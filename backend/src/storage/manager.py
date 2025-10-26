@@ -32,7 +32,7 @@ class ConfigManager:
     
     def get_default_prompt(self) -> str:
         """Get the default system prompt for session summarization"""
-        return """You are a professional Dungeon Master's assistant. Your task is to analyze the following D&D session transcript and generate a CONCISE, structured session summary.
+        return """You are a professional tabletop RPG assistant. Your task is to analyze the following TTRPG session transcript and generate a CONCISE, structured session summary.
 
 Focus ONLY on the most critical elements:
 1. Major plot developments and revelations.
@@ -55,6 +55,7 @@ Format the output using Markdown with two distinct, bolded sections:
             "gemini_api_key": "",
             "llm_preference": "local",
             "system_prompt": self.get_default_prompt(),
+            "ollama_model": "llama3.2",
             "created_at": str(Path().cwd()),
             "version": "1.0.0",
             "campaigns": {
@@ -430,7 +431,7 @@ class SessionManager:
         
         # Add tags
         tags = metadata.get("tags", [])
-        default_tags = ["dnd", "session-notes"]
+        default_tags = ["ttrpg", "session-notes"]
         
         if metadata.get("campaign_id"):
             default_tags.append(metadata["campaign_id"].lower().replace(" ", "-"))

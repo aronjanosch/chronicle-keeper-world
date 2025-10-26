@@ -13,7 +13,7 @@
       <!-- Header -->
       <header class="app-header">
         <h1>Chronicle Keeper</h1>
-        <p class="subtitle">Generate D&D Session Notes from Discord Audio</p>
+        <p class="subtitle">Generate TTRPG Session Notes from Discord Audio</p>
         <button id="settings-btn" class="settings-button">⚙️ Settings</button>
       </header>
 
@@ -123,10 +123,56 @@
           </div>
         </section>
 
-        <!-- Step 5: Export -->
+        <!-- Step 5: Review Suggestions -->
+        <section id="suggestions-screen" class="screen">
+          <div class="step-header">
+            <h2>Step 5: Review AI Suggestions</h2>
+            <p>Review and apply the AI-generated metadata suggestions to your session</p>
+          </div>
+          <div class="suggestions-review">
+            <div class="suggestions-section">
+              <h3>Suggested Tags</h3>
+              <div id="review-suggested-tags" class="suggestions-container">
+                <div class="suggestions-chips" id="review-tags-suggestions"></div>
+              </div>
+              <div class="current-metadata">
+                <label>Current Tags:</label>
+                <input type="text" id="review-session-tags" class="form-input" placeholder="No tags set">
+              </div>
+            </div>
+            
+            <div class="suggestions-section">
+              <h3>Mentioned Characters</h3>
+              <div id="review-suggested-characters" class="suggestions-container">
+                <div class="suggestions-chips" id="review-characters-suggestions"></div>
+              </div>
+              <div class="current-metadata">
+                <label>Current Characters:</label>
+                <input type="text" id="review-characters-present" class="form-input" placeholder="No characters set">
+              </div>
+            </div>
+            
+            <div class="suggestions-section">
+              <h3>Mentioned Locations</h3>
+              <div id="review-suggested-locations" class="suggestions-container">
+                <div class="suggestions-chips" id="review-locations-suggestions"></div>
+              </div>
+              <div class="current-metadata">
+                <label>Current Locations:</label>
+                <input type="text" id="review-session-locations" class="form-input" placeholder="No locations set">
+              </div>
+            </div>
+          </div>
+          <div class="screen-actions">
+            <button id="back-to-processing" class="secondary-button">← Back</button>
+            <button id="continue-to-export" class="primary-button">Continue to Export →</button>
+          </div>
+        </section>
+
+        <!-- Step 6: Export -->
         <section id="export-screen" class="screen">
           <div class="step-header">
-            <h2>Step 5: Export Notes</h2>
+            <h2>Step 6: Export Notes</h2>
             <p>Review and save your session notes</p>
           </div>
           <div class="export-options">
@@ -164,6 +210,14 @@
             <div class="setting-group">
               <label for="gemini-api-key">Gemini API Key:</label>
               <input type="password" id="gemini-api-key" placeholder="Enter your Gemini API key">
+            </div>
+            <div class="setting-group">
+              <label for="ollama-model">Ollama Model:</label>
+              <select id="ollama-model" class="form-input">
+                <option value="llama3.2">llama3.2 (default)</option>
+              </select>
+              <button id="refresh-models-btn" class="secondary-button" style="margin-top: 0.5rem;">🔄 Refresh Models</button>
+              <div id="model-status" class="model-status hidden"></div>
             </div>
             <div class="setting-group">
               <label for="system-prompt">System Prompt:</label>
