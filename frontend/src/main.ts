@@ -17,6 +17,7 @@ interface Settings {
   gemini_api_key?: string;
   system_prompt?: string;
   llm_preference?: 'local' | 'cloud';
+  ollama_model?: string;
 }
 
 interface SessionMetadata {
@@ -29,6 +30,14 @@ interface SessionMetadata {
   characters_present?: string[];
   tags?: string[];
   notes?: string;
+}
+
+interface MetadataSuggestions {
+  suggested_tags: string[];
+  mentioned_characters: string[];
+  mentioned_locations: string[];
+  session_tone: string[];
+  key_events: string[];
 }
 
 class ChronicleKeeperApp {
@@ -48,6 +57,7 @@ class ChronicleKeeperApp {
     document.getElementById('close-settings')?.addEventListener('click', () => this.closeSettings());
     document.getElementById('save-settings')?.addEventListener('click', () => this.saveSettings());
     document.getElementById('cancel-settings')?.addEventListener('click', () => this.closeSettings());
+    document.getElementById('refresh-models-btn')?.addEventListener('click', () => this.refreshOllamaModels());
 
     // File upload
     document.getElementById('file-select-btn')?.addEventListener('click', () => this.selectFile());
@@ -82,6 +92,7 @@ class ChronicleKeeperApp {
     document.getElementById('continue-to-processing')?.addEventListener('click', () => this.proceedToProcessing());
     document.getElementById('back-to-metadata')?.addEventListener('click', () => this.showScreen('metadata-screen'));
     document.getElementById('back-to-processing')?.addEventListener('click', () => this.showScreen('processing-screen'));
+    document.getElementById('continue-to-export')?.addEventListener('click', () => this.proceedToExport());
 
     // Processing
     document.getElementById('generate-notes-btn')?.addEventListener('click', () => this.generateNotes());
@@ -99,6 +110,7 @@ class ChronicleKeeperApp {
         
         const apiKeyInput = document.getElementById('gemini-api-key') as HTMLInputElement;
         const promptInput = document.getElementById('system-prompt') as HTMLTextAreaElement;
+        const ollamaModelSelect = document.getElementById('ollama-model') as HTMLSelectElement;
         
         if (apiKeyInput && settings.gemini_api_key) {
           apiKeyInput.value = settings.gemini_api_key;
@@ -106,6 +118,10 @@ class ChronicleKeeperApp {
         
         if (promptInput && settings.system_prompt) {
           promptInput.value = settings.system_prompt;
+        }
+
+        if (ollamaModelSelect && settings.ollama_model) {
+          ollamaModelSelect.value = settings.ollama_model;
         }
 
         // Set LLM preference
@@ -123,6 +139,8 @@ class ChronicleKeeperApp {
 
   private openSettings() {
     document.getElementById('settings-modal')?.classList.remove('hidden');
+    // Load Ollama models when opening settings
+    this.refreshOllamaModels();
   }
 
   private closeSettings() {
@@ -133,11 +151,13 @@ class ChronicleKeeperApp {
     const apiKeyInput = document.getElementById('gemini-api-key') as HTMLInputElement;
     const promptInput = document.getElementById('system-prompt') as HTMLTextAreaElement;
     const llmEngine = document.querySelector('input[name="llm-engine"]:checked') as HTMLInputElement;
+    const ollamaModelSelect = document.getElementById('ollama-model') as HTMLSelectElement;
 
     const settings: Settings = {
       gemini_api_key: apiKeyInput.value,
       system_prompt: promptInput.value,
-      llm_preference: llmEngine.value as 'local' | 'cloud'
+      llm_preference: llmEngine.value as 'local' | 'cloud',
+      ollama_model: ollamaModelSelect.value
     };
 
     try {
@@ -443,13 +463,22 @@ class ChronicleKeeperApp {
         this.generatedNotes = data.summary;
         this.showProcessingStatus('Notes generated successfully!', 'success');
         
-        // Display notes in export screen
-        const notesTextarea = document.getElementById('notes-content') as HTMLTextAreaElement;
-        if (notesTextarea) {
-          notesTextarea.value = this.generatedNotes;
+        // Display metadata suggestions if available
+        if (data.metadata_suggestions) {
+          this.showProcessingStatus('Notes and metadata suggestions generated successfully!', 'success');
+          // Go to suggestions screen to show AI suggestions
+          setTimeout(() => {
+            this.showSuggestionsScreen(data.metadata_suggestions);
+          }, 1500);
+        } else {
+          // No suggestions generated, go directly to export
+          const notesTextarea = document.getElementById('notes-content') as HTMLTextAreaElement;
+          if (notesTextarea) {
+            notesTextarea.value = this.generatedNotes;
+          }
+          
+          setTimeout(() => this.showScreen('export-screen'), 1500);
         }
-        
-        setTimeout(() => this.showScreen('export-screen'), 1500);
       } else {
         const error = await response.json();
         this.showProcessingStatus(`Failed to generate notes: ${error.detail}`, 'error');
@@ -599,6 +628,307 @@ class ChronicleKeeperApp {
   private hideStatus() {
     document.getElementById('upload-status')?.classList.add('hidden');
     document.getElementById('processing-status')?.classList.add('hidden');
+  }
+
+  private async analyzeMetadata() {
+    if (!this.currentSessionId) return;
+
+    const analyzeBtn = document.getElementById('analyze-metadata-btn') as HTMLButtonElement;
+    const llmEngine = document.querySelector('input[name="llm-engine"]:checked') as HTMLInputElement;
+
+    analyzeBtn.disabled = true;
+    this.showAnalyzeStatus('Analyzing transcript for metadata suggestions...', 'loading');
+
+    try {
+      const response = await window.fetch(`${API_BASE_URL}/analyze-metadata`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          session_id: this.currentSessionId,
+          llm_engine: llmEngine?.value || 'local'
+        }),
+      });
+
+      if (response.ok) {
+        const suggestions: MetadataSuggestions = await response.json();
+        this.displaySuggestions(suggestions);
+        this.showAnalyzeStatus('Analysis complete!', 'success');
+        setTimeout(() => this.hideAnalyzeStatus(), 3000);
+      } else {
+        const error = await response.json();
+        this.showAnalyzeStatus(`Analysis failed: ${error.detail}`, 'error');
+      }
+    } catch (error) {
+      console.error('Failed to analyze metadata:', error);
+      this.showAnalyzeStatus('Analysis failed: Network error', 'error');
+    } finally {
+      analyzeBtn.disabled = false;
+    }
+  }
+
+  private displaySuggestions(suggestions: MetadataSuggestions) {
+    // Display suggested tags
+    this.displayChipSuggestions('tags-suggestions', suggestions.suggested_tags, 'session-tags');
+    this.toggleSuggestionContainer('suggested-tags', suggestions.suggested_tags.length > 0);
+
+    // Display mentioned characters
+    this.displayChipSuggestions('characters-suggestions', suggestions.mentioned_characters, 'characters-present');
+    this.toggleSuggestionContainer('suggested-characters', suggestions.mentioned_characters.length > 0);
+
+    // Display mentioned locations
+    this.displayChipSuggestions('locations-suggestions', suggestions.mentioned_locations, 'session-locations');
+    this.toggleSuggestionContainer('suggested-locations', suggestions.mentioned_locations.length > 0);
+  }
+
+  private displayChipSuggestions(containerId: string, suggestions: string[], targetInputId: string) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+
+    container.innerHTML = '';
+    
+    suggestions.forEach(suggestion => {
+      const chip = document.createElement('span');
+      chip.className = 'suggestion-chip';
+      chip.textContent = suggestion;
+      chip.addEventListener('click', () => this.addSuggestionToInput(suggestion, targetInputId));
+      container.appendChild(chip);
+    });
+  }
+
+  private addSuggestionToInput(suggestion: string, inputId: string) {
+    const input = document.getElementById(inputId) as HTMLInputElement;
+    if (!input) return;
+
+    const currentValue = input.value.trim();
+    const currentItems = currentValue ? currentValue.split(',').map(s => s.trim()) : [];
+    
+    // Don't add if already present
+    if (currentItems.includes(suggestion)) return;
+
+    currentItems.push(suggestion);
+    input.value = currentItems.join(', ');
+
+    // Add visual feedback
+    const clickedChip = event?.target as HTMLElement;
+    if (clickedChip) {
+      clickedChip.classList.add('suggestion-chip-added');
+      setTimeout(() => clickedChip.classList.remove('suggestion-chip-added'), 2000);
+    }
+  }
+
+  private toggleSuggestionContainer(containerId: string, show: boolean) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+
+    if (show) {
+      container.classList.remove('hidden');
+    } else {
+      container.classList.add('hidden');
+    }
+  }
+
+  private showAnalyzeStatus(message: string, type: 'loading' | 'success' | 'error') {
+    const statusEl = document.getElementById('analyze-status');
+    if (statusEl) {
+      statusEl.textContent = message;
+      statusEl.className = `analyze-status ${type}`;
+      statusEl.classList.remove('hidden');
+    }
+  }
+
+  private hideAnalyzeStatus() {
+    const statusEl = document.getElementById('analyze-status');
+    if (statusEl) {
+      statusEl.classList.add('hidden');
+    }
+  }
+
+  private async refreshOllamaModels() {
+    const refreshBtn = document.getElementById('refresh-models-btn') as HTMLButtonElement;
+    const modelSelect = document.getElementById('ollama-model') as HTMLSelectElement;
+
+    if (refreshBtn) refreshBtn.disabled = true;
+    this.showModelStatus('Loading available models...', 'loading');
+
+    try {
+      const response = await window.fetch(`${API_BASE_URL}/ollama-models`);
+      
+      if (response.ok) {
+        const data = await response.json();
+        
+        if (!data.server_running) {
+          this.showModelStatus('Ollama server not running', 'error');
+          return;
+        }
+
+        if (data.models && data.models.length > 0) {
+          // Store current selection
+          const currentValue = modelSelect.value;
+          
+          // Clear existing options
+          modelSelect.innerHTML = '';
+          
+          // Add models as options
+          data.models.forEach((model: string) => {
+            const option = document.createElement('option');
+            option.value = model;
+            option.textContent = model;
+            modelSelect.appendChild(option);
+          });
+          
+          // Restore previous selection if it exists
+          if (data.models.includes(currentValue)) {
+            modelSelect.value = currentValue;
+          }
+          
+          this.showModelStatus(`Found ${data.models.length} models`, 'success');
+        } else {
+          this.showModelStatus('No models found. Try pulling a model first.', 'error');
+        }
+      } else {
+        this.showModelStatus('Failed to fetch models', 'error');
+      }
+    } catch (error) {
+      console.error('Failed to refresh models:', error);
+      this.showModelStatus('Failed to connect to backend', 'error');
+    } finally {
+      if (refreshBtn) refreshBtn.disabled = false;
+      setTimeout(() => this.hideModelStatus(), 3000);
+    }
+  }
+
+  private showModelStatus(message: string, type: 'loading' | 'success' | 'error') {
+    const statusEl = document.getElementById('model-status');
+    if (statusEl) {
+      statusEl.textContent = message;
+      statusEl.className = `model-status ${type}`;
+      statusEl.classList.remove('hidden');
+    }
+  }
+
+  private hideModelStatus() {
+    const statusEl = document.getElementById('model-status');
+    if (statusEl) {
+      statusEl.classList.add('hidden');
+    }
+  }
+
+  private showSuggestionsScreen(metadataSuggestions: MetadataSuggestions) {
+    this.showScreen('suggestions-screen');
+    
+    // Load current metadata values from the previous step
+    this.loadCurrentMetadataToReview();
+    
+    // Display AI suggestions
+    this.displayReviewSuggestions(metadataSuggestions);
+    
+    // Prepare notes for export screen
+    const notesTextarea = document.getElementById('notes-content') as HTMLTextAreaElement;
+    if (notesTextarea) {
+      notesTextarea.value = this.generatedNotes;
+    }
+  }
+
+  private loadCurrentMetadataToReview() {
+    // Load current values from the metadata screen into the review screen
+    const sessionTags = (document.getElementById('session-tags') as HTMLInputElement)?.value || '';
+    const charactersPresent = (document.getElementById('characters-present') as HTMLInputElement)?.value || '';
+    const sessionLocations = (document.getElementById('session-locations') as HTMLInputElement)?.value || '';
+    
+    // Set values in review screen
+    (document.getElementById('review-session-tags') as HTMLInputElement).value = sessionTags;
+    (document.getElementById('review-characters-present') as HTMLInputElement).value = charactersPresent;
+    (document.getElementById('review-session-locations') as HTMLInputElement).value = sessionLocations;
+  }
+
+  private displayReviewSuggestions(suggestions: MetadataSuggestions) {
+    // Display suggested tags
+    this.displayReviewChipSuggestions('review-tags-suggestions', suggestions.suggested_tags, 'review-session-tags');
+    
+    // Display mentioned characters
+    this.displayReviewChipSuggestions('review-characters-suggestions', suggestions.mentioned_characters, 'review-characters-present');
+    
+    // Display mentioned locations
+    this.displayReviewChipSuggestions('review-locations-suggestions', suggestions.mentioned_locations, 'review-session-locations');
+  }
+
+  private displayReviewChipSuggestions(containerId: string, suggestions: string[], targetInputId: string) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+
+    container.innerHTML = '';
+    
+    suggestions.forEach(suggestion => {
+      const chip = document.createElement('span');
+      chip.className = 'suggestion-chip';
+      chip.textContent = suggestion;
+      chip.addEventListener('click', () => this.addSuggestionToInput(suggestion, targetInputId));
+      container.appendChild(chip);
+    });
+  }
+
+  private async proceedToExport() {
+    if (!this.currentSessionId) return;
+
+    try {
+      // Get updated metadata from review screen
+      const sessionTags = (document.getElementById('review-session-tags') as HTMLInputElement)?.value || '';
+      const charactersPresent = (document.getElementById('review-characters-present') as HTMLInputElement)?.value || '';
+      const sessionLocations = (document.getElementById('review-session-locations') as HTMLInputElement)?.value || '';
+
+      // Parse comma-separated values
+      const tags = sessionTags ? sessionTags.split(',').map(t => t.trim()).filter(t => t) : [];
+      const characters = charactersPresent ? charactersPresent.split(',').map(c => c.trim()).filter(c => c) : [];
+      const locations = sessionLocations ? sessionLocations.split(',').map(l => l.trim()).filter(l => l) : [];
+
+      // Get the original metadata and update with new values
+      const currentMetadata = await this.getCurrentMetadata();
+      const updatedMetadata: SessionMetadata = {
+        ...currentMetadata,
+        session_id: this.currentSessionId,
+        tags: tags,
+        characters_present: characters,
+        locations: locations
+      };
+
+      // Save updated metadata
+      const response = await window.fetch(`${API_BASE_URL}/session-metadata`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(updatedMetadata),
+      });
+
+      if (response.ok) {
+        this.showScreen('export-screen');
+      } else {
+        const error = await response.json();
+        console.error(`Failed to save updated metadata: ${error.detail}`);
+        // Continue to export anyway
+        this.showScreen('export-screen');
+      }
+    } catch (error) {
+      console.error('Failed to save updated metadata:', error);
+      // Continue to export anyway
+      this.showScreen('export-screen');
+    }
+  }
+
+  private async getCurrentMetadata(): Promise<Partial<SessionMetadata>> {
+    if (!this.currentSessionId) return {};
+
+    try {
+      const response = await window.fetch(`${API_BASE_URL}/session-metadata/${this.currentSessionId}`);
+      if (response.ok) {
+        return await response.json();
+      }
+    } catch (error) {
+      console.error('Failed to get current metadata:', error);
+    }
+    return {};
   }
 }
 

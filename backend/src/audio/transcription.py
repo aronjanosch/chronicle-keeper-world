@@ -1,3 +1,7 @@
+import os
+# Force CPU for pyannote components to avoid CUDA hanging
+os.environ["PYANNOTE_DEVICE"] = "cpu"
+
 import whisperx
 import gc
 import torch
@@ -28,16 +32,45 @@ class WhisperTranscriber:
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
                 
-            # Use int8 for better compatibility with newer CUDA versions
-            compute_type = "int8" if self.device == "cuda" else "int8"
+            # Use float32 on CUDA for better stability, int8 on CPU
+            compute_type = "float32" if self.device == "cuda" else "int8"
             
             try:
-                self.model = whisperx.load_model(
-                    self.model_size, 
-                    self.device,
-                    compute_type=compute_type,
-                    local_files_only=False
+                # Try to load without VAD first
+                import whisperx.asr
+                from faster_whisper import WhisperModel
+                
+                # Load faster-whisper model directly
+                whisper_model = WhisperModel(
+                    self.model_size,
+                    device=self.device,
+                    compute_type=compute_type
                 )
+                
+                # Create a minimal wrapper that skips VAD
+                class NoVADWhisperModel:
+                    def __init__(self, model):
+                        self.model = model
+                    
+                    def transcribe(self, audio, batch_size=16):
+                        # Transcribe without VAD preprocessing
+                        segments, info = self.model.transcribe(audio, beam_size=5)
+                        
+                        # Convert to WhisperX format
+                        result_segments = []
+                        for segment in segments:
+                            result_segments.append({
+                                "start": segment.start,
+                                "end": segment.end,
+                                "text": segment.text
+                            })
+                        
+                        return {
+                            "segments": result_segments,
+                            "language": info.language
+                        }
+                
+                self.model = NoVADWhisperModel(whisper_model)
             except Exception as e:
                 logger.error(f"Failed to load model with CUDA, falling back to CPU: {e}")
                 # Fallback to CPU if CUDA fails
@@ -53,17 +86,14 @@ class WhisperTranscriber:
         """Load alignment model for better timestamp accuracy"""
         if self.align_model is None:
             try:
-                self.align_model, self.metadata = whisperx.load_align_model(
-                    language_code=language_code, 
-                    device=self.device
-                )
-            except Exception as e:
-                logger.error(f"Failed to load alignment model with {self.device}, falling back to CPU: {e}")
-                # Fallback to CPU if current device fails
+                # Always load alignment model on CPU to avoid hanging
                 self.align_model, self.metadata = whisperx.load_align_model(
                     language_code=language_code, 
                     device="cpu"
                 )
+            except Exception as e:
+                logger.error(f"Failed to load alignment model: {e}")
+                raise
     
     def transcribe_file(self, audio_path: str, speaker_name: str = None) -> Dict:
         """
@@ -89,14 +119,13 @@ class WhisperTranscriber:
             # Align whisper output
             self.load_align_model()
             
-            # Use CPU device for alignment if main device is CUDA and causing issues
-            align_device = "cpu" if self.device == "cuda" else self.device
+            # Always use CPU for alignment to avoid CUDA memory issues
             result = whisperx.align(
                 result["segments"], 
                 self.align_model, 
                 self.metadata, 
                 audio, 
-                align_device, 
+                "cpu", 
                 return_char_alignments=False
             )
             

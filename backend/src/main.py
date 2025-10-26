@@ -65,6 +65,7 @@ class SettingsModel(BaseModel):
     gemini_api_key: Optional[str] = None
     llm_preference: str = "local"
     system_prompt: str
+    ollama_model: Optional[str] = "llama3.2"
 
 class SessionMetadata(BaseModel):
     session_id: str
@@ -85,6 +86,17 @@ class ExportOptionsRequest(BaseModel):
     session_id: str
     use_obsidian_format: bool = False
     custom_filename: Optional[str] = None
+
+class MetadataSuggestions(BaseModel):
+    suggested_tags: List[str] = []
+    mentioned_characters: List[str] = []
+    mentioned_locations: List[str] = []
+    session_tone: List[str] = []
+    key_events: List[str] = []
+
+class AnalyzeMetadataRequest(BaseModel):
+    session_id: str
+    llm_engine: str = "local"
 
 @app.post("/upload", response_model=UploadResponse)
 async def upload_craig_zip(file: UploadFile = File(...)):
@@ -144,7 +156,7 @@ async def label_speakers(mapping: SpeakerMapping):
 
 @app.post("/generate-notes")
 async def generate_notes(request: GenerateNotesRequest):
-    """Generate transcript and create session summary"""
+    """Generate transcript and create session summary with metadata suggestions"""
     try:
         # Get session data
         session_data = session_manager.get_session(request.session_id)
@@ -161,21 +173,30 @@ async def generate_notes(request: GenerateNotesRequest):
         settings = config_manager.get_settings()
         system_prompt = request.custom_prompt or settings.get("system_prompt", "")
         
-        # Generate summary using selected LLM
+        # Generate summary and metadata using selected LLM
         if request.llm_engine == "cloud":
             gemini_client = GeminiClient(settings.get("gemini_api_key"))
-            summary = gemini_client.generate_summary(transcript, system_prompt)
+            result = gemini_client.generate_summary_with_metadata(transcript, system_prompt)
         else:
-            ollama_client = OllamaClient()
-            summary = ollama_client.generate_summary(transcript, system_prompt)
+            ollama_model = settings.get("ollama_model", "llama3.2")
+            ollama_client = OllamaClient(model=ollama_model)
+            result = ollama_client.generate_summary_with_metadata(transcript, system_prompt)
+        
+        summary = result["summary"]
+        metadata_suggestions = result["metadata"]
         
         # Store the summary in the session
         session_manager.update_session(request.session_id, {
             "summary": summary,
-            "transcript": transcript
+            "transcript": transcript,
+            "metadata_suggestions": metadata_suggestions
         })
         
-        return {"summary": summary, "transcript": transcript}
+        return {
+            "summary": summary, 
+            "transcript": transcript,
+            "metadata_suggestions": metadata_suggestions
+        }
     
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to generate notes: {str(e)}")
@@ -210,7 +231,8 @@ async def get_settings():
     safe_settings = {
         "llm_preference": settings.get("llm_preference", "local"),
         "system_prompt": settings.get("system_prompt", config_manager.get_default_prompt()),
-        "has_gemini_key": bool(settings.get("gemini_api_key"))
+        "has_gemini_key": bool(settings.get("gemini_api_key")),
+        "ollama_model": settings.get("ollama_model", "llama3.2")
     }
     return safe_settings
 
@@ -221,7 +243,8 @@ async def update_settings(settings: SettingsModel):
         config_manager.update_settings({
             "gemini_api_key": settings.gemini_api_key,
             "llm_preference": settings.llm_preference,
-            "system_prompt": settings.system_prompt
+            "system_prompt": settings.system_prompt,
+            "ollama_model": settings.ollama_model
         })
         return {"status": "success", "message": "Settings updated"}
     
@@ -350,6 +373,62 @@ async def export_obsidian_notes(request: ExportOptionsRequest):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to export: {str(e)}")
+
+@app.post("/analyze-metadata", response_model=MetadataSuggestions)
+async def analyze_metadata(request: AnalyzeMetadataRequest):
+    """Analyze transcript and suggest metadata tags, characters, and locations"""
+    try:
+        # Get session data
+        session_data = session_manager.get_session(request.session_id)
+        if not session_data:
+            raise HTTPException(status_code=404, detail="Session not found")
+        
+        # Check if transcript exists
+        transcript = session_data.get("transcript")
+        if not transcript:
+            raise HTTPException(status_code=400, detail="No transcript available. Generate notes first.")
+        
+        # Get settings for LLM configuration
+        settings = config_manager.get_settings()
+        
+        # Analyze metadata using selected LLM
+        if request.llm_engine == "cloud":
+            gemini_client = GeminiClient(settings.get("gemini_api_key"))
+            metadata_suggestions = gemini_client.analyze_metadata(transcript)
+        else:
+            ollama_model = settings.get("ollama_model", "llama3.2")
+            ollama_client = OllamaClient(model=ollama_model)
+            metadata_suggestions = ollama_client.analyze_metadata(transcript)
+        
+        return MetadataSuggestions(**metadata_suggestions)
+    
+    except Exception as e:
+        logger.error(f"Error analyzing metadata: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to analyze metadata: {str(e)}")
+
+@app.get("/ollama-models")
+async def get_ollama_models():
+    """Get available Ollama models"""
+    try:
+        ollama_client = OllamaClient()
+        
+        if not ollama_client.is_server_running():
+            return {"models": [], "server_running": False}
+        
+        # Get available models by calling the Ollama API directly
+        import requests
+        response = requests.get("http://127.0.0.1:11434/api/tags", timeout=5)
+        
+        if response.status_code == 200:
+            data = response.json()
+            models = [model["name"] for model in data.get("models", [])]
+            return {"models": models, "server_running": True}
+        else:
+            return {"models": [], "server_running": True, "error": "Failed to fetch models"}
+            
+    except Exception as e:
+        logger.error(f"Error fetching Ollama models: {e}")
+        return {"models": [], "server_running": False, "error": str(e)}
 
 @app.get("/health")
 async def health_check():
