@@ -1,5 +1,6 @@
 import json
 import os
+import sys
 from pathlib import Path
 from typing import Dict, Any, Optional
 from datetime import datetime
@@ -30,9 +31,15 @@ class ConfigManager:
         if not self.config_file.exists():
             self._save_default_config()
     
-    def get_default_prompt(self) -> str:
-        """Get the default system prompt for session summarization"""
-        return """You are a professional tabletop RPG assistant. Your task is to analyze the following TTRPG session transcript and generate a CONCISE, structured session summary.
+    def get_default_prompt(self, language: str = "en") -> str:
+        """Get the default system prompt for session summarization in specified language"""
+        prompts = self.get_localized_prompts()
+        return prompts.get(language, prompts["en"])
+    
+    def get_localized_prompts(self) -> Dict[str, str]:
+        """Get all localized system prompts"""
+        return {
+            "en": """You are a professional tabletop RPG assistant. Your task is to analyze the following TTRPG session transcript and generate a CONCISE, structured session summary.
 
 Focus ONLY on the most critical elements:
 1. Major plot developments and revelations.
@@ -47,14 +54,35 @@ Format the output using Markdown with two distinct, bolded sections:
 
 **Key Decisions & Next Steps:**
 - [Bullet point 1 - A choice the party made]
-- [Bullet point 2 - A goal or action item for the next session]"""
+- [Bullet point 2 - A goal or action item for the next session]""",
+            
+            "de": """Du bist ein professioneller Pen-&-Paper-RPG-Assistent. Deine Aufgabe ist es, das folgende TTRPG-Sitzungstranskript zu analysieren und eine PRÄGNANTE, strukturierte Sitzungszusammenfassung zu erstellen.
+
+Konzentriere dich NUR auf die wichtigsten Elemente:
+1. Große Handlungsentwicklungen und Enthüllungen.
+2. Wichtige Charakterentscheidungen und -handlungen (besonders Kampfergebnisse oder gescheiterte Würfe, die die Geschichte verändern).
+3. Aufgaben oder Ziele für die nächste Sitzung.
+
+Formatiere die Ausgabe mit Markdown in zwei verschiedenen, fett gedruckten Abschnitten:
+
+**Zusammenfassung der Ereignisse:**
+- [Stichpunkt 1]
+- [Stichpunkt 2]
+
+**Wichtige Entscheidungen & Nächste Schritte:**
+- [Stichpunkt 1 - Eine Entscheidung der Gruppe]
+- [Stichpunkt 2 - Ein Ziel oder eine Aufgabe für die nächste Sitzung]"""
+        }
     
     def _save_default_config(self):
         """Save default configuration"""
         default_config = {
             "gemini_api_key": "",
             "llm_preference": "local",
-            "system_prompt": self.get_default_prompt(),
+            "language": "en",
+            "transcription_language": "auto",
+            "whisper_model": "large-v2",
+            "system_prompt": self.get_default_prompt("en"),
             "ollama_model": "llama3.2",
             "created_at": str(Path().cwd()),
             "version": "1.0.0",
@@ -98,10 +126,25 @@ Format the output using Markdown with two distinct, bolded sections:
         """
         current_settings = self.get_settings()
         
+        # Check if language is being changed
+        language_changed = "language" in updates and updates["language"] != current_settings.get("language")
+        
         # Update only provided values
         for key, value in updates.items():
             if value is not None:  # Don't overwrite with None values
                 current_settings[key] = value
+        
+        # If language changed and system_prompt is still default, update it to new language default
+        if language_changed:
+            new_language = updates["language"]
+            current_prompt = current_settings.get("system_prompt", "")
+            old_language = "de" if new_language == "en" else "en"  # Determine old language
+            old_default = self.get_default_prompt(old_language)
+            
+            # If current prompt is the old language default, update to new language default
+            if current_prompt == old_default:
+                current_settings["system_prompt"] = self.get_default_prompt(new_language)
+                logger.info(f"Updated system prompt to {new_language} default")
         
         # Save updated settings
         with open(self.config_file, 'w', encoding='utf-8') as f:
@@ -122,6 +165,63 @@ Format the output using Markdown with two distinct, bolded sections:
         """
         settings = self.get_settings()
         return settings.get(key, default)
+    
+    def get_current_language(self) -> str:
+        """Get current language setting"""
+        return self.get_setting("language", "en")
+    
+    def get_available_languages(self) -> Dict[str, str]:
+        """Get available languages with their display names"""
+        return {
+            "en": "English",
+            "de": "Deutsch"
+        }
+    
+    def get_available_transcription_languages(self) -> Dict[str, str]:
+        """Get available transcription languages with their display names"""
+        return {
+            "auto": "Auto-detect",
+            "en": "English",
+            "de": "German (Deutsch)",
+            "es": "Spanish",
+            "fr": "French",
+            "it": "Italian",
+            "pt": "Portuguese",
+            "ru": "Russian",
+            "ja": "Japanese",
+            "ko": "Korean",
+            "zh": "Chinese"
+        }
+    
+    def get_transcription_language(self) -> str:
+        """Get current transcription language setting"""
+        return self.get_setting("transcription_language", "auto")
+    
+    def get_whisper_model(self) -> str:
+        """Get current Whisper model setting"""
+        return self.get_setting("whisper_model", "large-v2")
+    
+    def get_available_whisper_models(self) -> Dict[str, str]:
+        """Get available Whisper models with descriptions"""
+        return {
+            "tiny": "Tiny (~39 MB, fastest, lowest quality)",
+            "base": "Base (~74 MB, fast, good quality)", 
+            "small": "Small (~244 MB, slower, better quality)",
+            "medium": "Medium (~769 MB, slow, high quality)",
+            "large-v2": "Large-v2 (~1550 MB, slowest, best quality - recommended for non-English)"
+        }
+    
+    def get_current_prompt(self) -> str:
+        """Get current system prompt based on language setting"""
+        current_language = self.get_current_language()
+        custom_prompt = self.get_setting("system_prompt")
+        
+        # If custom prompt exists and differs from default, use it
+        if custom_prompt and custom_prompt != self.get_default_prompt(current_language):
+            return custom_prompt
+        
+        # Otherwise return localized default
+        return self.get_default_prompt(current_language)
     
     def reset_to_defaults(self):
         """Reset all settings to defaults"""
@@ -197,13 +297,21 @@ Format the output using Markdown with two distinct, bolded sections:
         })
 
 class SessionManager:
-    def __init__(self, session_dir: str = "/tmp/chronicle_sessions"):
+    def __init__(self, session_dir: str = None):
         """
         Initialize session manager
         
         Args:
-            session_dir: Directory to store session data
+            session_dir: Directory to store session data (defaults to bundled-safe location)
         """
+        if session_dir is None:
+            if getattr(sys, 'frozen', False):
+                # Running as bundled executable
+                session_dir = Path.home() / ".chronicle-keeper" / "temp" / "chronicle_sessions"
+            else:
+                # Running in development
+                session_dir = "/tmp/chronicle_sessions"
+        
         self.session_dir = Path(session_dir)
         self.session_dir.mkdir(parents=True, exist_ok=True)
         self.sessions = {}  # In-memory session cache

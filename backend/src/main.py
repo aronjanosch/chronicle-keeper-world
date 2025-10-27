@@ -7,6 +7,7 @@ import json
 import uuid
 import os
 import logging
+import sys
 from pathlib import Path
 
 from audio.extraction import extract_craig_zip
@@ -14,6 +15,7 @@ from audio.transcription import transcribe_session
 from llm.ollama import OllamaClient
 from llm.gemini import GeminiClient
 from storage.manager import ConfigManager, SessionManager
+from storage.debug_manager import DebugManager
 
 # Configure logging
 logging.basicConfig(
@@ -36,6 +38,7 @@ app.add_middleware(
 # Initialize managers
 config_manager = ConfigManager()
 session_manager = SessionManager()
+debug_manager = DebugManager()
 
 # Pydantic models for request/response
 class TrackInfo(BaseModel):
@@ -64,6 +67,9 @@ class ExportRequest(BaseModel):
 class SettingsModel(BaseModel):
     gemini_api_key: Optional[str] = None
     llm_preference: str = "local"
+    language: str = "en"
+    transcription_language: Optional[str] = "auto"
+    whisper_model: Optional[str] = "large-v2"
     system_prompt: str
     ollama_model: Optional[str] = "llama3.2"
 
@@ -163,15 +169,36 @@ async def generate_notes(request: GenerateNotesRequest):
         if not session_data:
             raise HTTPException(status_code=404, detail="Session not found")
         
+        # Get transcription language setting
+        transcription_language = config_manager.get_transcription_language()
+        
         # Transcribe audio files
         transcript = transcribe_session(
             session_data["tracks"], 
-            session_data["speaker_mapping"]
+            session_data["speaker_mapping"],
+            language=transcription_language
         )
         
-        # Get system prompt
+        # DEBUG: Export raw transcript
+        debug_manager.export_transcript(request.session_id, transcript, {
+            "tracks_count": len(session_data["tracks"]),
+            "speaker_mapping": session_data["speaker_mapping"],
+            "transcript_length": len(transcript)
+        })
+        
+        # Get system prompt (localized if no custom prompt)
         settings = config_manager.get_settings()
-        system_prompt = request.custom_prompt or settings.get("system_prompt", "")
+        system_prompt = request.custom_prompt or config_manager.get_current_prompt()
+        current_language = config_manager.get_current_language()
+        
+        # DEBUG: Export prompt used
+        debug_manager.export_prompt_used(
+            request.session_id, 
+            "summary_generation", 
+            system_prompt, 
+            current_language,
+            is_custom=bool(request.custom_prompt)
+        )
         
         # Generate summary and metadata using selected LLM
         if request.llm_engine == "cloud":
@@ -184,6 +211,21 @@ async def generate_notes(request: GenerateNotesRequest):
         
         summary = result["summary"]
         metadata_suggestions = result["metadata"]
+        
+        # DEBUG: Export LLM interaction
+        debug_manager.export_llm_interaction(
+            request.session_id,
+            request.llm_engine,
+            f"{system_prompt}\n\nTranscript to analyze:\n{transcript}",
+            summary,
+            {
+                "language": current_language,
+                "llm_engine": request.llm_engine,
+                "ollama_model": settings.get("ollama_model") if request.llm_engine == "local" else None,
+                "has_gemini_key": bool(settings.get("gemini_api_key")) if request.llm_engine == "cloud" else None
+            },
+            metadata_suggestions
+        )
         
         # Store the summary in the session
         session_manager.update_session(request.session_id, {
@@ -227,12 +269,20 @@ async def export_notes(request: ExportRequest):
 async def get_settings():
     """Retrieve current settings"""
     settings = config_manager.get_settings()
+    current_language = config_manager.get_current_language()
+    
     # Don't return the API key for security
     safe_settings = {
         "llm_preference": settings.get("llm_preference", "local"),
-        "system_prompt": settings.get("system_prompt", config_manager.get_default_prompt()),
+        "language": current_language,
+        "transcription_language": config_manager.get_transcription_language(),
+        "whisper_model": config_manager.get_whisper_model(),
+        "system_prompt": config_manager.get_current_prompt(),
         "has_gemini_key": bool(settings.get("gemini_api_key")),
-        "ollama_model": settings.get("ollama_model", "llama3.2")
+        "ollama_model": settings.get("ollama_model", "llama3.2"),
+        "available_languages": config_manager.get_available_languages(),
+        "available_transcription_languages": config_manager.get_available_transcription_languages(),
+        "available_whisper_models": config_manager.get_available_whisper_models()
     }
     return safe_settings
 
@@ -240,12 +290,24 @@ async def get_settings():
 async def update_settings(settings: SettingsModel):
     """Update settings and persist to JSON file"""
     try:
-        config_manager.update_settings({
+        updates = {
             "gemini_api_key": settings.gemini_api_key,
             "llm_preference": settings.llm_preference,
-            "system_prompt": settings.system_prompt,
+            "language": settings.language,
+            "transcription_language": settings.transcription_language,
+            "whisper_model": settings.whisper_model,
             "ollama_model": settings.ollama_model
-        })
+        }
+        
+        # Handle system prompt - if it's the same as the new language default, 
+        # store the default to maintain localization
+        new_default_prompt = config_manager.get_default_prompt(settings.language)
+        if settings.system_prompt == new_default_prompt:
+            updates["system_prompt"] = new_default_prompt
+        else:
+            updates["system_prompt"] = settings.system_prompt
+        
+        config_manager.update_settings(updates)
         return {"status": "success", "message": "Settings updated"}
     
     except Exception as e:
@@ -400,6 +462,14 @@ async def analyze_metadata(request: AnalyzeMetadataRequest):
             ollama_client = OllamaClient(model=ollama_model)
             metadata_suggestions = ollama_client.analyze_metadata(transcript)
         
+        # DEBUG: Export metadata analysis
+        debug_manager.export_metadata_analysis(
+            request.session_id,
+            "metadata_suggestions",
+            metadata_suggestions,
+            transcript
+        )
+        
         return MetadataSuggestions(**metadata_suggestions)
     
     except Exception as e:
@@ -430,10 +500,117 @@ async def get_ollama_models():
         logger.error(f"Error fetching Ollama models: {e}")
         return {"models": [], "server_running": False, "error": str(e)}
 
+@app.get("/prompts")
+async def get_prompts():
+    """Get all available localized prompts"""
+    try:
+        prompts = config_manager.get_localized_prompts()
+        available_languages = config_manager.get_available_languages()
+        current_language = config_manager.get_current_language()
+        
+        return {
+            "prompts": prompts,
+            "languages": available_languages,
+            "current_language": current_language
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get prompts: {str(e)}")
+
+@app.post("/reset-prompt")
+async def reset_prompt_to_default():
+    """Reset system prompt to localized default"""
+    try:
+        current_language = config_manager.get_current_language()
+        default_prompt = config_manager.get_default_prompt(current_language)
+        
+        config_manager.update_settings({
+            "system_prompt": default_prompt
+        })
+        
+        return {
+            "status": "success", 
+            "message": f"Prompt reset to {current_language} default",
+            "prompt": default_prompt
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to reset prompt: {str(e)}")
+
+@app.get("/debug/files")
+async def list_debug_files(session_id: Optional[str] = None):
+    """List debug files for a session or all sessions"""
+    try:
+        debug_files = debug_manager.list_debug_files(session_id)
+        return {"debug_files": debug_files}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to list debug files: {str(e)}")
+
+@app.post("/debug/export-session")
+async def export_session_debug(session_id: str):
+    """Export complete session data for debugging"""
+    try:
+        session_data = session_manager.get_session(session_id)
+        if not session_data:
+            raise HTTPException(status_code=404, detail="Session not found")
+        
+        filepath = debug_manager.export_session_data(session_id, session_data)
+        if filepath:
+            return {"status": "success", "file_path": filepath}
+        else:
+            raise HTTPException(status_code=500, detail="Failed to export session data")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to export session: {str(e)}")
+
+@app.delete("/debug/cleanup")
+async def cleanup_debug_files(days_old: int = 7):
+    """Clean up debug files older than specified days"""
+    try:
+        deleted_count = debug_manager.cleanup_old_files(days_old)
+        return {"status": "success", "deleted_files": deleted_count}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to cleanup files: {str(e)}")
+
 @app.get("/health")
 async def health_check():
     """Health check endpoint"""
     return {"status": "healthy", "service": "Chronicle Keeper API"}
 
+def get_bundled_temp_dir():
+    """Get appropriate temp directory for bundled application"""
+    if getattr(sys, 'frozen', False):
+        # Running as bundled executable
+        return Path.home() / ".chronicle-keeper" / "temp"
+    else:
+        # Running in development
+        return Path("/tmp")
+
+def setup_bundled_environment():
+    """Setup environment for bundled application"""
+    if getattr(sys, 'frozen', False):
+        # Create necessary directories
+        temp_dir = get_bundled_temp_dir()
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Ensure session directory exists
+        session_dir = temp_dir / "chronicle_sessions"
+        session_dir.mkdir(parents=True, exist_ok=True)
+
+def main():
+    """Main entry point for the application"""
+    setup_bundled_environment()
+    
+    # Configure logging for production
+    log_level = logging.INFO if getattr(sys, 'frozen', False) else logging.DEBUG
+    logging.basicConfig(
+        level=log_level,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    )
+    
+    # Determine host and port
+    host = os.getenv("CHRONICLE_HOST", "127.0.0.1")
+    port = int(os.getenv("CHRONICLE_PORT", "8000"))
+    
+    logger.info(f"Starting Chronicle Keeper API on {host}:{port}")
+    uvicorn.run(app, host=host, port=port, log_level="info")
+
 if __name__ == "__main__":
-    uvicorn.run(app, host="127.0.0.1", port=8000)
+    main()

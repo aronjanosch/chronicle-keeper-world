@@ -17,7 +17,11 @@ interface Settings {
   gemini_api_key?: string;
   system_prompt?: string;
   llm_preference?: 'local' | 'cloud';
+  language?: string;
+  transcription_language?: string;
   ollama_model?: string;
+  available_languages?: Record<string, string>;
+  available_transcription_languages?: Record<string, string>;
 }
 
 interface SessionMetadata {
@@ -111,6 +115,38 @@ class ChronicleKeeperApp {
         const apiKeyInput = document.getElementById('gemini-api-key') as HTMLInputElement;
         const promptInput = document.getElementById('system-prompt') as HTMLTextAreaElement;
         const ollamaModelSelect = document.getElementById('ollama-model') as HTMLSelectElement;
+        const languageSelect = document.getElementById('language-select') as HTMLSelectElement;
+        const transcriptionLanguageSelect = document.getElementById('transcription-language-select') as HTMLSelectElement;
+        
+        // Load available languages
+        if (languageSelect && settings.available_languages) {
+          languageSelect.innerHTML = '';
+          Object.entries(settings.available_languages).forEach(([code, name]) => {
+            const option = document.createElement('option');
+            option.value = code;
+            option.textContent = name;
+            languageSelect.appendChild(option);
+          });
+        }
+        
+        // Load available transcription languages
+        if (transcriptionLanguageSelect && settings.available_transcription_languages) {
+          transcriptionLanguageSelect.innerHTML = '';
+          Object.entries(settings.available_transcription_languages).forEach(([code, name]) => {
+            const option = document.createElement('option');
+            option.value = code;
+            option.textContent = name;
+            transcriptionLanguageSelect.appendChild(option);
+          });
+        }
+        
+        if (languageSelect && settings.language) {
+          languageSelect.value = settings.language;
+        }
+        
+        if (transcriptionLanguageSelect && settings.transcription_language) {
+          transcriptionLanguageSelect.value = settings.transcription_language;
+        }
         
         if (apiKeyInput && settings.gemini_api_key) {
           apiKeyInput.value = settings.gemini_api_key;
@@ -130,6 +166,11 @@ class ChronicleKeeperApp {
           if (radioButton) {
             radioButton.checked = true;
           }
+        }
+        
+        // Set up language change handler
+        if (languageSelect) {
+          languageSelect.addEventListener('change', () => this.handleLanguageChange());
         }
       }
     } catch (error) {
@@ -152,11 +193,15 @@ class ChronicleKeeperApp {
     const promptInput = document.getElementById('system-prompt') as HTMLTextAreaElement;
     const llmEngine = document.querySelector('input[name="llm-engine"]:checked') as HTMLInputElement;
     const ollamaModelSelect = document.getElementById('ollama-model') as HTMLSelectElement;
+    const languageSelect = document.getElementById('language-select') as HTMLSelectElement;
+    const transcriptionLanguageSelect = document.getElementById('transcription-language-select') as HTMLSelectElement;
 
     const settings: Settings = {
       gemini_api_key: apiKeyInput.value,
       system_prompt: promptInput.value,
       llm_preference: llmEngine.value as 'local' | 'cloud',
+      language: languageSelect.value,
+      transcription_language: transcriptionLanguageSelect.value,
       ollama_model: ollamaModelSelect.value
     };
 
@@ -178,6 +223,34 @@ class ChronicleKeeperApp {
     } catch (error) {
       console.error('Failed to save settings:', error);
       this.showStatus('Failed to save settings', 'error');
+    }
+  }
+
+  private async handleLanguageChange() {
+    try {
+      const languageSelect = document.getElementById('language-select') as HTMLSelectElement;
+      const promptInput = document.getElementById('system-prompt') as HTMLTextAreaElement;
+      
+      if (!languageSelect || !promptInput) return;
+      
+      const selectedLanguage = languageSelect.value;
+      
+      // Fetch the default prompt for the selected language
+      const response = await window.fetch(`${API_BASE_URL}/prompts`);
+      if (response.ok) {
+        const data = await response.json();
+        const localizedPrompt = data.prompts[selectedLanguage];
+        
+        if (localizedPrompt) {
+          // Ask user if they want to update the prompt
+          const shouldUpdate = confirm(`Switch to ${data.languages[selectedLanguage]} default prompt?`);
+          if (shouldUpdate) {
+            promptInput.value = localizedPrompt;
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Failed to handle language change:', error);
     }
   }
 
@@ -630,14 +703,14 @@ class ChronicleKeeperApp {
     document.getElementById('processing-status')?.classList.add('hidden');
   }
 
-  private async analyzeMetadata() {
+  /* private async _analyzeMetadata() {
     if (!this.currentSessionId) return;
 
     const analyzeBtn = document.getElementById('analyze-metadata-btn') as HTMLButtonElement;
     const llmEngine = document.querySelector('input[name="llm-engine"]:checked') as HTMLInputElement;
 
     analyzeBtn.disabled = true;
-    this.showAnalyzeStatus('Analyzing transcript for metadata suggestions...', 'loading');
+    this._showAnalyzeStatus('Analyzing transcript for metadata suggestions...', 'loading');
 
     try {
       const response = await window.fetch(`${API_BASE_URL}/analyze-metadata`, {
@@ -653,36 +726,36 @@ class ChronicleKeeperApp {
 
       if (response.ok) {
         const suggestions: MetadataSuggestions = await response.json();
-        this.displaySuggestions(suggestions);
-        this.showAnalyzeStatus('Analysis complete!', 'success');
-        setTimeout(() => this.hideAnalyzeStatus(), 3000);
+        this._displaySuggestions(suggestions);
+        this._showAnalyzeStatus('Analysis complete!', 'success');
+        setTimeout(() => this._hideAnalyzeStatus(), 3000);
       } else {
         const error = await response.json();
-        this.showAnalyzeStatus(`Analysis failed: ${error.detail}`, 'error');
+        this._showAnalyzeStatus(`Analysis failed: ${error.detail}`, 'error');
       }
     } catch (error) {
       console.error('Failed to analyze metadata:', error);
-      this.showAnalyzeStatus('Analysis failed: Network error', 'error');
+      this._showAnalyzeStatus('Analysis failed: Network error', 'error');
     } finally {
       analyzeBtn.disabled = false;
     }
-  }
+  } */
 
-  private displaySuggestions(suggestions: MetadataSuggestions) {
+  private _displaySuggestions(suggestions: MetadataSuggestions) {
     // Display suggested tags
-    this.displayChipSuggestions('tags-suggestions', suggestions.suggested_tags, 'session-tags');
-    this.toggleSuggestionContainer('suggested-tags', suggestions.suggested_tags.length > 0);
+    this._displayChipSuggestions('tags-suggestions', suggestions.suggested_tags, 'session-tags');
+    this._toggleSuggestionContainer('suggested-tags', suggestions.suggested_tags.length > 0);
 
     // Display mentioned characters
-    this.displayChipSuggestions('characters-suggestions', suggestions.mentioned_characters, 'characters-present');
-    this.toggleSuggestionContainer('suggested-characters', suggestions.mentioned_characters.length > 0);
+    this._displayChipSuggestions('characters-suggestions', suggestions.mentioned_characters, 'characters-present');
+    this._toggleSuggestionContainer('suggested-characters', suggestions.mentioned_characters.length > 0);
 
     // Display mentioned locations
-    this.displayChipSuggestions('locations-suggestions', suggestions.mentioned_locations, 'session-locations');
-    this.toggleSuggestionContainer('suggested-locations', suggestions.mentioned_locations.length > 0);
+    this._displayChipSuggestions('locations-suggestions', suggestions.mentioned_locations, 'session-locations');
+    this._toggleSuggestionContainer('suggested-locations', suggestions.mentioned_locations.length > 0);
   }
 
-  private displayChipSuggestions(containerId: string, suggestions: string[], targetInputId: string) {
+  private _displayChipSuggestions(containerId: string, suggestions: string[], targetInputId: string) {
     const container = document.getElementById(containerId);
     if (!container) return;
 
@@ -718,7 +791,7 @@ class ChronicleKeeperApp {
     }
   }
 
-  private toggleSuggestionContainer(containerId: string, show: boolean) {
+  private _toggleSuggestionContainer(containerId: string, show: boolean) {
     const container = document.getElementById(containerId);
     if (!container) return;
 
@@ -729,7 +802,7 @@ class ChronicleKeeperApp {
     }
   }
 
-  private showAnalyzeStatus(message: string, type: 'loading' | 'success' | 'error') {
+  private _showAnalyzeStatus(message: string, type: 'loading' | 'success' | 'error') {
     const statusEl = document.getElementById('analyze-status');
     if (statusEl) {
       statusEl.textContent = message;
@@ -738,7 +811,7 @@ class ChronicleKeeperApp {
     }
   }
 
-  private hideAnalyzeStatus() {
+  private _hideAnalyzeStatus() {
     const statusEl = document.getElementById('analyze-status');
     if (statusEl) {
       statusEl.classList.add('hidden');
