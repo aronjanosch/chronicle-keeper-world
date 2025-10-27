@@ -11,19 +11,22 @@ import logging
 logger = logging.getLogger(__name__)
 
 class WhisperTranscriber:
-    def __init__(self, model_size: str = "base", device: str = None):
+    def __init__(self, model_size: str = "base", device: str = None, language: str = "auto"):
         """
         Initialize WhisperX transcriber
         
         Args:
             model_size: Whisper model size (tiny, base, small, medium, large-v2)
             device: Device to use (auto-detected if None)
+            language: Language code for transcription ("auto" for auto-detection)
         """
         self.model_size = model_size
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+        self.language = language
         self.model = None
         self.align_model = None
         self.metadata = None
+        self.detected_language = None
         
     def load_model(self):
         """Load Whisper model and alignment model"""
@@ -52,9 +55,13 @@ class WhisperTranscriber:
                     def __init__(self, model):
                         self.model = model
                     
-                    def transcribe(self, audio, batch_size=16):
+                    def transcribe(self, audio, batch_size=16, language=None):
                         # Transcribe without VAD preprocessing
-                        segments, info = self.model.transcribe(audio, beam_size=5)
+                        transcribe_kwargs = {"beam_size": 5}
+                        if language and language != "auto":
+                            transcribe_kwargs["language"] = language
+                        
+                        segments, info = self.model.transcribe(audio, **transcribe_kwargs)
                         
                         # Convert to WhisperX format
                         result_segments = []
@@ -114,10 +121,15 @@ class WhisperTranscriber:
             
             # Transcribe with smaller batch size for stability
             batch_size = 8 if self.device == "cuda" else 16
-            result = self.model.transcribe(audio, batch_size=batch_size)
+            transcribe_language = self.language if self.language != "auto" else None
+            result = self.model.transcribe(audio, batch_size=batch_size, language=transcribe_language)
+            
+            # Store detected language for alignment
+            self.detected_language = result.get("language", "en")
+            logger.info(f"Detected/used language: {self.detected_language}")
             
             # Align whisper output
-            self.load_align_model()
+            self.load_align_model(self.detected_language)
             
             # Always use CPU for alignment to avoid CUDA memory issues
             result = whisperx.align(
@@ -163,18 +175,25 @@ class WhisperTranscriber:
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
 
-def transcribe_session(tracks: List[Dict], speaker_mapping: Dict[str, str]) -> str:
+def transcribe_session(tracks: List[Dict], speaker_mapping: Dict[str, str], language: str = "auto") -> str:
     """
     Transcribe all tracks in a session and merge into a single transcript
     
     Args:
         tracks: List of track dictionaries with file paths
         speaker_mapping: Mapping of track IDs to speaker names
+        language: Language code for transcription ("auto" for auto-detection)
         
     Returns:
         Merged transcript as formatted string
     """
-    transcriber = WhisperTranscriber()
+    # Import config manager to get model settings
+    from storage.manager import ConfigManager
+    config_manager = ConfigManager()
+    
+    # Get model size from settings (defaults to large-v2 for best accuracy)
+    model_size = config_manager.get_whisper_model()
+    transcriber = WhisperTranscriber(model_size=model_size, language=language)
     all_segments = []
     
     try:
