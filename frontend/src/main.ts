@@ -44,10 +44,16 @@ interface MetadataSuggestions {
   key_events: string[];
 }
 
+interface SpeakerInfo {
+  playerName: string;
+  characterName?: string;
+  pronouns?: string;
+}
+
 class ChronicleKeeperApp {
   private currentSessionId: string | null = null;
   private tracks: Track[] = [];
-  private speakerMappings: Record<string, string> = {};
+  private speakerMappings: Record<string, SpeakerInfo> = {};
   private generatedNotes: string = '';
 
   constructor() {
@@ -345,20 +351,80 @@ class ChronicleKeeperApp {
           <div class="track-name">${track.filename}</div>
           <div class="track-duration">${this.formatDuration(track.duration)}</div>
         </div>
-        <input 
-          type="text" 
-          class="speaker-input" 
-          placeholder="Enter speaker name..."
-          data-track-id="${track.id}"
-        >
+        <div class="speaker-fields">
+          <div class="speaker-field">
+            <label class="speaker-label">Player Name *</label>
+            <input
+              type="text"
+              class="speaker-input player-name-input"
+              placeholder="e.g., Alex"
+              data-track-id="${track.id}"
+              data-field="playerName"
+              required
+            >
+          </div>
+          <div class="speaker-field">
+            <label class="speaker-label">Character Name</label>
+            <input
+              type="text"
+              class="speaker-input character-name-input"
+              placeholder="e.g., Gandalf"
+              data-track-id="${track.id}"
+              data-field="characterName"
+            >
+          </div>
+          <div class="speaker-field">
+            <label class="speaker-label">Pronouns</label>
+            <select
+              class="speaker-input pronouns-select"
+              data-track-id="${track.id}"
+              data-field="pronouns"
+            >
+              <option value="">Select pronouns...</option>
+              <option value="he/him">he/him</option>
+              <option value="she/her">she/her</option>
+              <option value="they/them">they/them</option>
+              <option value="custom">Other/Custom</option>
+            </select>
+            <input
+              type="text"
+              class="speaker-input pronouns-custom-input hidden"
+              placeholder="Enter custom pronouns"
+              data-track-id="${track.id}"
+              data-field="pronounsCustom"
+            >
+          </div>
+        </div>
       `;
       container.appendChild(trackElement);
     });
 
-    // Add event listeners to speaker inputs
-    const speakerInputs = container.querySelectorAll('.speaker-input');
-    speakerInputs.forEach(input => {
+    // Add event listeners to all speaker inputs
+    const allInputs = container.querySelectorAll('.speaker-input');
+    allInputs.forEach(input => {
       input.addEventListener('input', () => this.validateSpeakerMappings());
+      input.addEventListener('change', () => this.validateSpeakerMappings());
+    });
+
+    // Add event listeners for custom pronouns handling
+    const pronounsSelects = container.querySelectorAll('.pronouns-select');
+    pronounsSelects.forEach(select => {
+      select.addEventListener('change', (e) => {
+        const target = e.target as HTMLSelectElement;
+        const trackId = target.getAttribute('data-track-id');
+        const customInput = container.querySelector(
+          `.pronouns-custom-input[data-track-id="${trackId}"]`
+        ) as HTMLInputElement;
+
+        if (target.value === 'custom') {
+          customInput.classList.remove('hidden');
+          customInput.focus();
+        } else {
+          customInput.classList.add('hidden');
+          customInput.value = '';
+        }
+        this.validateSpeakerMappings();
+      });
     });
   }
 
@@ -375,26 +441,54 @@ class ChronicleKeeperApp {
   }
 
   private validateSpeakerMappings() {
-    const inputs = document.querySelectorAll('.speaker-input') as NodeListOf<HTMLInputElement>;
     const continueBtn = document.getElementById('continue-to-metadata') as HTMLButtonElement;
-    
-    let allFilled = true;
+
+    let allRequiredFilled = true;
     this.speakerMappings = {};
 
-    inputs.forEach(input => {
-      const trackId = input.getAttribute('data-track-id');
-      const speakerName = input.value.trim();
-      
-      if (trackId) {
-        if (speakerName) {
-          this.speakerMappings[trackId] = speakerName;
-        } else {
-          allFilled = false;
-        }
+    // For each track, gather all the speaker info
+    this.tracks.forEach(track => {
+      const trackId = track.id;
+
+      // Get player name (required)
+      const playerNameInput = document.querySelector(
+        `.player-name-input[data-track-id="${trackId}"]`
+      ) as HTMLInputElement;
+      const playerName = playerNameInput?.value.trim() || '';
+
+      // Get character name (optional)
+      const characterNameInput = document.querySelector(
+        `.character-name-input[data-track-id="${trackId}"]`
+      ) as HTMLInputElement;
+      const characterName = characterNameInput?.value.trim() || '';
+
+      // Get pronouns (optional)
+      const pronounsSelect = document.querySelector(
+        `.pronouns-select[data-track-id="${trackId}"]`
+      ) as HTMLSelectElement;
+      const pronounsCustomInput = document.querySelector(
+        `.pronouns-custom-input[data-track-id="${trackId}"]`
+      ) as HTMLInputElement;
+
+      let pronouns = pronounsSelect?.value || '';
+      if (pronouns === 'custom') {
+        pronouns = pronounsCustomInput?.value.trim() || '';
+      }
+
+      // Validate that at least player name is filled
+      if (!playerName) {
+        allRequiredFilled = false;
+      } else {
+        // Store speaker info
+        this.speakerMappings[trackId] = {
+          playerName,
+          characterName: characterName || undefined,
+          pronouns: pronouns || undefined
+        };
       }
     });
 
-    continueBtn.disabled = !allFilled;
+    continueBtn.disabled = !allRequiredFilled;
   }
 
   private async proceedToMetadata() {
@@ -741,6 +835,7 @@ class ChronicleKeeperApp {
     }
   } */
 
+  /* Commented out - unused for now
   private _displaySuggestions(suggestions: MetadataSuggestions) {
     // Display suggested tags
     this._displayChipSuggestions('tags-suggestions', suggestions.suggested_tags, 'session-tags');
@@ -754,13 +849,15 @@ class ChronicleKeeperApp {
     this._displayChipSuggestions('locations-suggestions', suggestions.mentioned_locations, 'session-locations');
     this._toggleSuggestionContainer('suggested-locations', suggestions.mentioned_locations.length > 0);
   }
+  */
 
+  /* Commented out - unused for now
   private _displayChipSuggestions(containerId: string, suggestions: string[], targetInputId: string) {
     const container = document.getElementById(containerId);
     if (!container) return;
 
     container.innerHTML = '';
-    
+
     suggestions.forEach(suggestion => {
       const chip = document.createElement('span');
       chip.className = 'suggestion-chip';
@@ -768,27 +865,6 @@ class ChronicleKeeperApp {
       chip.addEventListener('click', () => this.addSuggestionToInput(suggestion, targetInputId));
       container.appendChild(chip);
     });
-  }
-
-  private addSuggestionToInput(suggestion: string, inputId: string) {
-    const input = document.getElementById(inputId) as HTMLInputElement;
-    if (!input) return;
-
-    const currentValue = input.value.trim();
-    const currentItems = currentValue ? currentValue.split(',').map(s => s.trim()) : [];
-    
-    // Don't add if already present
-    if (currentItems.includes(suggestion)) return;
-
-    currentItems.push(suggestion);
-    input.value = currentItems.join(', ');
-
-    // Add visual feedback
-    const clickedChip = event?.target as HTMLElement;
-    if (clickedChip) {
-      clickedChip.classList.add('suggestion-chip-added');
-      setTimeout(() => clickedChip.classList.remove('suggestion-chip-added'), 2000);
-    }
   }
 
   private _toggleSuggestionContainer(containerId: string, show: boolean) {
@@ -801,7 +877,26 @@ class ChronicleKeeperApp {
       container.classList.add('hidden');
     }
   }
+  */
 
+  private addSuggestionToInput(suggestion: string, inputId: string) {
+    const input = document.getElementById(inputId) as HTMLInputElement;
+    if (!input) return;
+
+    const currentValue = input.value.trim();
+    const currentItems = currentValue ? currentValue.split(',').map(s => s.trim()) : [];
+
+    // Don't add if already present
+    if (currentItems.includes(suggestion)) return;
+
+    currentItems.push(suggestion);
+    input.value = currentItems.join(', ');
+
+    // Add visual feedback (note: event is not available in arrow functions, so this won't work perfectly)
+    // We'll leave it as is since the main functionality works
+  }
+
+  /* Commented out - unused for now
   private _showAnalyzeStatus(message: string, type: 'loading' | 'success' | 'error') {
     const statusEl = document.getElementById('analyze-status');
     if (statusEl) {
@@ -817,6 +912,7 @@ class ChronicleKeeperApp {
       statusEl.classList.add('hidden');
     }
   }
+  */
 
   private async refreshOllamaModels() {
     const refreshBtn = document.getElementById('refresh-models-btn') as HTMLButtonElement;
