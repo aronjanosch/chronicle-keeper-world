@@ -11,14 +11,15 @@ import logging
 logger = logging.getLogger(__name__)
 
 class WhisperTranscriber:
-    def __init__(self, model_size: str = "base", device: str = None, language: str = "auto"):
+    def __init__(self, model_size: str = "base", device: str = None, language: str = "auto", transcription_settings: Dict = None):
         """
         Initialize WhisperX transcriber
-        
+
         Args:
             model_size: Whisper model size (tiny, base, small, medium, large-v2)
             device: Device to use (auto-detected if None)
             language: Language code for transcription ("auto" for auto-detection)
+            transcription_settings: Anti-hallucination settings
         """
         self.model_size = model_size
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
@@ -27,6 +28,15 @@ class WhisperTranscriber:
         self.align_model = None
         self.metadata = None
         self.detected_language = None
+
+        # Load transcription settings
+        self.transcription_settings = transcription_settings or {
+            "no_speech_threshold": 0.6,
+            "logprob_threshold": -1.0,
+            "compression_ratio_threshold": 2.4,
+            "condition_on_previous_text": False,
+            "filter_hallucinations": True
+        }
         
     def load_model(self):
         """Load Whisper model and alignment model"""
@@ -52,32 +62,69 @@ class WhisperTranscriber:
                 
                 # Create a minimal wrapper that skips VAD
                 class NoVADWhisperModel:
-                    def __init__(self, model):
+                    def __init__(self, model, settings):
                         self.model = model
-                    
+                        self.settings = settings
+
                     def transcribe(self, audio, batch_size=16, language=None):
-                        # Transcribe without VAD preprocessing
-                        transcribe_kwargs = {"beam_size": 5}
+                        # Transcribe without VAD preprocessing, but with anti-hallucination parameters
+                        transcribe_kwargs = {
+                            "beam_size": 5,
+                            # Anti-hallucination parameters from settings
+                            "no_speech_threshold": self.settings.get("no_speech_threshold", 0.6),
+                            "log_prob_threshold": self.settings.get("logprob_threshold", -1.0),  # Note: faster-whisper uses log_prob_threshold
+                            "compression_ratio_threshold": self.settings.get("compression_ratio_threshold", 2.4),
+                            "condition_on_previous_text": self.settings.get("condition_on_previous_text", False),
+                        }
                         if language and language != "auto":
                             transcribe_kwargs["language"] = language
-                        
+
                         segments, info = self.model.transcribe(audio, **transcribe_kwargs)
                         
-                        # Convert to WhisperX format
+                        # Convert to WhisperX format and filter hallucinations
                         result_segments = []
                         for segment in segments:
+                            # Apply hallucination filtering if enabled
+                            if self.settings.get("filter_hallucinations", True):
+                                # Skip segments with high no_speech probability (likely hallucinations)
+                                if segment.no_speech_prob > 0.9:
+                                    logger.debug(f"Filtered segment with high no_speech_prob={segment.no_speech_prob:.2f}: {segment.text[:50]}")
+                                    continue
+
+                                # Skip segments with known hallucination patterns
+                                text_lower = segment.text.lower().strip()
+                                hallucination_patterns = [
+                                    "untertitel",  # German subtitle markers
+                                    "amara.org",
+                                    "zdf",
+                                    "das war's für heute",  # YouTube outro patterns
+                                    "lasst einen daumen",
+                                    "abonniert meinen kanal",
+                                    "bis zum nächsten mal",
+                                    "sous-titres",  # French
+                                    "soustitreur.com",
+                                    "copyright wdr",
+                                    "im auftrag des",
+                                ]
+
+                                if any(pattern in text_lower for pattern in hallucination_patterns):
+                                    logger.debug(f"Filtered hallucinated segment: {segment.text[:50]}")
+                                    continue
+
                             result_segments.append({
                                 "start": segment.start,
                                 "end": segment.end,
-                                "text": segment.text
+                                "text": segment.text,
+                                "no_speech_prob": segment.no_speech_prob,  # Include for debugging
+                                "avg_logprob": segment.avg_logprob,  # Include for debugging
                             })
-                        
+
                         return {
                             "segments": result_segments,
                             "language": info.language
                         }
-                
-                self.model = NoVADWhisperModel(whisper_model)
+
+                self.model = NoVADWhisperModel(whisper_model, self.transcription_settings)
             except Exception as e:
                 logger.error(f"Failed to load model with CUDA, falling back to CPU: {e}")
                 # Fallback to CPU if CUDA fails
@@ -133,14 +180,42 @@ class WhisperTranscriber:
             
             # Always use CPU for alignment to avoid CUDA memory issues
             result = whisperx.align(
-                result["segments"], 
-                self.align_model, 
-                self.metadata, 
-                audio, 
-                "cpu", 
+                result["segments"],
+                self.align_model,
+                self.metadata,
+                audio,
+                "cpu",
                 return_char_alignments=False
             )
-            
+
+            # Post-alignment filtering: Remove segments that failed alignment
+            # These often indicate hallucinations
+            if self.transcription_settings.get("filter_hallucinations", True):
+                filtered_segments = []
+                for segment in result.get("segments", []):
+                    # Check if alignment succeeded (has word-level alignment)
+                    words = segment.get("words", [])
+
+                    # If segment has no words or failed alignment, it might be a hallucination
+                    # But only filter if it also matches hallucination patterns
+                    if len(words) == 0:
+                        text_lower = segment.get("text", "").lower().strip()
+                        hallucination_patterns = [
+                            "untertitel", "amara.org", "zdf",
+                            "das war's für heute", "lasst einen daumen",
+                            "abonniert meinen kanal", "bis zum nächsten mal",
+                            "sous-titres", "soustitreur.com",
+                            "copyright wdr", "im auftrag des",
+                        ]
+
+                        if any(pattern in text_lower for pattern in hallucination_patterns):
+                            logger.info(f"Filtered failed alignment segment with hallucination pattern: {segment.get('text', '')[:50]}")
+                            continue
+
+                    filtered_segments.append(segment)
+
+                result["segments"] = filtered_segments
+
         except Exception as e:
             logger.error(f"Error during transcription: {e}")
             # Return a basic structure if transcription fails
@@ -175,40 +250,72 @@ class WhisperTranscriber:
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
 
-def transcribe_session(tracks: List[Dict], speaker_mapping: Dict[str, str], language: str = "auto") -> str:
+def transcribe_session(tracks: List[Dict], speaker_mapping: Dict[str, any], language: str = "auto") -> str:
     """
     Transcribe all tracks in a session and merge into a single transcript
-    
+
     Args:
         tracks: List of track dictionaries with file paths
-        speaker_mapping: Mapping of track IDs to speaker names
+        speaker_mapping: Mapping of track IDs to speaker info (dict with playerName, characterName, pronouns)
+                        or legacy string format (just speaker name)
         language: Language code for transcription ("auto" for auto-detection)
-        
+
     Returns:
         Merged transcript as formatted string
     """
     # Import config manager to get model settings
-    from storage.manager import ConfigManager
+    from storage.config_manager import ConfigManager
     config_manager = ConfigManager()
-    
-    # Get model size from settings (defaults to large-v2 for best accuracy)
+
+    # Get model size and transcription settings from config
     model_size = config_manager.get_whisper_model()
-    transcriber = WhisperTranscriber(model_size=model_size, language=language)
+    transcription_settings = config_manager.get_transcription_settings()
+
+    transcriber = WhisperTranscriber(
+        model_size=model_size,
+        language=language,
+        transcription_settings=transcription_settings
+    )
     all_segments = []
-    
+
     try:
         for track in tracks:
             track_id = track["id"]
             file_path = track["file_path"]
-            speaker_name = speaker_mapping.get(track_id, f"Speaker_{track_id}")
-            
+
+            # Handle both new format (dict with playerName, characterName, pronouns)
+            # and legacy format (just string speaker name)
+            speaker_info = speaker_mapping.get(track_id, f"Speaker_{track_id}")
+
+            if isinstance(speaker_info, dict):
+                # New format: use character name if available, otherwise player name
+                character_name = speaker_info.get("characterName", "").strip()
+                player_name = speaker_info.get("playerName", f"Speaker_{track_id}")
+                speaker_name = character_name if character_name else player_name
+
+                # Store full speaker info in segment for later use
+                speaker_metadata = {
+                    "player_name": player_name,
+                    "character_name": character_name,
+                    "pronouns": speaker_info.get("pronouns", "")
+                }
+            else:
+                # Legacy format: just a string
+                speaker_name = speaker_info
+                speaker_metadata = {
+                    "player_name": speaker_info,
+                    "character_name": "",
+                    "pronouns": ""
+                }
+
             logger.info(f"Transcribing {file_path} for {speaker_name}")
-            
+
             result = transcriber.transcribe_file(file_path, speaker_name)
-            
-            # Add segments to combined list
+
+            # Add segments to combined list with metadata
             for segment in result["segments"]:
                 segment["track_id"] = track_id
+                segment["speaker_metadata"] = speaker_metadata
                 all_segments.append(segment)
         
         # Sort all segments by start time
@@ -226,19 +333,50 @@ def transcribe_session(tracks: List[Dict], speaker_mapping: Dict[str, str], lang
 def format_transcript(segments: List[Dict]) -> str:
     """
     Format transcript segments into readable text
-    
+
     Args:
-        segments: List of transcript segments with timestamps and speakers
-        
+        segments: List of transcript segments with timestamps and speaker metadata
+
     Returns:
         Formatted transcript string
     """
     transcript_lines = []
     transcript_lines.append("# D&D Session Transcript\n")
-    
+
+    # Extract and add speaker/character information at the beginning
+    speaker_info_map = {}
+    for segment in segments:
+        if "speaker_metadata" in segment:
+            speaker_name = segment.get("speaker", "Unknown")
+            metadata = segment["speaker_metadata"]
+
+            if speaker_name not in speaker_info_map:
+                player_name = metadata.get("player_name", "")
+                character_name = metadata.get("character_name", "")
+                pronouns = metadata.get("pronouns", "")
+
+                # Build speaker info display
+                info_parts = []
+                if character_name:
+                    info_parts.append(f"Character: {character_name}")
+                if player_name and player_name != character_name:
+                    info_parts.append(f"Player: {player_name}")
+                if pronouns:
+                    info_parts.append(f"Pronouns: {pronouns}")
+
+                if info_parts:
+                    speaker_info_map[speaker_name] = " | ".join(info_parts)
+
+    # Add speaker info section if we have any metadata
+    if speaker_info_map:
+        transcript_lines.append("## Participants\n")
+        for speaker_name, info in speaker_info_map.items():
+            transcript_lines.append(f"- **{speaker_name}**: {info}")
+        transcript_lines.append("\n## Transcript\n")
+
     current_speaker = None
     speaker_text = []
-    
+
     for segment in segments:
         speaker = segment.get("speaker", "Unknown")
         text = segment.get("text", "").strip()

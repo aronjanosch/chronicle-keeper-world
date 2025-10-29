@@ -189,22 +189,27 @@ body {
 
 .track-item {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 1rem;
+  flex-direction: column;
+  padding: 1.25rem;
   border: 1px solid #e9ecef;
   border-radius: 8px;
   margin-bottom: 1rem;
   background: #f8f9fa;
+  gap: 1rem;
 }
 
 .track-info {
-  flex: 1;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid #dee2e6;
 }
 
 .track-name {
   font-weight: 600;
   color: #2c3e50;
+  font-size: 1rem;
 }
 
 .track-duration {
@@ -212,11 +217,52 @@ body {
   color: #7f8c8d;
 }
 
+.speaker-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 1rem;
+}
+
+.speaker-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.speaker-label {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #495057;
+  margin-bottom: 0.25rem;
+}
+
 .speaker-input {
-  padding: 0.5rem;
-  border: 1px solid #ddd;
+  padding: 0.6rem;
+  border: 1px solid #dee2e6;
   border-radius: 6px;
-  width: 200px;
+  font-size: 0.95rem;
+  transition: all 0.3s ease;
+  background: white;
+}
+
+.speaker-input:focus {
+  outline: none;
+  border-color: #667eea;
+  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+}
+
+.speaker-input::placeholder {
+  color: #adb5bd;
+}
+
+.pronouns-custom-input {
+  margin-top: 0.5rem;
+}
+
+@media (max-width: 600px) {
+  .speaker-fields {
+    grid-template-columns: 1fr;
+  }
 }
 
 /* Processing Screen */

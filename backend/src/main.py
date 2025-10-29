@@ -14,7 +14,8 @@ from audio.extraction import extract_craig_zip
 from audio.transcription import transcribe_session
 from llm.ollama import OllamaClient
 from llm.gemini import GeminiClient
-from storage.manager import ConfigManager, SessionManager
+from storage.config_manager import ConfigManager
+from storage.session_manager import SessionManager
 from storage.debug_manager import DebugManager
 
 # Configure logging
@@ -51,9 +52,14 @@ class UploadResponse(BaseModel):
     tracks: List[TrackInfo]
     session_id: str
 
+class SpeakerInfo(BaseModel):
+    playerName: str
+    characterName: Optional[str] = None
+    pronouns: Optional[str] = None
+
 class SpeakerMapping(BaseModel):
     session_id: str
-    mappings: Dict[str, str]
+    mappings: Dict[str, SpeakerInfo]
 
 class GenerateNotesRequest(BaseModel):
     session_id: str
@@ -153,11 +159,17 @@ async def upload_craig_zip(file: UploadFile = File(...)):
 
 @app.post("/label-speakers")
 async def label_speakers(mapping: SpeakerMapping):
-    """Map track IDs to speaker names"""
+    """Map track IDs to speaker info (player name, character name, pronouns)"""
     try:
-        session_manager.set_speaker_mapping(mapping.session_id, mapping.mappings)
+        # Convert Pydantic models to dicts for storage
+        mappings_dict = {
+            track_id: speaker_info.model_dump()
+            for track_id, speaker_info in mapping.mappings.items()
+        }
+        session_manager.set_speaker_mapping(mapping.session_id, mappings_dict)
         return {"status": "success", "message": "Speaker mapping stored"}
     except Exception as e:
+        logger.error(f"Error storing speaker mapping: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to store mapping: {str(e)}")
 
 @app.post("/generate-notes")
