@@ -62,7 +62,9 @@ class ConfigManager:
                 "logprob_threshold": -1.0,
                 "compression_ratio_threshold": 2.4,
                 "condition_on_previous_text": False,
-                "filter_hallucinations": True
+                "filter_hallucinations": True,
+                # VAD settings: if not specified, WhisperX uses its defaults (pyannote VAD on CUDA)
+                # Can be overridden: "vad_method" (pyannote/silero) and "vad_device" (cuda/cpu)
             },
             "system_prompt": self.get_default_prompt("en"),
             "ollama_model": "llama3.2",
