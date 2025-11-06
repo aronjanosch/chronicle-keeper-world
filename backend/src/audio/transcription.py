@@ -21,6 +21,15 @@ import gc
 import torch
 from typing import Dict, List
 
+from constants import (
+    WHISPER_BATCH_SIZE_CUDA,
+    WHISPER_BATCH_SIZE_CPU,
+    WHISPER_COMPUTE_TYPE_CUDA,
+    WHISPER_COMPUTE_TYPE_CPU,
+    DEFAULT_TRANSCRIPTION_SETTINGS,
+    HALLUCINATION_PATTERNS
+)
+
 logger = logging.getLogger(__name__)
 
 class WhisperTranscriber:
@@ -42,16 +51,8 @@ class WhisperTranscriber:
         self.metadata = None
         self.detected_language = None
 
-        # Load transcription settings
-        self.transcription_settings = transcription_settings or {
-            "no_speech_threshold": 0.6,
-            "logprob_threshold": -1.0,
-            "compression_ratio_threshold": 2.4,
-            "condition_on_previous_text": False,
-            "filter_hallucinations": True,
-            # VAD settings: if not specified, WhisperX will use its defaults (pyannote VAD)
-            # Can be overridden via config: "vad_method" (pyannote/silero) and "vad_device" (cuda/cpu)
-        }
+        # Load transcription settings (includes VAD settings)
+        self.transcription_settings = transcription_settings or DEFAULT_TRANSCRIPTION_SETTINGS
         
     def load_model(self):
         """Load Whisper model and alignment model"""
@@ -61,7 +62,7 @@ class WhisperTranscriber:
                 torch.cuda.empty_cache()
 
             # Use float32 on CUDA for better stability, int8 on CPU
-            compute_type = "float32" if self.device == "cuda" else "int8"
+            compute_type = WHISPER_COMPUTE_TYPE_CUDA if self.device == "cuda" else WHISPER_COMPUTE_TYPE_CPU
 
             try:
                 # Load WhisperX model (restores WhisperX pipeline and VAD-based segmentation)
@@ -77,9 +78,9 @@ class WhisperTranscriber:
                 # Fallback to CPU if CUDA fails
                 self.device = "cpu"
                 self.model = whisperx.load_model(
-                    self.model_size, 
+                    self.model_size,
                     "cpu",
-                    compute_type="int8",
+                    compute_type=WHISPER_COMPUTE_TYPE_CPU,
                     local_files_only=False
                 )
             
@@ -113,8 +114,8 @@ class WhisperTranscriber:
             # Load audio
             audio = whisperx.load_audio(audio_path)
             
-            # Transcribe with smaller batch size for stability
-            batch_size = 8 if self.device == "cuda" else 16
+            # Transcribe with optimized batch size for stability
+            batch_size = WHISPER_BATCH_SIZE_CUDA if self.device == "cuda" else WHISPER_BATCH_SIZE_CPU
             transcribe_language = self.language if self.language != "auto" else None
             
             # Configure VAD options if explicitly set, otherwise use WhisperX defaults
@@ -167,15 +168,8 @@ class WhisperTranscriber:
                     # But only filter if it also matches hallucination patterns
                     if len(words) == 0:
                         text_lower = segment.get("text", "").lower().strip()
-                        hallucination_patterns = [
-                            "untertitel", "amara.org", "zdf",
-                            "das war's für heute", "lasst einen daumen",
-                            "abonniert meinen kanal", "bis zum nächsten mal",
-                            "sous-titres", "soustitreur.com",
-                            "copyright wdr", "im auftrag des",
-                        ]
 
-                        if any(pattern in text_lower for pattern in hallucination_patterns):
+                        if any(pattern in text_lower for pattern in HALLUCINATION_PATTERNS):
                             logger.info(f"Filtered failed alignment segment with hallucination pattern: {segment.get('text', '')[:50]}")
                             continue
 
