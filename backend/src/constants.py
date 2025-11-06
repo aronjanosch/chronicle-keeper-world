@@ -45,13 +45,15 @@ WHISPER_BATCH_SIZE_CPU = 16  # Larger batch for CPU processing
 WHISPER_COMPUTE_TYPE_CUDA = "float32"  # Better stability than float16
 WHISPER_COMPUTE_TYPE_CPU = "int8"  # Optimized for CPU
 
-# Default transcription settings (anti-hallucination)
+# Default transcription settings (anti-hallucination and VAD)
 DEFAULT_TRANSCRIPTION_SETTINGS = {
     "no_speech_threshold": 0.6,
     "logprob_threshold": -1.0,
     "compression_ratio_threshold": 2.4,
     "condition_on_previous_text": False,
-    "filter_hallucinations": True
+    "filter_hallucinations": True,
+    # VAD settings: if not specified, WhisperX will use its defaults (pyannote VAD)
+    # Can be overridden via config: "vad_method" (pyannote/silero) and "vad_device" (cuda/cpu)
 }
 
 # Hallucination filter patterns (common false transcriptions)
