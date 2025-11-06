@@ -162,8 +162,12 @@ chronicle-keeper/
 ### LLM Engine Selection
 Runtime routing between local and cloud LLMs based on user preference. Ollama client handles server startup and model availability checks. Gemini client includes content length validation and safety settings.
 
+**Model Selection**: Users can choose from multiple Ollama models (llama3.2, llama3.1, mistral, gemma2, qwen2.5, etc.). Models are automatically pulled if not available locally.
+
 ### Audio Processing Chain
 Craig Bot ZIP files contain multi-track FLAC/WAV files. WhisperX processes each track separately, then merges into a single speaker-labeled, timestamped transcript. GPU acceleration utilized when available.
+
+**Whisper Model Selection**: Users can choose from 5 Whisper models (tiny, base, small, medium, large-v2). Models are automatically downloaded if not available. large-v2 is recommended for non-English transcriptions.
 
 ### Error Handling Pattern
 All endpoints use try/catch with HTTPException responses. Temporary files always cleaned up in finally blocks. Session cleanup includes both memory and disk storage.
