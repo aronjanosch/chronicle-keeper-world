@@ -1,12 +1,25 @@
 import os
-# Force CPU for pyannote components to avoid CUDA hanging
-os.environ["PYANNOTE_DEVICE"] = "cpu"
+import sys
+from pathlib import Path
+import logging
+
+# Fix cuDNN loading issue (see https://github.com/m-bain/whisperX/issues/902, #1100, #1103)
+# Solution: Remove nvidia-cudnn-cu12 package and bundled cuDNN libraries
+# Unset LD_LIBRARY_PATH to avoid conflicts with bundled cuDNN
+# PyTorch will use system cuDNN or handle it internally
+if "LD_LIBRARY_PATH" in os.environ:
+    # Remove any venv cuDNN paths that might cause conflicts
+    ld_paths = os.environ["LD_LIBRARY_PATH"].split(":")
+    filtered_paths = [p for p in ld_paths if "nvidia/cudnn" not in p]
+    if len(filtered_paths) != len(ld_paths):
+        os.environ["LD_LIBRARY_PATH"] = ":".join(filtered_paths) if filtered_paths else ""
+        logger = logging.getLogger(__name__)
+        logger.debug("Removed venv cuDNN paths from LD_LIBRARY_PATH to avoid conflicts")
 
 import whisperx
 import gc
 import torch
 from typing import Dict, List
-import logging
 
 from constants import (
     WHISPER_BATCH_SIZE_CUDA,
@@ -38,7 +51,7 @@ class WhisperTranscriber:
         self.metadata = None
         self.detected_language = None
 
-        # Load transcription settings
+        # Load transcription settings (includes VAD settings)
         self.transcription_settings = transcription_settings or DEFAULT_TRANSCRIPTION_SETTINGS
         
     def load_model(self):
@@ -104,7 +117,27 @@ class WhisperTranscriber:
             # Transcribe with optimized batch size for stability
             batch_size = WHISPER_BATCH_SIZE_CUDA if self.device == "cuda" else WHISPER_BATCH_SIZE_CPU
             transcribe_language = self.language if self.language != "auto" else None
-            result = self.model.transcribe(audio, batch_size=batch_size, language=transcribe_language)
+            
+            # Configure VAD options if explicitly set, otherwise use WhisperX defaults
+            transcribe_kwargs = {
+                "batch_size": batch_size,
+            }
+            if transcribe_language:
+                transcribe_kwargs["language"] = transcribe_language
+            
+            # Only pass vad_options if explicitly configured (WhisperX defaults to pyannote VAD)
+            if "vad_method" in self.transcription_settings or "vad_device" in self.transcription_settings:
+                vad_options = {}
+                if "vad_method" in self.transcription_settings:
+                    vad_options["vad_method"] = self.transcription_settings["vad_method"]
+                if "vad_device" in self.transcription_settings:
+                    vad_options["vad_device"] = self.transcription_settings["vad_device"]
+                else:
+                    # Default to CUDA if available when vad_method is specified
+                    vad_options["vad_device"] = "cuda" if torch.cuda.is_available() else "cpu"
+                transcribe_kwargs["vad_options"] = vad_options
+
+            result = self.model.transcribe(audio, **transcribe_kwargs)
             
             # Store detected language for alignment
             self.detected_language = result.get("language", "en")
