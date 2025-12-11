@@ -12,7 +12,7 @@ import os
 
 from llm.base import BaseLLMClient
 from models import SummaryResponse, get_empty_metadata
-from prompts import build_enhanced_prompt, build_structured_prompt
+from prompts import build_structured_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -89,10 +89,10 @@ class GeminiClient(BaseLLMClient):
 
     def generate_summary_with_metadata(self, transcript: str, system_prompt: str, language: str = "en") -> Dict[str, Any]:
         """
-        Generate session summary and metadata using structured output.
+        Generate session summary with metadata using a two-call approach.
 
-        Uses Gemini's native structured output feature with JSON schema
-        to guarantee valid response format without manual parsing.
+        Call 1: Generate detailed summary (temperature 0.7)
+        Call 2: Extract metadata from summary (temperature 0.3)
 
         Args:
             transcript: The session transcript
@@ -102,37 +102,82 @@ class GeminiClient(BaseLLMClient):
         Returns:
             Dictionary containing summary and metadata suggestions
         """
-        # Build the structured prompt
-        full_prompt = build_structured_prompt(system_prompt, transcript, language)
-
-        # Get schema from Pydantic model
-        schema = SummaryResponse.model_json_schema()
-
+        # Step 1: Generate summary
+        logger.info("Generating summary with Gemini...")
+        summary = self.generate_summary(transcript, system_prompt)
+        
+        # Step 2: Extract metadata from summary
+        logger.info("Extracting metadata from summary...")
         try:
-            # Use NEW SDK with response_json_schema (not response_schema)
+            metadata = self.extract_metadata(summary, language)
+        except Exception as e:
+            logger.error(f"Metadata extraction failed: {e}")
+            logger.warning("Using empty metadata")
+            metadata = get_empty_metadata()
+        
+        return {
+            "summary": summary,
+            "metadata": metadata,
+            "raw_response": summary
+        }
+    
+    def extract_metadata(self, summary: str, language: str = "en") -> Dict[str, Any]:
+        """
+        Extract metadata from a session summary using structured output.
+
+        Args:
+            summary: The generated session summary
+            language: Language code (en, de)
+
+        Returns:
+            Dictionary containing metadata (tags, characters, locations, tone, events)
+        """
+        from prompts import get_metadata_guidelines
+        
+        # Build metadata extraction prompt
+        guidelines = get_metadata_guidelines(language)
+        
+        if language == "de":
+            prompt = f"""Analysiere diese Sitzungszusammenfassung und extrahiere strukturierte Metadaten.
+
+{guidelines}
+
+Zusammenfassung:
+{summary}
+
+Gib NUR gültiges JSON zurück mit allen erforderlichen Feldern ausgefüllt."""
+        else:
+            prompt = f"""Analyze this session summary and extract structured metadata.
+
+{guidelines}
+
+Summary:
+{summary}
+
+Return ONLY valid JSON with all required fields populated."""
+        
+        # Get schema for metadata only
+        from models import SessionMetadata
+        schema = SessionMetadata.model_json_schema()
+        
+        try:
             response = self.client.models.generate_content(
                 model=self.model_name,
-                contents=full_prompt,
+                contents=prompt,
                 config={
-                    "temperature": 0.7,
+                    "temperature": 0.3,  # Lower temperature for consistent tagging
                     "response_mime_type": "application/json",
-                    "response_json_schema": schema,  # NEW SDK uses response_json_schema
+                    "response_json_schema": schema,
                 }
             )
-
-            # Parse the structured response using Pydantic
-            result = SummaryResponse.model_validate_json(response.text)
-
-            return {
-                "summary": result.summary,
-                "metadata": result.metadata.model_dump(),
-                "raw_response": response.text
-            }
-
+            
+            # Parse the structured response
+            result = SessionMetadata.model_validate_json(response.text)
+            return result.model_dump()
+            
         except Exception as e:
-            logger.error(f"Error generating structured output with Gemini: {e}")
-            logger.warning("Falling back to legacy parsing method")
-            return self._fallback_generation(transcript, system_prompt, language)
+            logger.error(f"Error extracting metadata: {e}")
+            raise
 
     def _fallback_generation(self, transcript: str, system_prompt: str, language: str) -> Dict[str, Any]:
         """

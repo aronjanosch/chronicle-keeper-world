@@ -793,8 +793,9 @@ async def export_obsidian_notes(request: ExportOptionsRequest):
                 request.session_id, config_manager
             )
         else:
-            # Use standard format
-            content = summary
+            # Use standard format with proper markdown formatting
+            from storage.session_manager import format_markdown_summary
+            content = format_markdown_summary(summary)
             filename = request.custom_filename or "session_notes.md"
         
         return {

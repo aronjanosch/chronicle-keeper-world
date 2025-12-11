@@ -1,138 +1,115 @@
 """
 Centralized prompt management for Chronicle Keeper.
 
-This module contains all LLM prompts, format instructions, and metadata definitions
-in a single location to eliminate duplication and improve maintainability.
+This module contains all LLM prompts and metadata definitions.
+Uses a two-call approach: (1) generate summary, (2) extract metadata.
 """
 
 from typing import Dict
 
 # ============================================================================
-# BASE SYSTEM PROMPTS (Localized)
+# SUMMARY GENERATION PROMPTS (Two-call approach)
 # ============================================================================
 
+# These prompts are used for Call 1: Generate the session summary
+# Call 2 uses metadata extraction prompts (see METADATA section below)
+
 BASE_PROMPTS: Dict[str, str] = {
-    "en": """You are a professional tabletop RPG assistant helping the GM maintain campaign continuity. Your task is to analyze the following TTRPG session transcript and generate a detailed, GM-focused session summary.
+    "en": """You are an RPG assistant for the GM. Create a concise, structured session summary.
 
-IMPORTANT INSTRUCTIONS FOR CHARACTER REFERENCES:
-- The transcript includes a "Participants" section with character names, player names, and pronouns
-- When referring to characters in your summary, ALWAYS use their CHARACTER NAME (not player name)
-- Use the CORRECT PRONOUNS listed for each character consistently throughout your summary
-- If only a player name is provided (no character name), use the player name
-- Example: If the transcript shows "Gandalf: Character: Gandalf | Player: Alex | Pronouns: he/him", refer to this character as "Gandalf" using "he/him" pronouns
+CHARACTER NAMES: Always use CHARACTER NAMES from the transcript (not player names). Use correct pronouns.
 
-GM-FOCUSED SUMMARY GUIDELINES:
-Your summary should help the GM remember important details for future sessions. Include:
+FOCUS: Only GM-relevant details - what's important for continuity and next session? Be specific and concise.
 
-1. NARRATIVE & STORY PROGRESSION:
-   - Major plot developments and revelations
-   - New information learned or mysteries uncovered
-   - Story hooks and foreshadowing introduced
-   - NPC interactions and what NPCs revealed or promised
+STRUCTURE: Follow this Markdown structure with ### headings:
 
-2. CHARACTER MOMENTS & DECISIONS:
-   - Important choices the party made and their reasoning
-   - Character development moments and roleplay highlights
-   - Party dynamics and conflicts
-   - Failed rolls with significant consequences
+## Summary of Events:
 
-3. COMBAT & ENCOUNTERS:
-   - How combat encounters played out (tactics, key moments)
-   - Enemy types faced and their capabilities
-   - Combat outcomes and consequences
+### Opening Scene and Initial Situation:
+[2-3 sentences: How did the session start?]
 
-4. RESOURCES & ITEMS:
-   - Items, rewards, or information obtained
-   - Resources spent or lost
-   - Quest items or clues collected
+### Major Plot Developments:
+[Only core story points]
 
-5. LOCATIONS & WORLD DETAILS:
-   - Places visited or discovered
-   - Environmental details that matter
-   - World-building elements introduced
+### NPC Interactions:
+[Who, what, promises made?]
 
-6. CONTINUITY TRACKING:
-   - Unresolved plot threads and mysteries
-   - NPCs who need follow-up
-   - Promises made or debts incurred
-   - Goals and action items for next session
+### Combat Encounters:
+[MAX 3-4 SENTENCES: Enemy types, decisive moments, lasting consequences. NO combat report!]
 
-Scale your summary length to match the session - longer sessions need more detail. Be thorough enough that the GM can quickly refresh their memory before the next session.
+### Character Moments:
+[Only significant moments with consequences]
 
-Format the output using Markdown with two distinct, bolded sections:
+### Items and Resources:
+[Bullet points]
 
-**Summary of Events:**
-- [Include detailed bullet points covering all important story beats]
-- [Capture NPC interactions, discoveries, and character moments]
-- [Note combat outcomes and how encounters unfolded]
-- [Include any items obtained or resources used]
+### How the Session Ended:
+[Current situation, cliffhanger]
 
-**Key Decisions & Next Steps:**
-- [Document important choices and their context]
-- [List unresolved plot threads requiring follow-up]
-- [Note promises, debts, or commitments made]
-- [Identify clear goals for the next session]""",
+## Key Decisions & Next Steps:
 
-    "de": """Du bist ein professioneller Pen-&-Paper-RPG-Assistent, der dem Spielleiter hilft, die Kampagnenkontinuität aufrechtzuerhalten. Deine Aufgabe ist es, das folgende TTRPG-Sitzungstranskript zu analysieren und eine detaillierte, für den Spielleiter optimierte Sitzungszusammenfassung zu erstellen.
+### Major Group Decisions:
+[Core decisions + reasoning]
 
-WICHTIGE ANWEISUNGEN FÜR CHARAKTERREFERENZEN:
-- Das Transkript enthält einen Abschnitt "Teilnehmer" mit Charakternamen, Spielernamen und Pronomen
-- Verwende bei Verweisen auf Charaktere in deiner Zusammenfassung IMMER deren CHARAKTERNAMEN (nicht Spielernamen)
-- Verwende die angegebenen KORREKTEN PRONOMEN für jeden Charakter durchgehend in deiner Zusammenfassung
-- Wenn nur ein Spielername angegeben ist (kein Charaktername), verwende den Spielernamen
-- Beispiel: Wenn das Transkript zeigt "Gandalf: Charakter: Gandalf | Spieler: Alex | Pronomen: er/ihm", beziehe dich auf diesen Charakter als "Gandalf" mit den Pronomen "er/ihm"
+### Unresolved Threads:
+[Story hooks]
 
-SPIELLEITER-FOKUSSIERTE RICHTLINIEN:
-Deine Zusammenfassung soll dem Spielleiter helfen, sich an wichtige Details für zukünftige Sitzungen zu erinnern. Berücksichtige:
+### Important NPCs:
+[Who needs follow-up?]
 
-1. ERZÄHLUNG & HANDLUNGSFORTSCHRITT:
-   - Große Handlungsentwicklungen und Enthüllungen
-   - Neue Informationen oder aufgedeckte Mysterien
-   - Eingeführte Story-Hooks und Vorausdeutungen
-   - NSC-Interaktionen und was NSCs enthüllt oder versprochen haben
+### Goals for Next Session:
+[Concrete next steps]
 
-2. CHARAKTERMOMENTE & ENTSCHEIDUNGEN:
-   - Wichtige Entscheidungen der Gruppe und ihre Beweggründe
-   - Charakterentwicklungsmomente und Rollenspiel-Highlights
-   - Gruppendynamik und Konflikte
-   - Gescheiterte Würfe mit bedeutsamen Konsequenzen
+### Commitments and Obligations:
+[What the party owes/promised]""",
 
-3. KÄMPFE & BEGEGNUNGEN:
-   - Wie Kampfbegegnungen verliefen (Taktiken, Schlüsselmomente)
-   - Gegnertypen und ihre Fähigkeiten
-   - Kampfergebnisse und Konsequenzen
+    "de": """Du bist ein RPG-Assistent für den Spielleiter. Erstelle eine prägnante, strukturierte Sitzungszusammenfassung.
 
-4. RESSOURCEN & GEGENSTÄNDE:
-   - Erhaltene Gegenstände, Belohnungen oder Informationen
-   - Verbrauchte oder verlorene Ressourcen
-   - Gesammelte Quest-Gegenstände oder Hinweise
+CHARAKTERNAMEN: Verwende immer den CHARAKTERNAMEN aus dem Transkript (nicht Spielername). Nutze die korrekten Pronomen.
 
-5. ORTE & WELTDETAILS:
-   - Besuchte oder entdeckte Orte
-   - Umgebungsdetails, die wichtig sind
-   - Eingeführte Worldbuilding-Elemente
+FOKUS: Nur GM-relevante Details - was ist wichtig für Kontinuität und nächste Sitzung? Sei konkret und prägnant.
 
-6. KONTINUITÄTSVERFOLGUNG:
-   - Ungelöste Handlungsstränge und Mysterien
-   - NSCs, die Follow-up benötigen
-   - Gegebene Versprechen oder eingegangene Schulden
-   - Ziele und Aufgaben für die nächste Sitzung
+STRUKTUR: Folge dieser Markdown-Struktur mit ### Überschriften:
 
-Passe die Länge deiner Zusammenfassung an die Sitzung an - längere Sitzungen benötigen mehr Details. Sei gründlich genug, dass der Spielleiter vor der nächsten Sitzung schnell sein Gedächtnis auffrischen kann.
+## Zusammenfassung der Ereignisse:
 
-Formatiere die Ausgabe mit Markdown in zwei verschiedenen, fett gedruckten Abschnitten:
+### Eröffnungsszene und Ausgangssituation:
+[2-3 Sätze: Wie begann die Sitzung?]
 
-**Zusammenfassung der Ereignisse:**
-- [Füge detaillierte Stichpunkte für alle wichtigen Story-Beats hinzu]
-- [Erfasse NSC-Interaktionen, Entdeckungen und Charaktermomente]
-- [Notiere Kampfergebnisse und wie Begegnungen verliefen]
-- [Füge erhaltene Gegenstände oder verwendete Ressourcen hinzu]
+### Große Handlungsentwicklungen, Enthüllungen oder neue Informationen:
+[Nur Story-Kernpunkte]
 
-**Wichtige Entscheidungen & Nächste Schritte:**
-- [Dokumentiere wichtige Entscheidungen und ihren Kontext]
-- [Liste ungelöste Handlungsstränge auf, die Follow-up benötigen]
-- [Notiere Versprechen, Schulden oder eingegangene Verpflichtungen]
-- [Identifiziere klare Ziele für die nächste Sitzung]"""
+### NPC-Interaktionen: wen sie trafen, was besprochen wurde, gegebene Versprechen:
+[Wer, was, welche Versprechen?]
+
+### Kampfbegegnungen: Gegner, eingesetzte Taktiken, Ergebnisse und Konsequenzen:
+[MAX 3-4 SÄTZE: Gegnertypen, entscheidende Momente, bleibende Konsequenzen. KEIN Kampfbericht!]
+
+### Charaktermomente: wichtige Entscheidungen, Rollenspiel-Highlights, gescheiterte Würfe:
+[Nur bedeutsame Momente mit Konsequenzen]
+
+### Erhaltene Gegenstände, Belohnungen oder verwendete Ressourcen:
+[Stichpunkte]
+
+### Wie die Sitzung endete und die unmittelbare Situation:
+[Aktuelle Lage, Cliffhanger]
+
+## Wichtige Entscheidungen & Nächste Schritte:
+
+### Große Entscheidungen der Gruppe und ihre Beweggründe:
+[Kernentscheidungen + Begründung]
+
+### Ungelöste Handlungsstränge und Mysterien, die Follow-up benötigen:
+[Story-Hooks]
+
+### NPCs, die Aufmerksamkeit benötigen oder versprochene Interaktionen:
+[Wer braucht Follow-up?]
+
+### Klare Ziele und Aufgaben für die nächste Sitzung:
+[Konkrete nächste Schritte]
+
+### Schulden, Versprechen oder Verpflichtungen, die die Gruppe eingegangen ist:
+[Was schuldet/verspricht die Gruppe?]"""
 }
 
 # ============================================================================
@@ -158,7 +135,7 @@ METADATA_GUIDELINES: Dict[str, str] = {
 Ensure ALL required fields are populated. Do not return empty lists for tags, tone, or events.""",
     "de": """Metadaten-Richtlinien:
 - suggested_tags: ERFORDERLICH. Liste 3-5 Tags. Z.B. "Kampf", "Sozial", "Erkundung", "Mysterium".
-- mentioned_characters: Liste wichtige SCs und NSCs. Verwende spezifische Namen.
+- mentioned_characters: Liste wichtige SCs und NPCs. Verwende spezifische Namen.
 - mentioned_locations: Liste spezifische besuchte oder erwähnte Orte.
 - session_tone: ERFORDERLICH. Liste 1-3 Stimmungsbeschreibungen. Z.B. "Angespannt", "Humorvoll", "Düster".
 - key_events: ERFORDERLICH. Liste 3-5 kurze Stichpunkte zu Hauptereignissen.
@@ -171,104 +148,13 @@ def get_metadata_guidelines(language: str = "en") -> str:
     return METADATA_GUIDELINES.get(language, METADATA_GUIDELINES["en"])
 
 # ============================================================================
-# FORMAT INSTRUCTIONS
+# STRUCTURED OUTPUT INSTRUCTIONS (for metadata extraction)
 # ============================================================================
-
-RESPONSE_SEPARATOR = "---METADATA---"
-
-SUMMARY_FORMAT_TEMPLATES = {
-    "en": """**Summary of Events:**
-- [Opening scene and initial situation]
-- [Major plot developments, revelations, or new information learned]
-- [NPC interactions: who they met, what was discussed, promises made]
-- [Combat encounters: enemies faced, tactics used, outcomes and consequences]
-- [Character moments: important decisions, roleplay highlights, failed rolls]
-- [Items obtained, rewards received, or resources used]
-- [Location details and world-building elements introduced]
-- [How the session concluded and immediate situation]
-
-**Key Decisions & Next Steps:**
-- [Major choices the party made and their reasoning]
-- [Unresolved plot threads and mysteries that need follow-up]
-- [NPCs who require attention or promised interactions]
-- [Clear goals and action items for the next session]
-- [Debts, promises, or commitments the party has made]""",
-    "de": """**Zusammenfassung der Ereignisse:**
-- [Eröffnungsszene und Ausgangssituation]
-- [Große Handlungsentwicklungen, Enthüllungen oder neue erlernte Informationen]
-- [NSC-Interaktionen: wen sie trafen, was besprochen wurde, gegebene Versprechen]
-- [Kampfbegegnungen: Gegner, eingesetzte Taktiken, Ergebnisse und Konsequenzen]
-- [Charaktermomente: wichtige Entscheidungen, Rollenspiel-Highlights, gescheiterte Würfe]
-- [Erhaltene Gegenstände, Belohnungen oder verwendete Ressourcen]
-- [Ortsdetails und eingeführte Worldbuilding-Elemente]
-- [Wie die Sitzung endete und die unmittelbare Situation]
-
-**Wichtige Entscheidungen & Nächste Schritte:**
-- [Große Entscheidungen der Gruppe und ihre Beweggründe]
-- [Ungelöste Handlungsstränge und Mysterien, die Follow-up benötigen]
-- [NSCs, die Aufmerksamkeit benötigen oder versprochene Interaktionen]
-- [Klare Ziele und Aufgaben für die nächste Sitzung]
-- [Schulden, Versprechen oder Verpflichtungen, die die Gruppe eingegangen ist]"""
-}
-
-ENHANCED_INSTRUCTIONS_TEXT: Dict[str, str] = {
-    "en": {
-        "critical": "CRITICAL: Follow this EXACT format structure:",
-        "instructions": "INSTRUCTIONS:",
-        "step1": "1. First write the summary using the EXACT format above",
-        "step2": f'2. Then add "{RESPONSE_SEPARATOR}" as a separator',
-        "step3": "3. Then add the JSON metadata block",
-        "step4": "4. Do NOT deviate from this structure"
-    },
-    "de": {
-        "critical": "KRITISCH: Befolge diese EXAKTE Formatstruktur:",
-        "instructions": "ANWEISUNGEN:",
-        "step1": "1. Schreibe zuerst die Zusammenfassung im EXAKTEN Format oben",
-        "step2": f'2. Füge dann "{RESPONSE_SEPARATOR}" als Trennzeichen hinzu',
-        "step3": "3. Füge dann den JSON-Metadatenblock hinzu",
-        "step4": "4. Weiche NICHT von dieser Struktur ab"
-    }
-}
 
 STRUCTURED_OUTPUT_INSTRUCTIONS: Dict[str, str] = {
     "en": "Analyze the transcript and generate a structured summary. You MUST populate the metadata lists. 'suggested_tags', 'session_tone', and 'key_events' CANNOT be empty. If you are unsure, infer the best options from the context.",
     "de": "Analysiere das Transkript und erstelle eine strukturierte Zusammenfassung. Du MUSST die Metadaten-Listen füllen. 'suggested_tags', 'session_tone' und 'key_events' DÜRFEN NICHT leer sein. Wenn du unsicher bist, leite die besten Optionen aus dem Kontext ab."
 }
-
-def get_enhanced_instructions(language: str = "en") -> str:
-    """
-    Get the enhanced formatting instructions with localized section headers.
-
-    Args:
-        language: Language code (en, de)
-
-    Returns:
-        Instruction string including the localized summary template and separator/JSON block
-    """
-    template = SUMMARY_FORMAT_TEMPLATES.get(language, SUMMARY_FORMAT_TEMPLATES["en"])
-    instructions = ENHANCED_INSTRUCTIONS_TEXT.get(language, ENHANCED_INSTRUCTIONS_TEXT["en"])
-    metadata_guidelines = get_metadata_guidelines(language)
-    
-    return f"""{instructions["critical"]}
-
-{template}
-
-{RESPONSE_SEPARATOR}
-{{
-    "suggested_tags": [],
-    "mentioned_characters": [],
-    "mentioned_locations": [],
-    "session_tone": [],
-    "key_events": []
-}}
-
-{instructions["instructions"]}
-{instructions["step1"]}
-{instructions["step2"]}
-{instructions["step3"]}
-{instructions["step4"]}
-
-{metadata_guidelines}"""
 
 TRANSCRIPT_LABELS: Dict[str, str] = {
     "en": "Transcript:",
@@ -303,30 +189,6 @@ def get_available_languages() -> Dict[str, str]:
         "en": "English",
         "de": "Deutsch"
     }
-
-
-def build_enhanced_prompt(base_prompt: str, transcript: str, language: str = "en") -> str:
-    """
-    Build the full enhanced prompt with format instructions and metadata guidelines.
-    
-    NOTE: This is for text-based generation where the model outputs text + separator + JSON.
-    Do NOT use this for native structured output (JSON schema).
-
-    Args:
-        base_prompt: The base system prompt
-        transcript: The session transcript to analyze
-        language: Language code (en, de)
-
-    Returns:
-        Complete prompt string ready for LLM
-    """
-    transcript_label = TRANSCRIPT_LABELS.get(language, TRANSCRIPT_LABELS["en"])
-    return f"""{base_prompt}
-
-{get_enhanced_instructions(language)}
-
-{transcript_label}
-{transcript}"""
 
 
 def build_structured_prompt(base_prompt: str, transcript: str, language: str = "en") -> str:

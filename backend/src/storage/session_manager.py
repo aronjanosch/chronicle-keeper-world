@@ -14,6 +14,39 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+def format_markdown_summary(summary: str) -> str:
+    """
+    Format a summary string to ensure proper markdown line breaks.
+    
+    LLMs using structured JSON output often return summaries with bullet points
+    concatenated without newlines. This function adds proper line breaks.
+    
+    Args:
+        summary: Raw summary string from LLM
+        
+    Returns:
+        Properly formatted summary with line breaks
+    """
+    if not summary:
+        return summary
+    
+    import re
+    
+    # Pattern 1: Add newline before section headers that appear mid-text
+    # (e.g., "text.**Next Section:**" -> "text.\n\n**Next Section:**")
+    summary = re.sub(r'([.?!])(\*\*[^*]+:\*\*)', r'\1\n\n\2', summary)
+    
+    # Pattern 2: Add newline after section headers followed by bullet points
+    # (e.g., "**Summary:**- " -> "**Summary:**\n- ")
+    summary = re.sub(r'\*\*([^*]+):\*\*-', r'**\1:**\n-', summary)
+    
+    # Pattern 3: Add newlines between bullet points
+    # (e.g., "point.- Next" -> "point.\n- Next")
+    summary = re.sub(r'([.?!])-\s', r'\1\n- ', summary)
+    
+    return summary
+
+
 class SessionManager:
     def __init__(self, session_dir: str = None):
         """
@@ -318,8 +351,9 @@ class SessionManager:
             frontmatter.append(metadata["notes"])
             frontmatter.append("")
 
-        # Add the generated summary
-        frontmatter.append(summary)
+        # Add the generated summary with proper formatting
+        formatted_summary = format_markdown_summary(summary)
+        frontmatter.append(formatted_summary)
 
         return "\n".join(frontmatter)
 

@@ -15,7 +15,7 @@ import ollama
 
 from llm.base import BaseLLMClient
 from models import SummaryResponse, get_empty_metadata
-from prompts import build_enhanced_prompt, build_structured_prompt
+from prompts import build_structured_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -187,10 +187,10 @@ class OllamaClient(BaseLLMClient):
 
     def generate_summary_with_metadata(self, transcript: str, system_prompt: str, language: str = "en") -> Dict[str, Any]:
         """
-        Generate session summary and metadata using structured output.
+        Generate session summary with metadata using a two-call approach.
 
-        Uses Ollama's native structured output feature with JSON schema
-        to guarantee valid response format without manual parsing.
+        Call 1: Generate detailed summary (temperature 0.7)
+        Call 2: Extract metadata from summary (temperature 0.3)
 
         Args:
             transcript: The session transcript
@@ -203,38 +203,82 @@ class OllamaClient(BaseLLMClient):
         if not self.ensure_model_ready():
             raise Exception("Ollama model not available")
 
-        # Build the structured prompt
-        full_prompt = build_structured_prompt(system_prompt, transcript, language)
-
+        # Step 1: Generate summary
+        logger.info("Generating summary with Ollama...")
+        summary = self.generate_summary(transcript, system_prompt)
+        
+        # Step 2: Extract metadata from summary
+        logger.info("Extracting metadata from summary...")
         try:
-            # Use ollama library with structured output
+            metadata = self.extract_metadata(summary, language)
+        except Exception as e:
+            logger.error(f"Metadata extraction failed: {e}")
+            logger.warning("Using empty metadata")
+            metadata = get_empty_metadata()
+        
+        return {
+            "summary": summary,
+            "metadata": metadata,
+            "raw_response": summary
+        }
+    
+    def extract_metadata(self, summary: str, language: str = "en") -> Dict[str, Any]:
+        """
+        Extract metadata from a session summary using structured output.
+
+        Args:
+            summary: The generated session summary
+            language: Language code (en, de)
+
+        Returns:
+            Dictionary containing metadata (tags, characters, locations, tone, events)
+        """
+        from prompts import get_metadata_guidelines
+        from models import SessionMetadata
+        
+        # Build metadata extraction prompt
+        guidelines = get_metadata_guidelines(language)
+        
+        if language == "de":
+            prompt = f"""Analysiere diese Sitzungszusammenfassung und extrahiere strukturierte Metadaten.
+
+{guidelines}
+
+Zusammenfassung:
+{summary}
+
+Gib NUR gültiges JSON zurück mit allen erforderlichen Feldern ausgefüllt."""
+        else:
+            prompt = f"""Analyze this session summary and extract structured metadata.
+
+{guidelines}
+
+Summary:
+{summary}
+
+Return ONLY valid JSON with all required fields populated."""
+        
+        try:
             response = ollama.chat(
                 model=self.model,
                 messages=[{
                     'role': 'user',
-                    'content': full_prompt
+                    'content': prompt
                 }],
-                format=SummaryResponse.model_json_schema(),
+                format=SessionMetadata.model_json_schema(),
                 options={
-                    'temperature': 0.3,  # Lower temperature for consistent structured output
-                    # No num_predict limit - let the model decide appropriate length
+                    'temperature': 0.3,  # Lower temperature for consistent tagging
+                    'num_predict': 500  # Metadata is short, limit tokens
                 }
             )
-
+            
             # Parse the structured response
-            result = SummaryResponse.model_validate_json(response.message.content)
-
-            return {
-                "summary": result.summary,
-                "metadata": result.metadata.model_dump(),
-                "raw_response": response.message.content
-            }
-
+            result = SessionMetadata.model_validate_json(response.message.content)
+            return result.model_dump()
+            
         except Exception as e:
-            logger.error(f"Error generating structured output with Ollama: {e}")
-            # Fallback to empty metadata
-            logger.warning("Falling back to legacy parsing method")
-            return self._fallback_generation(transcript, system_prompt, language)
+            logger.error(f"Error extracting metadata: {e}")
+            raise
 
     def _fallback_generation(self, transcript: str, system_prompt: str, language: str) -> Dict[str, Any]:
         """
