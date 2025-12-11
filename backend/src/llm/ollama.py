@@ -2,7 +2,7 @@
 Ollama LLM client for local model inference.
 
 Handles Ollama server management, model availability checks, and API calls.
-Inherits common parsing and prompt building from BaseLLMClient.
+Supports both legacy requests-based API and new ollama library with structured outputs.
 """
 
 import requests
@@ -11,8 +11,11 @@ import time
 import logging
 from typing import Dict, Any
 
+import ollama
+
 from llm.base import BaseLLMClient
-from prompts import build_simple_prompt
+from models import SummaryResponse, get_empty_metadata
+from prompts import build_enhanced_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -178,9 +181,132 @@ class OllamaClient(BaseLLMClient):
             Generated summary
         """
         # Build simple prompt without metadata instructions
+        from prompts import build_simple_prompt
         full_prompt = build_simple_prompt(system_prompt, transcript)
 
         return self._call_llm(full_prompt, temperature=0.7, max_tokens=2048)
+
+    def generate_summary_with_metadata(self, transcript: str, system_prompt: str, language: str = "en") -> Dict[str, Any]:
+        """
+        Generate session summary and metadata using structured output.
+
+        Uses Ollama's native structured output feature with JSON schema
+        to guarantee valid response format without manual parsing.
+
+        Args:
+            transcript: The session transcript
+            system_prompt: System prompt for summarization
+            language: Language code (en, de)
+
+        Returns:
+            Dictionary containing summary and metadata suggestions
+        """
+        if not self.ensure_model_ready():
+            raise Exception("Ollama model not available")
+
+        # Build the enhanced prompt
+        full_prompt = build_enhanced_prompt(system_prompt, transcript, language)
+
+        try:
+            # Use ollama library with structured output
+            response = ollama.chat(
+                model=self.model,
+                messages=[{
+                    'role': 'user',
+                    'content': full_prompt
+                }],
+                format=SummaryResponse.model_json_schema(),
+                options={
+                    'temperature': 0.3,  # Lower temperature for consistent structured output
+                    'num_predict': 2048,
+                }
+            )
+
+            # Parse the structured response
+            result = SummaryResponse.model_validate_json(response.message.content)
+
+            return {
+                "summary": result.summary,
+                "metadata": result.metadata.model_dump(),
+                "raw_response": response.message.content
+            }
+
+        except Exception as e:
+            logger.error(f"Error generating structured output with Ollama: {e}")
+            # Fallback to empty metadata
+            logger.warning("Falling back to legacy parsing method")
+            return self._fallback_generation(transcript, system_prompt, language)
+
+    def _fallback_generation(self, transcript: str, system_prompt: str, language: str) -> Dict[str, Any]:
+        """
+        Fallback to legacy generation without structured output.
+
+        Args:
+            transcript: The session transcript
+            system_prompt: System prompt for summarization
+            language: Language code
+
+        Returns:
+            Dictionary with summary and empty metadata
+        """
+        try:
+            from prompts import build_simple_prompt
+            full_prompt = build_simple_prompt(system_prompt, transcript, language)
+            summary = self._call_llm(full_prompt, temperature=0.7, max_tokens=2048)
+
+            return {
+                "summary": summary,
+                "metadata": get_empty_metadata(),
+                "raw_response": summary
+            }
+        except Exception as e:
+            logger.error(f"Fallback generation also failed: {e}")
+            raise
+
+    def estimate_tokens(self, text: str) -> int:
+        """
+        Estimate token count for input text.
+
+        Uses character-based estimation since Ollama doesn't provide
+        a built-in token counting API.
+
+        Args:
+            text: Input text to estimate
+
+        Returns:
+            Estimated token count
+        """
+        if not text:
+            return 0
+
+        # Character-based estimation: ~4 characters per token
+        # Add 10% buffer for markdown and special characters
+        estimated = int((len(text) // 4) * 1.1)
+
+        return estimated
+
+    def estimate_prompt_tokens(self, transcript: str, system_prompt: str) -> Dict[str, int]:
+        """
+        Estimate token count for complete prompt (system prompt + transcript).
+
+        Args:
+            transcript: The session transcript
+            system_prompt: System prompt for summarization
+
+        Returns:
+            Dictionary with token breakdown
+        """
+        # Build the full prompt to get accurate count
+        from prompts import build_enhanced_prompt
+        full_prompt = build_enhanced_prompt(system_prompt, transcript, "en")
+
+        total_tokens = self.estimate_tokens(full_prompt)
+
+        return {
+            "total_tokens": total_tokens,
+            "method": "character_estimation",
+            "accurate": False  # Character-based estimation is approximate
+        }
 
     def test_connection(self) -> dict:
         """Test connection and return status info"""

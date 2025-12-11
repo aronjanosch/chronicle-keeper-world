@@ -12,7 +12,8 @@ from datetime import datetime
 import logging
 
 # Import centralized prompts
-from src.prompts import get_base_prompt, get_available_languages, get_empty_metadata
+from src.prompts import get_base_prompt, get_available_languages
+from src.models import get_empty_metadata
 
 # Import centralized constants
 from src.constants import (

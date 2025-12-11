@@ -17,6 +17,7 @@ from llm.gemini import GeminiClient
 from storage.config_manager import ConfigManager
 from storage.session_manager import SessionManager
 from storage.debug_manager import DebugManager
+from context_window import ContextWindowManager
 
 # Configure logging
 logging.basicConfig(
@@ -40,6 +41,7 @@ app.add_middleware(
 config_manager = ConfigManager()
 session_manager = SessionManager()
 debug_manager = DebugManager()
+context_manager = ContextWindowManager()
 
 # Pydantic models for request/response
 class TrackInfo(BaseModel):
@@ -66,6 +68,39 @@ class GenerateNotesRequest(BaseModel):
     llm_engine: str  # "local" or "cloud"
     custom_prompt: Optional[str] = None
     ollama_model: Optional[str] = None
+
+class AnalyzeContextRequest(BaseModel):
+    session_id: str
+    llm_engine: str  # "local" or "cloud"
+    custom_prompt: Optional[str] = None
+    ollama_model: Optional[str] = None
+
+class TranscribeRequest(BaseModel):
+    session_id: str
+    whisper_model: Optional[str] = None
+    transcription_language: Optional[str] = None
+
+class TranscribeResponse(BaseModel):
+    transcript: str  # Preview only (first 500 chars)
+    token_estimate: int
+    transcript_length: int
+    detected_language: str
+    status: str
+
+class TokenEstimateRequest(BaseModel):
+    session_id: str
+    llm_engine: str  # "local" or "cloud"
+    ollama_model: Optional[str] = None
+
+class TokenEstimateResponse(BaseModel):
+    estimated_tokens: int
+    model: str
+    max_tokens: int
+    usage_percent: float
+    fits_in_context: bool
+    recommended_action: str
+    message: str
+    estimated_cost_usd: Optional[float] = None
 
 class ExportRequest(BaseModel):
     content: str
@@ -180,6 +215,148 @@ async def label_speakers(mapping: SpeakerMapping):
         logger.error(f"Error storing speaker mapping: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to store mapping: {str(e)}")
 
+@app.post("/transcribe", response_model=TranscribeResponse)
+async def transcribe_audio(request: TranscribeRequest):
+    """
+    Transcribe audio files for a session without running LLM generation.
+
+    Returns transcript and token count estimates for review before LLM generation.
+    """
+    try:
+        # Get session data
+        session_data = session_manager.get_session(request.session_id)
+        if not session_data:
+            raise HTTPException(status_code=404, detail="Session not found")
+
+        # Check if transcript already exists (allow re-transcription)
+        existing_transcript = session_data.get("transcript")
+        if existing_transcript:
+            logger.info(f"Session {request.session_id} already has transcript, re-transcribing...")
+
+        # Get transcription settings
+        settings = config_manager.get_settings()
+        transcription_language = request.transcription_language or settings.get("transcription_language", "auto")
+        whisper_model = request.whisper_model or settings.get("whisper_model", "large-v2")
+
+        # Update config temporarily if custom settings provided
+        if request.whisper_model:
+            config_manager.update_settings({"whisper_model": whisper_model})
+        if request.transcription_language:
+            config_manager.update_settings({"transcription_language": transcription_language})
+
+        # Transcribe audio files
+        logger.info(f"Starting transcription for session {request.session_id} with model {whisper_model}, language {transcription_language}")
+        transcript = transcribe_session(
+            session_data["tracks"],
+            session_data["speaker_mapping"],
+            language=transcription_language
+        )
+
+        # DEBUG: Export raw transcript
+        debug_manager.export_transcript(request.session_id, transcript, {
+            "tracks_count": len(session_data["tracks"]),
+            "speaker_mapping": session_data["speaker_mapping"],
+            "transcript_length": len(transcript),
+            "whisper_model": whisper_model,
+            "transcription_language": transcription_language
+        })
+
+        # Get system prompt for token estimation
+        system_prompt = config_manager.get_current_prompt()
+
+        # Estimate tokens using context manager
+        token_estimate = context_manager.estimate_tokens(transcript + system_prompt)
+
+        # Store transcript in session (without summary)
+        from datetime import datetime
+        session_manager.update_session(request.session_id, {
+            "transcript": transcript,
+            "transcription_metadata": {
+                "whisper_model": whisper_model,
+                "transcription_language": transcription_language,
+                "detected_language": transcription_language,
+                "transcribed_at": datetime.now().isoformat()
+            }
+        })
+
+        logger.info(f"Transcription completed for session {request.session_id}, {len(transcript)} chars, ~{token_estimate} tokens")
+
+        # Return preview (first 500 chars) + metadata
+        transcript_preview = transcript[:500] + "..." if len(transcript) > 500 else transcript
+
+        return TranscribeResponse(
+            transcript=transcript_preview,
+            token_estimate=token_estimate,
+            transcript_length=len(transcript),
+            detected_language=transcription_language,
+            status="success"
+        )
+
+    except Exception as e:
+        logger.error(f"Transcription failed: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to transcribe: {str(e)}")
+
+@app.post("/estimate-tokens", response_model=TokenEstimateResponse)
+async def estimate_tokens(request: TokenEstimateRequest):
+    """
+    Estimate token count and context window usage for a session.
+
+    Uses cached transcript if available.
+    """
+    try:
+        session_data = session_manager.get_session(request.session_id)
+        if not session_data:
+            raise HTTPException(status_code=404, detail="Session not found")
+
+        transcript = session_data.get("transcript")
+        if not transcript:
+            raise HTTPException(status_code=400, detail="No transcript available. Transcribe first.")
+
+        # Get system prompt
+        system_prompt = config_manager.get_current_prompt()
+
+        # Determine model
+        settings = config_manager.get_settings()
+        is_cloud = request.llm_engine == "cloud"
+
+        if is_cloud:
+            model = "gemini-2.0-flash-exp"
+            # Gemini pricing: $0.15 per 1M input tokens
+            cost_per_token = 0.15 / 1_000_000
+        else:
+            model = request.ollama_model or settings.get("ollama_model", "llama3.2")
+            cost_per_token = None
+
+        # Analyze context window
+        analysis = context_manager.analyze_context(
+            transcript=transcript,
+            system_prompt=system_prompt,
+            model=model,
+            is_cloud=is_cloud
+        )
+
+        # Calculate estimated cost for cloud
+        estimated_cost = None
+        if is_cloud and cost_per_token:
+            estimated_cost = analysis["estimated_tokens"] * cost_per_token
+
+        return TokenEstimateResponse(
+            estimated_tokens=analysis["estimated_tokens"],
+            model=model,
+            max_tokens=analysis["max_tokens"],
+            usage_percent=analysis["usage_percent"],
+            fits_in_context=analysis["fits"],
+            recommended_action=analysis["recommended_action"],
+            message=analysis["message"],
+            estimated_cost_usd=estimated_cost
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Token estimation failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Token estimation failed: {str(e)}")
+
 @app.post("/generate-notes")
 async def generate_notes(request: GenerateNotesRequest):
     """Generate transcript and create session summary with metadata suggestions"""
@@ -188,38 +365,70 @@ async def generate_notes(request: GenerateNotesRequest):
         session_data = session_manager.get_session(request.session_id)
         if not session_data:
             raise HTTPException(status_code=404, detail="Session not found")
-        
-        # Get transcription language setting
-        transcription_language = config_manager.get_transcription_language()
-        
-        # Transcribe audio files
-        transcript = transcribe_session(
-            session_data["tracks"], 
-            session_data["speaker_mapping"],
-            language=transcription_language
-        )
-        
-        # DEBUG: Export raw transcript
-        debug_manager.export_transcript(request.session_id, transcript, {
-            "tracks_count": len(session_data["tracks"]),
-            "speaker_mapping": session_data["speaker_mapping"],
-            "transcript_length": len(transcript)
-        })
+
+        # Check if transcript already exists from separate transcription step
+        transcript = session_data.get("transcript")
+
+        if not transcript:
+            # Legacy path: transcribe if not already done
+            logger.info("No transcript found, running transcription (legacy mode)")
+            transcription_language = config_manager.get_transcription_language()
+
+            transcript = transcribe_session(
+                session_data["tracks"],
+                session_data["speaker_mapping"],
+                language=transcription_language
+            )
+
+            # DEBUG: Export raw transcript
+            debug_manager.export_transcript(request.session_id, transcript, {
+                "tracks_count": len(session_data["tracks"]),
+                "speaker_mapping": session_data["speaker_mapping"],
+                "transcript_length": len(transcript),
+                "mode": "legacy"
+            })
+        else:
+            logger.info(f"Using existing transcript from session ({len(transcript)} chars)")
         
         # Get system prompt (localized if no custom prompt)
         settings = config_manager.get_settings()
         system_prompt = request.custom_prompt or config_manager.get_current_prompt()
         current_language = config_manager.get_current_language()
-        
+
         # DEBUG: Export prompt used
         debug_manager.export_prompt_used(
-            request.session_id, 
-            "summary_generation", 
-            system_prompt, 
+            request.session_id,
+            "summary_generation",
+            system_prompt,
             current_language,
             is_custom=bool(request.custom_prompt)
         )
-        
+
+        # Analyze context window before generation
+        is_cloud = request.llm_engine == "cloud"
+        if is_cloud:
+            model_name = "gemini-2.0-flash-exp"
+        else:
+            model_name = request.ollama_model or settings.get("ollama_model", "llama3.2")
+
+        context_analysis = context_manager.analyze_context(
+            transcript=transcript,
+            system_prompt=system_prompt,
+            model=model_name,
+            is_cloud=is_cloud
+        )
+
+        # Check if generation should be blocked
+        if context_manager.should_block_generation(context_analysis):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Context window exceeded: {context_analysis['message']}"
+            )
+
+        # Log context analysis warning if needed
+        if context_analysis["recommended_action"] in ["warn_high_usage", "switch_to_cloud"]:
+            logger.warning(f"Context window warning for session {request.session_id}: {context_analysis['message']}")
+
         # Generate summary and metadata using selected LLM
         if request.llm_engine == "cloud":
             gemini_client = GeminiClient(settings.get("gemini_api_key"))
@@ -260,15 +469,88 @@ async def generate_notes(request: GenerateNotesRequest):
             "transcript": transcript,
             "metadata_suggestions": metadata_suggestions
         })
-        
-        return {
-            "summary": summary, 
+
+        # Prepare response with context analysis
+        response_data = {
+            "summary": summary,
             "transcript": transcript,
-            "metadata_suggestions": metadata_suggestions
+            "metadata_suggestions": metadata_suggestions,
+            "context_analysis": {
+                "estimated_tokens": context_analysis["estimated_tokens"],
+                "usage_percent": context_analysis["usage_percent"],
+                "fits_in_context": context_analysis["fits"],
+                "recommended_action": context_analysis["recommended_action"],
+                "message": context_analysis["message"]
+            }
         }
+
+        return response_data
     
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to generate notes: {str(e)}")
+
+@app.post("/analyze-context")
+async def analyze_context(request: AnalyzeContextRequest):
+    """
+    Analyze context window usage before generating notes.
+
+    Returns information about token usage, model limits, and recommendations
+    for switching between local and cloud models.
+    """
+    try:
+        # Get session data
+        session_data = session_manager.get_session(request.session_id)
+        if not session_data:
+            raise HTTPException(status_code=404, detail="Session not found")
+
+        # Get transcript (check if already generated)
+        transcript = session_data.get("transcript")
+        if not transcript:
+            # Transcribe if not already done
+            settings = config_manager.get_settings()
+            transcription_language = settings.get("transcription_language", "auto")
+
+            transcript = transcribe_session(
+                session_data["tracks"],
+                session_data["speaker_mapping"],
+                language=transcription_language
+            )
+
+            # Store transcript for later use
+            session_manager.update_session(request.session_id, {
+                "transcript": transcript
+            })
+
+        # Get system prompt
+        system_prompt = request.custom_prompt or config_manager.get_current_prompt()
+
+        # Determine model and engine
+        settings = config_manager.get_settings()
+        is_cloud = request.llm_engine == "cloud"
+
+        if is_cloud:
+            model = "gemini-2.0-flash-exp"
+        else:
+            model = request.ollama_model or settings.get("ollama_model", "llama3.2")
+
+        # Analyze context window
+        analysis = context_manager.analyze_context(
+            transcript=transcript,
+            system_prompt=system_prompt,
+            model=model,
+            is_cloud=is_cloud
+        )
+
+        # Add session info
+        analysis["session_id"] = request.session_id
+        analysis["transcript_length"] = len(transcript)
+        analysis["transcript_char_count"] = len(transcript)
+
+        return analysis
+
+    except Exception as e:
+        logger.error(f"Context analysis failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Context analysis failed: {str(e)}")
 
 @app.post("/export")
 async def export_notes(request: ExportRequest):

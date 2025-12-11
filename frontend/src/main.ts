@@ -106,7 +106,14 @@ class ChronicleKeeperApp {
     document.getElementById('back-to-speakers')?.addEventListener('click', () => this.showScreen('speakers-screen'));
     document.getElementById('continue-to-processing')?.addEventListener('click', () => this.proceedToTranscription());
     document.getElementById('back-to-metadata')?.addEventListener('click', () => this.showScreen('metadata-screen'));
-    document.getElementById('continue-to-summarization')?.addEventListener('click', () => this.proceedToSummarization());
+    document.getElementById('continue-to-summarization')?.addEventListener('click', () => this.proceedToTranscriptionResults());
+
+    // Transcription results screen
+    document.getElementById('back-to-transcription-settings')?.addEventListener('click', () => this.showScreen('transcription-screen'));
+    document.getElementById('start-transcription-btn')?.addEventListener('click', () => this.startTranscription());
+    document.getElementById('retry-transcription-btn')?.addEventListener('click', () => this.retryTranscription());
+    document.getElementById('continue-to-summarization-from-results')?.addEventListener('click', () => this.proceedToSummarization());
+
     document.getElementById('back-to-transcription')?.addEventListener('click', () => this.showScreen('transcription-screen'));
     document.getElementById('back-to-summarization')?.addEventListener('click', () => this.showScreen('summarization-screen'));
     document.getElementById('back-to-suggestions')?.addEventListener('click', () => this.showScreen('suggestions-screen'));
@@ -583,6 +590,248 @@ class ChronicleKeeperApp {
     }
   }
 
+  private async proceedToTranscriptionResults() {
+    // Save transcription settings if checkbox is checked
+    const saveCheckbox = document.getElementById('save-transcription-settings') as HTMLInputElement;
+    if (saveCheckbox?.checked) {
+      await this.saveTranscriptionSettingsToBackend();
+    }
+
+    // Reset results screen state
+    this.resetTranscriptionResultsScreen();
+
+    // Show transcription results screen
+    this.showScreen('transcription-results-screen');
+  }
+
+  private resetTranscriptionResultsScreen() {
+    // Hide results content
+    const resultsContent = document.getElementById('transcription-results-content');
+    if (resultsContent) {
+      resultsContent.classList.add('hidden');
+    }
+
+    // Hide error display
+    const errorDisplay = document.getElementById('transcription-error');
+    if (errorDisplay) {
+      errorDisplay.classList.add('hidden');
+    }
+
+    // Reset status display
+    const statusDisplay = document.getElementById('transcription-status-display');
+    if (statusDisplay) {
+      statusDisplay.className = 'status-display';
+      statusDisplay.innerHTML = '<span class="status-icon">⏳</span><span class="status-text">Ready to transcribe</span>';
+    }
+
+    // Disable continue button
+    const continueBtn = document.getElementById('continue-to-summarization-from-results') as HTMLButtonElement;
+    if (continueBtn) {
+      continueBtn.disabled = true;
+    }
+
+    // Enable transcribe button
+    const transcribeBtn = document.getElementById('start-transcription-btn') as HTMLButtonElement;
+    if (transcribeBtn) {
+      transcribeBtn.disabled = false;
+    }
+  }
+
+  private async startTranscription() {
+    if (!this.currentSessionId) return;
+
+    const transcribeBtn = document.getElementById('start-transcription-btn') as HTMLButtonElement;
+    const statusDisplay = document.getElementById('transcription-status-display');
+    const errorDisplay = document.getElementById('transcription-error');
+    const resultsContent = document.getElementById('transcription-results-content');
+
+    // Disable button
+    if (transcribeBtn) transcribeBtn.disabled = true;
+
+    // Hide error/results
+    if (errorDisplay) errorDisplay.classList.add('hidden');
+    if (resultsContent) resultsContent.classList.add('hidden');
+
+    // Update status to loading
+    if (statusDisplay) {
+      statusDisplay.className = 'status-display loading';
+      statusDisplay.innerHTML = '<span class="status-icon">🔄</span><span class="status-text">Transcribing audio tracks... This may take 5-20 minutes.</span>';
+    }
+
+    try {
+      // Get transcription settings
+      const whisperModelSelect = document.getElementById('whisper-model-select') as HTMLSelectElement;
+      const transcriptionLanguageSelect = document.getElementById('transcription-language-select-wizard') as HTMLSelectElement;
+
+      const response = await window.fetch(`${API_BASE_URL}/transcribe`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          session_id: this.currentSessionId,
+          whisper_model: whisperModelSelect?.value,
+          transcription_language: transcriptionLanguageSelect?.value
+        }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+
+        // Update status to success
+        if (statusDisplay) {
+          statusDisplay.className = 'status-display success';
+          statusDisplay.innerHTML = '<span class="status-icon">✅</span><span class="status-text">Transcription completed successfully!</span>';
+        }
+
+        // Display results
+        this.displayTranscriptionResults(data);
+
+        // Show results content
+        if (resultsContent) resultsContent.classList.remove('hidden');
+
+        // Enable continue button
+        const continueBtn = document.getElementById('continue-to-summarization-from-results') as HTMLButtonElement;
+        if (continueBtn) {
+          continueBtn.disabled = false;
+        }
+
+      } else {
+        const error = await response.json();
+        this.showTranscriptionError(error.detail || 'Transcription failed');
+      }
+
+    } catch (error) {
+      console.error('Transcription error:', error);
+      this.showTranscriptionError('Network error during transcription');
+    }
+  }
+
+  private displayTranscriptionResults(data: any) {
+    // Display transcript preview
+    const previewEl = document.getElementById('transcript-preview');
+    if (previewEl) {
+      previewEl.textContent = data.transcript || 'No preview available';
+    }
+
+    // Display transcript size
+    const sizeEl = document.getElementById('transcript-size-display');
+    if (sizeEl) {
+      sizeEl.textContent = data.transcript_length?.toLocaleString() || '-';
+    }
+
+    // Display token count
+    const tokenEl = document.getElementById('token-count-display');
+    if (tokenEl) {
+      tokenEl.textContent = data.token_estimate?.toLocaleString() || '-';
+    }
+
+    // Fetch detailed token estimate with context analysis
+    this.fetchTokenEstimate();
+  }
+
+  private async fetchTokenEstimate() {
+    if (!this.currentSessionId) return;
+
+    try {
+      // Get LLM engine selection from summarization screen (or default to local)
+      const llmEngineRadios = document.querySelectorAll('input[name="llm-engine-wizard"]') as NodeListOf<HTMLInputElement>;
+      let llmEngine = 'local';
+      for (const radio of llmEngineRadios) {
+        if (radio.checked) {
+          llmEngine = radio.value;
+          break;
+        }
+      }
+
+      const ollamaModelSelect = document.getElementById('ollama-model-select-wizard') as HTMLSelectElement;
+
+      const response = await window.fetch(`${API_BASE_URL}/estimate-tokens`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          session_id: this.currentSessionId,
+          llm_engine: llmEngine,
+          ollama_model: ollamaModelSelect?.value
+        }),
+      });
+
+      if (response.ok) {
+        const estimate = await response.json();
+
+        // Display context usage
+        const usageEl = document.getElementById('context-usage-display');
+        if (usageEl) {
+          usageEl.textContent = estimate.usage_percent?.toFixed(1) || '-';
+        }
+
+        // Display cost if cloud
+        if (estimate.estimated_cost_usd !== null && estimate.estimated_cost_usd !== undefined) {
+          const costCard = document.getElementById('cost-estimate-card');
+          const costDisplay = document.getElementById('cost-display');
+          if (costCard && costDisplay) {
+            costCard.classList.remove('hidden');
+            costDisplay.textContent = `$${estimate.estimated_cost_usd.toFixed(4)}`;
+          }
+        }
+
+        // Show recommendation if needed
+        this.showContextRecommendation(estimate);
+      }
+
+    } catch (error) {
+      console.error('Failed to fetch token estimate:', error);
+    }
+  }
+
+  private showContextRecommendation(estimate: any) {
+    const recommendationEl = document.getElementById('context-recommendation');
+    if (!recommendationEl) return;
+
+    // Determine recommendation class
+    let recommendationClass = 'success';
+    if (estimate.recommended_action === 'warn_high_usage' || estimate.recommended_action === 'switch_to_cloud') {
+      recommendationClass = 'warning';
+    } else if (estimate.recommended_action === 'require_cloud' || estimate.recommended_action === 'chunking_required') {
+      recommendationClass = 'error';
+    }
+
+    recommendationEl.className = `context-recommendation ${recommendationClass}`;
+    recommendationEl.textContent = estimate.message || '';
+    recommendationEl.classList.remove('hidden');
+  }
+
+  private showTranscriptionError(errorMessage: string) {
+    const statusDisplay = document.getElementById('transcription-status-display');
+    const errorDisplay = document.getElementById('transcription-error');
+    const errorText = document.getElementById('transcription-error-text');
+
+    // Update status to error
+    if (statusDisplay) {
+      statusDisplay.className = 'status-display error';
+      statusDisplay.innerHTML = '<span class="status-icon">❌</span><span class="status-text">Transcription failed</span>';
+    }
+
+    // Show error display
+    if (errorDisplay && errorText) {
+      errorText.textContent = errorMessage;
+      errorDisplay.classList.remove('hidden');
+    }
+
+    // Re-enable transcribe button
+    const transcribeBtn = document.getElementById('start-transcription-btn') as HTMLButtonElement;
+    if (transcribeBtn) {
+      transcribeBtn.disabled = false;
+    }
+  }
+
+  private retryTranscription() {
+    this.resetTranscriptionResultsScreen();
+    this.startTranscription();
+  }
+
   private async loadTranscriptionSettings() {
     try {
       const response = await window.fetch(`${API_BASE_URL}/settings`);
@@ -619,12 +868,7 @@ class ChronicleKeeperApp {
   }
 
   private async proceedToSummarization() {
-    // Optionally save transcription settings if checkbox is checked
-    const saveCheckbox = document.getElementById('save-transcription-settings') as HTMLInputElement;
-    if (saveCheckbox?.checked) {
-      await this.saveTranscriptionSettingsToBackend();
-    }
-
+    // No longer needs to save transcription settings (already saved in previous step)
     await this.loadSummarizationSettings();
     this.showScreen('summarization-screen');
   }
@@ -767,7 +1011,7 @@ class ChronicleKeeperApp {
       await this.saveSummarizationSettingsToBackend();
     }
 
-    this.showProcessingStatus('Transcribing audio and generating notes... This may take several minutes.', 'loading');
+    this.showProcessingStatus('Generating session summary... This may take a few minutes.', 'loading');
 
     try {
       const response = await window.fetch(`${API_BASE_URL}/generate-notes`, {

@@ -810,3 +810,157 @@ body {
   font-weight: 600;
   margin-bottom: 1rem;
 }
+
+/* Transcription Results Styles */
+.transcription-results {
+  max-width: 900px;
+  margin: 0 auto;
+}
+
+.result-section {
+  background: #f8f9fa;
+  border-radius: 8px;
+  padding: 1.5rem;
+  margin-bottom: 1.5rem;
+}
+
+.result-section h3 {
+  margin: 0 0 1rem 0;
+  color: #2c3e50;
+  font-size: 1.2rem;
+}
+
+.status-display {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 1rem;
+  background: white;
+  border-radius: 6px;
+  border: 2px solid #e0e0e0;
+}
+
+.status-icon {
+  font-size: 2rem;
+}
+
+.status-text {
+  font-size: 1.1rem;
+  font-weight: 500;
+}
+
+.transcript-preview-box {
+  background: white;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  padding: 1rem;
+  max-height: 200px;
+  overflow-y: auto;
+  font-family: monospace;
+  font-size: 0.9rem;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+.estimate-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.estimate-card {
+  background: white;
+  border-radius: 8px;
+  padding: 1.5rem;
+  text-align: center;
+  border: 2px solid #e0e0e0;
+}
+
+.estimate-label {
+  font-size: 0.9rem;
+  color: #666;
+  margin-bottom: 0.5rem;
+}
+
+.estimate-value {
+  font-size: 2rem;
+  font-weight: bold;
+  color: #2c3e50;
+  margin-bottom: 0.25rem;
+}
+
+.estimate-unit {
+  font-size: 0.85rem;
+  color: #888;
+}
+
+.context-recommendation {
+  padding: 1rem;
+  border-radius: 6px;
+  margin-top: 1rem;
+}
+
+.context-recommendation.warning {
+  background: #fff3cd;
+  border: 1px solid #ffc107;
+  color: #856404;
+}
+
+.context-recommendation.error {
+  background: #f8d7da;
+  border: 1px solid #dc3545;
+  color: #721c24;
+}
+
+.context-recommendation.success {
+  background: #d4edda;
+  border: 1px solid #28a745;
+  color: #155724;
+}
+
+.error-display {
+  background: #f8d7da;
+  border: 2px solid #dc3545;
+  border-radius: 8px;
+  padding: 1.5rem;
+  margin: 1.5rem 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+}
+
+.error-icon {
+  font-size: 3rem;
+}
+
+.error-text {
+  color: #721c24;
+  font-weight: 500;
+  text-align: center;
+}
+
+/* Loading state for status display */
+.status-display.loading {
+  border-color: #007bff;
+}
+
+.status-display.loading .status-icon {
+  animation: spin 2s linear infinite;
+}
+
+.status-display.success {
+  border-color: #28a745;
+  background: #d4edda;
+}
+
+.status-display.error {
+  border-color: #dc3545;
+  background: #f8d7da;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
