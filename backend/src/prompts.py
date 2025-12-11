@@ -290,19 +290,3 @@ def get_metadata_analysis_prompt(transcript: str, language: str = "en") -> str:
 {transcript}
 
 {json_label}"""
-
-
-def get_empty_metadata() -> Dict[str, list]:
-    """
-    Get an empty metadata structure with all expected keys.
-
-    Returns:
-        Dictionary with empty lists for all metadata fields
-    """
-    return {
-        "suggested_tags": [],
-        "mentioned_characters": [],
-        "mentioned_locations": [],
-        "session_tone": [],
-        "key_events": []
-    }

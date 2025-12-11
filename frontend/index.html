@@ -144,6 +144,83 @@
           </div>
         </section>
 
+        <!-- Step 4.5: Transcription Results -->
+        <section id="transcription-results-screen" class="screen">
+          <div class="step-header">
+            <h2>Step 4.5: Transcription Results</h2>
+            <p>Review transcription results and estimated processing costs</p>
+          </div>
+
+          <div class="transcription-results">
+            <!-- Transcription Status Display -->
+            <div class="result-section">
+              <h3>Transcription Status</h3>
+              <div id="transcription-status-display" class="status-display">
+                <span class="status-icon">⏳</span>
+                <span class="status-text">Ready to transcribe</span>
+              </div>
+            </div>
+
+            <!-- Start Transcription Button -->
+            <button id="start-transcription-btn" class="primary-button large-button">
+              🎙️ Start Transcription
+            </button>
+
+            <!-- Results Section (hidden until complete) -->
+            <div id="transcription-results-content" class="hidden">
+              <!-- Transcript Preview -->
+              <div class="result-section">
+                <h3>Transcript Preview</h3>
+                <div id="transcript-preview" class="transcript-preview-box">
+                  <!-- Populated after transcription -->
+                </div>
+              </div>
+
+              <!-- Token Count & Cost Estimate -->
+              <div class="result-section">
+                <h3>Processing Estimates</h3>
+                <div class="estimate-cards">
+                  <div class="estimate-card">
+                    <div class="estimate-label">Transcript Size</div>
+                    <div class="estimate-value" id="transcript-size-display">-</div>
+                    <div class="estimate-unit">characters</div>
+                  </div>
+                  <div class="estimate-card">
+                    <div class="estimate-label">Estimated Tokens</div>
+                    <div class="estimate-value" id="token-count-display">-</div>
+                    <div class="estimate-unit">tokens</div>
+                  </div>
+                  <div class="estimate-card">
+                    <div class="estimate-label">Context Usage</div>
+                    <div class="estimate-value" id="context-usage-display">-</div>
+                    <div class="estimate-unit">% of model capacity</div>
+                  </div>
+                  <div class="estimate-card hidden" id="cost-estimate-card">
+                    <div class="estimate-label">Estimated Cost (Gemini)</div>
+                    <div class="estimate-value" id="cost-display">-</div>
+                    <div class="estimate-unit">USD</div>
+                  </div>
+                </div>
+                <div id="context-recommendation" class="context-recommendation hidden">
+                  <!-- Populated with recommendation message -->
+                </div>
+              </div>
+            </div>
+
+            <!-- Error Display -->
+            <div id="transcription-error" class="error-display hidden">
+              <span class="error-icon">❌</span>
+              <span class="error-text" id="transcription-error-text"></span>
+              <button id="retry-transcription-btn" class="secondary-button">🔄 Retry Transcription</button>
+            </div>
+          </div>
+
+          <div class="screen-actions">
+            <button id="back-to-transcription-settings" class="secondary-button">← Back</button>
+            <button id="continue-to-summarization-from-results" class="primary-button" disabled>Continue to Summarization →</button>
+          </div>
+        </section>
+
         <!-- Step 5: Summarization Settings -->
         <section id="summarization-screen" class="screen">
           <div class="step-header">
