@@ -32,10 +32,30 @@
                 <p>Drag & drop your Craig Bot ZIP file here</p>
                 <p class="upload-or">or</p>
                 <button id="file-select-btn" class="primary-button">Select File</button>
-                <button id="debug-upload-btn" class="secondary-button">🔧 Use Example Recording</button>
+                <div class="secondary-actions">
+                  <button id="load-history-btn" class="secondary-button">📂 Load Previous Session</button>
+                  <button id="debug-upload-btn" class="secondary-button">🔧 Use Example Recording</button>
+                </div>
               </div>
             </div>
             <div id="upload-status" class="upload-status hidden"></div>
+          </div>
+        </section>
+
+        <!-- History Screen -->
+        <section id="history-screen" class="screen">
+          <div class="step-header">
+            <h2>Session History</h2>
+            <p>Select a previous session to resume or re-summarize</p>
+          </div>
+          <div class="history-container">
+            <div id="sessions-list" class="sessions-list">
+              <!-- Populated dynamically -->
+              <div class="loading-spinner">Loading sessions...</div>
+            </div>
+          </div>
+          <div class="screen-actions">
+            <button id="back-to-upload-from-history" class="secondary-button">← Back</button>
           </div>
         </section>
 

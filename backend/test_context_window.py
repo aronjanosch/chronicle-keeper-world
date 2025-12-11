@@ -36,8 +36,8 @@ def test_context_window_manager():
         ("Very long session (3.5hr)", 65_000, "llama3.2", False, RecommendedAction.WARN_HIGH_USAGE),
         ("Extreme session (4.5hr)", 80_000, "llama3.2", False, RecommendedAction.SWITCH_TO_CLOUD),
         ("Massive session (6+hr)", 95_000, "llama3.2", False, RecommendedAction.REQUIRE_CLOUD),
-        ("Long session on cloud", 80_000, "gemini-2.0-flash-exp", True, RecommendedAction.USE_AS_IS),
-        ("Extreme session on cloud", 200_000, "gemini-2.0-flash-exp", True, RecommendedAction.USE_AS_IS),
+        ("Long session on cloud", 80_000, "gemini-2.5-flash", True, RecommendedAction.USE_AS_IS),
+        ("Extreme session on cloud", 200_000, "gemini-2.5-flash", True, RecommendedAction.USE_AS_IS),
     ]
 
     print("=" * 80)
@@ -102,7 +102,7 @@ def test_model_limits():
         ("llama3.2", False, 128_000),
         ("llama3.3", False, 128_000),
         ("qwen2.5", False, 128_000),
-        ("gemini-2.0-flash-exp", True, 1_000_000),
+        ("gemini-2.5-flash", True, 1_000_000),
         ("unknown-model", False, 128_000),  # Should default to 128K
         ("unknown-cloud", True, 1_000_000),  # Should default to 1M
     ]

@@ -3,18 +3,9 @@ import sys
 from pathlib import Path
 import logging
 
-# Fix cuDNN loading issue (see https://github.com/m-bain/whisperX/issues/902, #1100, #1103)
-# Solution: Remove nvidia-cudnn-cu12 package and bundled cuDNN libraries
-# Unset LD_LIBRARY_PATH to avoid conflicts with bundled cuDNN
-# PyTorch will use system cuDNN or handle it internally
-if "LD_LIBRARY_PATH" in os.environ:
-    # Remove any venv cuDNN paths that might cause conflicts
-    ld_paths = os.environ["LD_LIBRARY_PATH"].split(":")
-    filtered_paths = [p for p in ld_paths if "nvidia/cudnn" not in p]
-    if len(filtered_paths) != len(ld_paths):
-        os.environ["LD_LIBRARY_PATH"] = ":".join(filtered_paths) if filtered_paths else ""
-        logger = logging.getLogger(__name__)
-        logger.debug("Removed venv cuDNN paths from LD_LIBRARY_PATH to avoid conflicts")
+# Initialize cuDNN library paths BEFORE importing whisperx
+# This ensures system cuDNN is used instead of bundled libraries
+import cudnn_init  # noqa: F401
 
 import whisperx
 import gc

@@ -39,7 +39,11 @@ app.add_middleware(
 
 # Initialize managers
 config_manager = ConfigManager()
-session_manager = SessionManager()
+
+# Use persistent sessions directory within config directory
+sessions_dir = config_manager.config_dir / "sessions"
+session_manager = SessionManager(session_dir=sessions_dir)
+
 debug_manager = DebugManager()
 context_manager = ContextWindowManager()
 
@@ -152,6 +156,35 @@ class PullModelRequest(BaseModel):
 
 class TestOllamaConnectionRequest(BaseModel):
     base_url: str
+
+@app.get("/sessions")
+async def list_sessions():
+    """List all available sessions"""
+    try:
+        sessions = session_manager.list_sessions()
+        return {"sessions": sessions}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to list sessions: {str(e)}")
+
+@app.delete("/sessions/{session_id}")
+async def delete_session(session_id: str):
+    """Delete a session"""
+    try:
+        session_manager.cleanup_session(session_id)
+        return {"status": "success", "message": f"Session {session_id} deleted"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to delete session: {str(e)}")
+
+@app.get("/session/{session_id}")
+async def get_session(session_id: str):
+    """Get full session data"""
+    try:
+        session = session_manager.get_session(session_id)
+        if not session:
+            raise HTTPException(status_code=404, detail="Session not found")
+        return session
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get session: {str(e)}")
 
 @app.post("/upload", response_model=UploadResponse)
 async def upload_craig_zip(file: UploadFile = File(...)):
@@ -320,7 +353,7 @@ async def estimate_tokens(request: TokenEstimateRequest):
         is_cloud = request.llm_engine == "cloud"
 
         if is_cloud:
-            model = "gemini-2.0-flash-exp"
+            model = "gemini-2.5-flash"
             # Gemini pricing: $0.15 per 1M input tokens
             cost_per_token = 0.15 / 1_000_000
         else:
@@ -407,7 +440,7 @@ async def generate_notes(request: GenerateNotesRequest):
         # Analyze context window before generation
         is_cloud = request.llm_engine == "cloud"
         if is_cloud:
-            model_name = "gemini-2.0-flash-exp"
+            model_name = "gemini-2.5-flash"
         else:
             model_name = request.ollama_model or settings.get("ollama_model", "llama3.2")
 
@@ -445,10 +478,22 @@ async def generate_notes(request: GenerateNotesRequest):
         
         # DEBUG: Export LLM interaction (include raw response to show how tags were parsed)
         transcript_label = "Transcript" if current_language == "en" else "Transkript"
+        
+        # We try to reconstruct what the LLM client probably used, although the client now builds its own prompts.
+        # Ideally, the client should return the exact prompt used.
+        debug_prompt_display = f"{system_prompt}\n\n[PROMPT CONSTRUCTION HIDDEN - SEE CLIENT]\n\n{transcript_label}:\n{transcript}"
+
+        # If using structured prompt, the construction is different. We should probably just log the system prompt
+        # and transcript, but for now we'll stick to this or maybe show the full prompt if we could get it.
+        # Let's revert to showing the constructed prompt estimate for clarity in debugging.
+        from prompts import build_structured_prompt
+        if request.llm_engine == "cloud" or (request.llm_engine == "local" and ollama_client.is_model_available()):
+             debug_prompt_display = build_structured_prompt(system_prompt, transcript, current_language)
+
         debug_manager.export_llm_interaction(
             request.session_id,
             request.llm_engine,
-            f"{system_prompt}\n\n{transcript_label}:\n{transcript}",
+            debug_prompt_display,
             result.get("raw_response", summary),
             {
                 "language": current_language,
@@ -529,7 +574,7 @@ async def analyze_context(request: AnalyzeContextRequest):
         is_cloud = request.llm_engine == "cloud"
 
         if is_cloud:
-            model = "gemini-2.0-flash-exp"
+            model = "gemini-2.5-flash"
         else:
             model = request.ollama_model or settings.get("ollama_model", "llama3.2")
 

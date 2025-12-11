@@ -16,29 +16,27 @@ class SessionMetadata(BaseModel):
     All fields are lists limited to 5-8 most relevant items.
     """
     suggested_tags: List[str] = Field(
-        default_factory=list,
-        description="Activity types (combat, social, exploration, investigation, puzzle, travel) and tone (dramatic, comedic, tense, mystery, political)",
-        max_length=8
+        description="Array of 3-5 tags categorizing the session content. Choose from: Combat, Social, Exploration, Mystery, Puzzle, Roleplay, Investigation, Stealth, Magic, Travel, Shopping, Planning, Negotiation, or create similar specific tags. Example: ['Combat', 'Mystery', 'Social']",
+        min_length=3,
+        max_length=5
     )
     mentioned_characters: List[str] = Field(
-        default_factory=list,
-        description="Names of NPCs, characters, or entities mentioned multiple times",
-        max_length=8
+        description="Array of character names (both PCs and NPCs) that appeared or were mentioned. Use specific names from the transcript. Example: ['Elaria', 'GM']",
+        default_factory=list
     )
     mentioned_locations: List[str] = Field(
-        default_factory=list,
-        description="Place names mentioned in the session",
-        max_length=8
+        description="Array of specific location names visited or discussed. Example: ['Telodar', 'Forest Outpost']",
+        default_factory=list
     )
     session_tone: List[str] = Field(
-        default_factory=list,
-        description="Overall mood/tone descriptors",
-        max_length=8
+        description="Array of 1-3 adjectives describing the overall session atmosphere. Choose from: Tense, Humorous, Dark, Epic, Lighthearted, Dramatic, Mysterious, Action-Packed, Emotional, Casual. Example: ['Tense', 'Action-Packed']",
+        min_length=1,
+        max_length=3
     )
     key_events: List[str] = Field(
-        default_factory=list,
-        description="Major story beats or important occurrences",
-        max_length=8
+        description="Array of 3-5 brief descriptions of major events that occurred. Each should be a short phrase or sentence. Example: ['Defeated enemy scout', 'Gathered reinforcements', 'Planned assault on enemy camp']",
+        min_length=3,
+        max_length=5
     )
 
 

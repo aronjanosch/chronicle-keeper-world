@@ -37,7 +37,7 @@ class ContextWindowManager:
     # Context window limits in tokens
     LIMITS = {
         # Cloud models
-        "gemini-2.0-flash-exp": 1_000_000,
+        "gemini-2.5-flash": 1_000_000,
         "gemini-2.0-flash": 1_000_000,
         "gemini-1.5-pro": 2_000_000,
         "gemini-1.5-flash": 1_000_000,
@@ -74,7 +74,7 @@ class ContextWindowManager:
         Get the context window limit for a specific model.
 
         Args:
-            model: Model name (e.g., "llama3.2", "gemini-2.0-flash-exp")
+            model: Model name (e.g., "llama3.2", "gemini-2.5-flash")
             is_cloud: Whether this is a cloud model
 
         Returns:

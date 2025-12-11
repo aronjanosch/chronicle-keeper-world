@@ -15,7 +15,7 @@ import ollama
 
 from llm.base import BaseLLMClient
 from models import SummaryResponse, get_empty_metadata
-from prompts import build_enhanced_prompt
+from prompts import build_enhanced_prompt, build_structured_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -204,8 +204,8 @@ class OllamaClient(BaseLLMClient):
         if not self.ensure_model_ready():
             raise Exception("Ollama model not available")
 
-        # Build the enhanced prompt
-        full_prompt = build_enhanced_prompt(system_prompt, transcript, language)
+        # Build the structured prompt
+        full_prompt = build_structured_prompt(system_prompt, transcript, language)
 
         try:
             # Use ollama library with structured output
@@ -297,8 +297,8 @@ class OllamaClient(BaseLLMClient):
             Dictionary with token breakdown
         """
         # Build the full prompt to get accurate count
-        from prompts import build_enhanced_prompt
-        full_prompt = build_enhanced_prompt(system_prompt, transcript, "en")
+        from prompts import build_structured_prompt
+        full_prompt = build_structured_prompt(system_prompt, transcript, "en")
 
         total_tokens = self.estimate_tokens(full_prompt)
 

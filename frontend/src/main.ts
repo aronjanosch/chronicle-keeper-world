@@ -76,6 +76,7 @@ class ChronicleKeeperApp {
 
     // File upload
     document.getElementById('file-select-btn')?.addEventListener('click', () => this.selectFile());
+    document.getElementById('load-history-btn')?.addEventListener('click', () => this.showHistoryScreen());
     document.getElementById('debug-upload-btn')?.addEventListener('click', () => this.debugUpload());
     
     // Drag and drop
@@ -102,6 +103,7 @@ class ChronicleKeeperApp {
 
     // Navigation buttons
     document.getElementById('back-to-upload')?.addEventListener('click', () => this.showScreen('upload-screen'));
+    document.getElementById('back-to-upload-from-history')?.addEventListener('click', () => this.showScreen('upload-screen'));
     document.getElementById('continue-to-metadata')?.addEventListener('click', () => this.proceedToMetadata());
     document.getElementById('back-to-speakers')?.addEventListener('click', () => this.showScreen('speakers-screen'));
     document.getElementById('continue-to-processing')?.addEventListener('click', () => this.proceedToTranscription());
@@ -1388,6 +1390,163 @@ class ChronicleKeeperApp {
       console.error('Failed to get current metadata:', error);
     }
     return {};
+  }
+
+  private async showHistoryScreen() {
+    this.showScreen('history-screen');
+    await this.loadSessions();
+  }
+
+  private async loadSessions() {
+    const listContainer = document.getElementById('sessions-list');
+    if (!listContainer) return;
+
+    listContainer.innerHTML = '<div class="loading-spinner">Loading sessions...</div>';
+
+    try {
+      const response = await window.fetch(`${API_BASE_URL}/sessions`);
+      if (response.ok) {
+        const data = await response.json();
+        this.renderSessionsList(data.sessions);
+      } else {
+        listContainer.innerHTML = '<div class="error-message">Failed to load sessions.</div>';
+      }
+    } catch (error) {
+      console.error('Failed to load sessions:', error);
+      listContainer.innerHTML = '<div class="error-message">Network error loading sessions.</div>';
+    }
+  }
+
+  private renderSessionsList(sessions: any[]) {
+    const listContainer = document.getElementById('sessions-list');
+    if (!listContainer) return;
+
+    if (sessions.length === 0) {
+      listContainer.innerHTML = '<div class="empty-state">No saved sessions found.</div>';
+      return;
+    }
+
+    listContainer.innerHTML = '';
+
+    sessions.forEach(session => {
+      const date = session.session_date || (session.created_at ? new Date(session.created_at).toLocaleDateString() : 'Unknown Date');
+      const time = session.created_at ? new Date(session.created_at).toLocaleTimeString() : '';
+      const title = session.campaign_name 
+        ? `${session.campaign_name} - Session ${session.session_number || '?'}`
+        : `Session ${session.id.substring(0, 8)}`;
+      
+      const item = document.createElement('div');
+      item.className = 'session-item';
+      item.innerHTML = `
+        <div class="session-header">
+          <div class="session-title">${title}</div>
+          <div class="session-date">${date} ${time}</div>
+        </div>
+        <div class="session-meta">
+          <span>Tracks: ${session.track_count || 0}</span>
+          ${session.summary_preview ? '<span>• Has Summary</span>' : ''}
+        </div>
+        ${session.summary_preview ? `<div class="session-preview">${session.summary_preview}</div>` : ''}
+      `;
+      
+      item.addEventListener('click', () => this.loadSession(session.id));
+      listContainer.appendChild(item);
+    });
+  }
+
+  private async loadSession(sessionId: string) {
+    this.showProcessingStatus('Loading session...', 'loading'); // Reusing processing status might not be visible if not on that screen, but okay.
+    // Better to show a global loader or just update the UI state.
+    
+    try {
+      const response = await window.fetch(`${API_BASE_URL}/session/${sessionId}`);
+      if (response.ok) {
+        const sessionData = await response.json();
+        
+        // Restore state
+        this.currentSessionId = sessionData.id;
+        this.tracks = sessionData.tracks || [];
+        this.speakerMappings = sessionData.speaker_mapping || {};
+        this.generatedNotes = sessionData.summary || '';
+
+        // Determine where to go
+        if (sessionData.transcript) {
+          // If transcript exists, go to Summarization Settings (Step 5)
+          // We need to ensure metadata is loaded into the form fields just in case they go back
+          await this.populateMetadataForm(sessionData.session_metadata);
+          
+          // Also render tracks/speakers in background just in case
+          this.renderTracks();
+          this.restoreSpeakerMappings(sessionData.speaker_mapping);
+          
+          // Proceed to summarization
+          this.showStatus('notification', 'Session loaded! Ready to summarize.', 'success');
+          await this.loadSummarizationSettings();
+          this.showScreen('summarization-screen');
+        } else {
+          // If no transcript, go to Transcription Settings (Step 4)
+          await this.populateMetadataForm(sessionData.session_metadata);
+          this.renderTracks();
+          this.restoreSpeakerMappings(sessionData.speaker_mapping);
+          
+          this.showStatus('notification', 'Session loaded! Ready to transcribe.', 'success');
+          await this.loadTranscriptionSettings();
+          this.showScreen('transcription-screen');
+        }
+
+      } else {
+        this.showStatus('notification', 'Failed to load session details', 'error');
+      }
+    } catch (error) {
+      console.error('Failed to load session:', error);
+      this.showStatus('notification', 'Error loading session', 'error');
+    }
+  }
+
+  private async populateMetadataForm(metadata: any) {
+    if (!metadata) return;
+    
+    (document.getElementById('session-date') as HTMLInputElement).value = metadata.session_date || '';
+    (document.getElementById('session-number') as HTMLInputElement).value = metadata.session_number || '';
+    (document.getElementById('campaign-name') as HTMLInputElement).value = metadata.campaign_name || '';
+    (document.getElementById('session-locations') as HTMLInputElement).value = (metadata.locations || []).join(', ');
+    (document.getElementById('characters-present') as HTMLInputElement).value = (metadata.characters_present || []).join(', ');
+    (document.getElementById('session-tags') as HTMLInputElement).value = (metadata.tags || []).join(', ');
+    (document.getElementById('session-notes') as HTMLTextAreaElement).value = metadata.notes || '';
+  }
+
+  private restoreSpeakerMappings(mappings: any) {
+    if (!mappings) return;
+    
+    // We need to wait for renderTracks to finish DOM updates if we were async, 
+    // but renderTracks is synchronous.
+    
+    Object.entries(mappings).forEach(([trackId, info]: [string, any]) => {
+      // Handle both old format (string) and new format (object)
+      const player = typeof info === 'string' ? info : info.playerName;
+      const character = typeof info === 'object' ? info.characterName : '';
+      const pronouns = typeof info === 'object' ? info.pronouns : '';
+
+      const playerInput = document.querySelector(`.player-name-input[data-track-id="${trackId}"]`) as HTMLInputElement;
+      if (playerInput) playerInput.value = player || '';
+
+      const charInput = document.querySelector(`.character-name-input[data-track-id="${trackId}"]`) as HTMLInputElement;
+      if (charInput) charInput.value = character || '';
+
+      const pronounsSelect = document.querySelector(`.pronouns-select[data-track-id="${trackId}"]`) as HTMLSelectElement;
+      if (pronounsSelect && pronouns) {
+        if (['he/him', 'she/her', 'they/them'].includes(pronouns)) {
+          pronounsSelect.value = pronouns;
+        } else {
+          pronounsSelect.value = 'custom';
+          const customInput = document.querySelector(`.pronouns-custom-input[data-track-id="${trackId}"]`) as HTMLInputElement;
+          if (customInput) {
+            customInput.classList.remove('hidden');
+            customInput.value = pronouns;
+          }
+        }
+      }
+    });
   }
 }
 

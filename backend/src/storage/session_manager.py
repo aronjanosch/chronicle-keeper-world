@@ -197,15 +197,21 @@ class SessionManager:
             try:
                 with open(session_file, 'r', encoding='utf-8') as f:
                     session_data = json.load(f)
+                    # Extract useful metadata for list view
+                    meta = session_data.get("session_metadata", {})
                     sessions.append({
                         "id": session_data["id"],
                         "created_at": session_data.get("created_at"),
-                        "track_count": len(session_data.get("tracks", []))
+                        "track_count": len(session_data.get("tracks", [])),
+                        "session_date": meta.get("session_date"),
+                        "session_number": meta.get("session_number"),
+                        "campaign_name": meta.get("campaign_name"),
+                        "summary_preview": (session_data.get("summary") or "")[:100] + "..." if session_data.get("summary") else None
                     })
             except (json.JSONDecodeError, KeyError):
                 continue
 
-        return sorted(sessions, key=lambda x: x["created_at"], reverse=True)
+        return sorted(sessions, key=lambda x: x["created_at"] or "", reverse=True)
 
     def generate_obsidian_content(self, session_id: str, summary: str, config_manager) -> str:
         """

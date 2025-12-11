@@ -16,7 +16,7 @@ A cross-platform desktop application that generates structured D&D session notes
 - **Frontend**: Tauri desktop application (TypeScript/HTML/CSS)
 - **Backend**: Python FastAPI server with audio processing and LLM integration
 - **Local LLM**: Ollama with llama3.2 model
-- **Cloud LLM**: Google Gemini API (gemini-2.0-flash-exp)
+- **Cloud LLM**: Google Gemini API (gemini-2.5-flash)
 
 ## Prerequisites
 

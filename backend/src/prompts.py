@@ -75,21 +75,21 @@ METADATA_JSON_STRUCTURE = {
 
 METADATA_GUIDELINES: Dict[str, str] = {
     "en": """Metadata guidelines:
-- suggested_tags: Activity types (combat, social, exploration, investigation, puzzle, travel) and tone (dramatic, comedic, tense, mystery, political)
-- mentioned_characters: Names of NPCs, characters, or entities mentioned multiple times
-- mentioned_locations: Place names mentioned in the session
-- session_tone: Overall mood/tone descriptors
-- key_events: Major story beats or important occurrences
+- suggested_tags: REQUIRED. List 3-5 tags. E.g., "Combat", "Social", "Exploration", "Mystery".
+- mentioned_characters: List important PCs and NPCs. Use specific names.
+- mentioned_locations: List specific locations visited or mentioned.
+- session_tone: REQUIRED. List 1-3 mood descriptors. E.g., "Tense", "Humorous", "Dark".
+- key_events: REQUIRED. List 3-5 short bullet points of major events.
 
-Only include items that are clearly mentioned and significant. Limit each array to 5-8 most relevant items.""",
+Ensure ALL required fields are populated. Do not return empty lists for tags, tone, or events.""",
     "de": """Metadaten-Richtlinien:
-- suggested_tags: Aktivitätstypen (Kampf, sozial, Erkundung, Ermittlung, Rätsel, Reise) und Stimmung (dramatisch, komisch, angespannt, mysteriös, politisch)
-- mentioned_characters: Namen von NPCs, Charakteren oder Entitäten, die mehrfach erwähnt werden
-- mentioned_locations: Ortsnamen, die in der Sitzung erwähnt werden
-- session_tone: Gesamtstimmungs-/Tonbeschreibungen
-- key_events: Wichtige Handlungsmomente oder wichtige Ereignisse
+- suggested_tags: ERFORDERLICH. Liste 3-5 Tags. Z.B. "Kampf", "Sozial", "Erkundung", "Mysterium".
+- mentioned_characters: Liste wichtige SCs und NSCs. Verwende spezifische Namen.
+- mentioned_locations: Liste spezifische besuchte oder erwähnte Orte.
+- session_tone: ERFORDERLICH. Liste 1-3 Stimmungsbeschreibungen. Z.B. "Angespannt", "Humorvoll", "Düster".
+- key_events: ERFORDERLICH. Liste 3-5 kurze Stichpunkte zu Hauptereignissen.
 
-Nur Elemente einbeziehen, die klar erwähnt und bedeutsam sind. Jedes Array auf 5-8 relevanteste Elemente begrenzen."""
+Stelle sicher, dass ALLE erforderlichen Felder ausgefüllt sind. Gib KEINE leeren Listen für Tags, Stimmung oder Ereignisse zurück."""
 }
 
 def get_metadata_guidelines(language: str = "en") -> str:
@@ -140,6 +140,11 @@ ENHANCED_INSTRUCTIONS_TEXT: Dict[str, str] = {
         "step3": "3. Füge dann den JSON-Metadatenblock hinzu",
         "step4": "4. Weiche NICHT von dieser Struktur ab"
     }
+}
+
+STRUCTURED_OUTPUT_INSTRUCTIONS: Dict[str, str] = {
+    "en": "Analyze the transcript and generate a structured summary. You MUST populate the metadata lists. 'suggested_tags', 'session_tone', and 'key_events' CANNOT be empty. If you are unsure, infer the best options from the context.",
+    "de": "Analysiere das Transkript und erstelle eine strukturierte Zusammenfassung. Du MUSST die Metadaten-Listen füllen. 'suggested_tags', 'session_tone' und 'key_events' DÜRFEN NICHT leer sein. Wenn du unsicher bist, leite die besten Optionen aus dem Kontext ab."
 }
 
 def get_enhanced_instructions(language: str = "en") -> str:
@@ -215,6 +220,9 @@ def get_available_languages() -> Dict[str, str]:
 def build_enhanced_prompt(base_prompt: str, transcript: str, language: str = "en") -> str:
     """
     Build the full enhanced prompt with format instructions and metadata guidelines.
+    
+    NOTE: This is for text-based generation where the model outputs text + separator + JSON.
+    Do NOT use this for native structured output (JSON schema).
 
     Args:
         base_prompt: The base system prompt
@@ -228,6 +236,35 @@ def build_enhanced_prompt(base_prompt: str, transcript: str, language: str = "en
     return f"""{base_prompt}
 
 {get_enhanced_instructions(language)}
+
+{transcript_label}
+{transcript}"""
+
+
+def build_structured_prompt(base_prompt: str, transcript: str, language: str = "en") -> str:
+    """
+    Build a prompt specifically for native structured output (JSON schema).
+    
+    This avoids conflicting formatting instructions (like separators) that confuse
+    models when JSON schema enforcement is active.
+
+    Args:
+        base_prompt: The base system prompt
+        transcript: The session transcript to analyze
+        language: Language code (en, de)
+
+    Returns:
+        Prompt string optimized for structured output
+    """
+    transcript_label = TRANSCRIPT_LABELS.get(language, TRANSCRIPT_LABELS["en"])
+    instructions = STRUCTURED_OUTPUT_INSTRUCTIONS.get(language, STRUCTURED_OUTPUT_INSTRUCTIONS["en"])
+    metadata_guidelines = get_metadata_guidelines(language)
+    
+    return f"""{base_prompt}
+
+{instructions}
+
+{metadata_guidelines}
 
 {transcript_label}
 {transcript}"""
