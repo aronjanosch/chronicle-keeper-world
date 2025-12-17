@@ -112,6 +112,7 @@ class ExportRequest(BaseModel):
 
 class SettingsModel(BaseModel):
     gemini_api_key: Optional[str] = None
+    gemini_model: Optional[str] = "gemini-2.0-flash-exp"
     llm_preference: str = "local"
     language: str = "en"
     transcription_language: Optional[str] = "auto"
@@ -353,7 +354,7 @@ async def estimate_tokens(request: TokenEstimateRequest):
         is_cloud = request.llm_engine == "cloud"
 
         if is_cloud:
-            model = "gemini-2.5-flash"
+            model = settings.get("gemini_model", "gemini-2.0-flash-exp")
             # Gemini pricing: $0.15 per 1M input tokens
             cost_per_token = 0.15 / 1_000_000
         else:
@@ -464,7 +465,8 @@ async def generate_notes(request: GenerateNotesRequest):
 
         # Generate summary and metadata using selected LLM
         if request.llm_engine == "cloud":
-            gemini_client = GeminiClient(settings.get("gemini_api_key"))
+            gemini_model = settings.get("gemini_model", "gemini-2.0-flash-exp")
+            gemini_client = GeminiClient(settings.get("gemini_api_key"), model_name=gemini_model)
             result = gemini_client.generate_summary_with_metadata(transcript, system_prompt, current_language)
         else:
             # Allow per-request override of Ollama model; fall back to saved settings
@@ -633,6 +635,7 @@ async def get_settings():
         "whisper_model": config_manager.get_whisper_model(),
         "system_prompt": config_manager.get_current_prompt(),
         "has_gemini_key": bool(settings.get("gemini_api_key")),
+        "gemini_model": settings.get("gemini_model", "gemini-2.0-flash-exp"),
         "ollama_model": settings.get("ollama_model", "llama3.2"),
         "ollama_base_url": config_manager.get_ollama_base_url(),
         "available_languages": config_manager.get_available_languages(),
@@ -648,6 +651,7 @@ async def update_settings(settings: SettingsModel):
     try:
         updates = {
             "gemini_api_key": settings.gemini_api_key,
+            "gemini_model": settings.gemini_model,
             "llm_preference": settings.llm_preference,
             "language": settings.language,
             "transcription_language": settings.transcription_language,
@@ -826,7 +830,8 @@ async def analyze_metadata(request: AnalyzeMetadataRequest):
         
         # Analyze metadata using selected LLM
         if request.llm_engine == "cloud":
-            gemini_client = GeminiClient(settings.get("gemini_api_key"))
+            gemini_model = settings.get("gemini_model", "gemini-2.0-flash-exp")
+            gemini_client = GeminiClient(settings.get("gemini_api_key"), model_name=gemini_model)
             metadata_suggestions = gemini_client.analyze_metadata(transcript, current_language)
         else:
             ollama_model = settings.get("ollama_model", "llama3.2")

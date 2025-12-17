@@ -132,6 +132,9 @@ DEFAULT_OLLAMA_MODEL = "llama3.2"
 # Default Ollama base URL
 DEFAULT_OLLAMA_BASE_URL = "http://127.0.0.1:11434"
 
+# Default Gemini model
+DEFAULT_GEMINI_MODEL = "gemini-2.0-flash-exp"
+
 # ============================================================================
 # TIMEOUT VALUES
 # ============================================================================

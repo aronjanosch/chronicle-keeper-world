@@ -15,6 +15,7 @@ interface UploadResponse {
 
 interface Settings {
   gemini_api_key?: string;
+  gemini_model?: string;
   system_prompt?: string;
   llm_preference?: 'local' | 'cloud';
   language?: string;
@@ -136,6 +137,7 @@ class ChronicleKeeperApp {
         const settings: Settings = await response.json();
 
         const apiKeyInput = document.getElementById('gemini-api-key') as HTMLInputElement;
+        const geminiModelInput = document.getElementById('gemini-model') as HTMLInputElement;
         const promptInput = document.getElementById('system-prompt') as HTMLTextAreaElement;
         const languageSelect = document.getElementById('language-select') as HTMLSelectElement;
         const ollamaBaseUrlInput = document.getElementById('ollama-base-url') as HTMLInputElement;
@@ -155,8 +157,21 @@ class ChronicleKeeperApp {
           languageSelect.value = settings.language;
         }
 
-        if (apiKeyInput && settings.gemini_api_key) {
-          apiKeyInput.value = settings.gemini_api_key;
+        // Update API key input placeholder to indicate if key exists
+        // Backend doesn't return the actual key for security, only a boolean
+        if (apiKeyInput) {
+          const hasKey = (settings as any).has_gemini_key;
+          if (hasKey) {
+            apiKeyInput.placeholder = '••••••••••••••••••••••••••••••• (saved)';
+          } else {
+            apiKeyInput.placeholder = 'Enter your Gemini API key';
+          }
+          // Leave the input empty - user can enter a new key if they want to change it
+          apiKeyInput.value = '';
+        }
+
+        if (geminiModelInput && settings.gemini_model) {
+          geminiModelInput.value = settings.gemini_model;
         }
 
         if (promptInput && settings.system_prompt) {
@@ -187,18 +202,36 @@ class ChronicleKeeperApp {
 
   private async saveSettings() {
     const apiKeyInput = document.getElementById('gemini-api-key') as HTMLInputElement;
+    const geminiModelInput = document.getElementById('gemini-model') as HTMLInputElement;
     const promptInput = document.getElementById('system-prompt') as HTMLTextAreaElement;
     const languageSelect = document.getElementById('language-select') as HTMLSelectElement;
     const ollamaBaseUrlInput = document.getElementById('ollama-base-url') as HTMLInputElement;
 
-    const settings: Settings = {
-      gemini_api_key: apiKeyInput.value,
-      system_prompt: promptInput.value,
-      language: languageSelect.value,
-      ollama_base_url: ollamaBaseUrlInput.value
-    };
-
     try {
+      // Fetch current settings to preserve values we don't want to overwrite
+      const currentResponse = await window.fetch(`${API_BASE_URL}/settings`);
+      if (!currentResponse.ok) {
+        this.showStatus('notification', 'Failed to load current settings', 'error');
+        return;
+      }
+      const currentSettings: Settings = await currentResponse.json();
+
+      // Build updated settings, preserving API key if input is empty
+      const settings: Settings = {
+        system_prompt: promptInput.value,
+        language: languageSelect.value,
+        gemini_model: geminiModelInput.value || 'gemini-2.0-flash-exp',
+        ollama_base_url: ollamaBaseUrlInput.value
+      };
+
+      // Only update API key if the user entered something
+      // Otherwise keep the existing one from backend
+      if (apiKeyInput.value.trim()) {
+        settings.gemini_api_key = apiKeyInput.value.trim();
+      } else if (currentSettings.gemini_api_key) {
+        settings.gemini_api_key = currentSettings.gemini_api_key;
+      }
+
       const response = await window.fetch(`${API_BASE_URL}/settings`, {
         method: 'POST',
         headers: {

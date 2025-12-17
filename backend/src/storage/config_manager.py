@@ -24,6 +24,7 @@ from src.constants import (
     AVAILABLE_TRANSCRIPTION_LANGUAGES,
     DEFAULT_OLLAMA_MODEL,
     DEFAULT_OLLAMA_BASE_URL,
+    DEFAULT_GEMINI_MODEL,
     DEFAULT_OBSIDIAN_FILENAME_PATTERN
 )
 
@@ -66,6 +67,7 @@ class ConfigManager:
         """Save default configuration"""
         default_config = {
             "gemini_api_key": "",
+            "gemini_model": DEFAULT_GEMINI_MODEL,
             "llm_preference": "local",
             "language": "en",
             "transcription_language": "auto",

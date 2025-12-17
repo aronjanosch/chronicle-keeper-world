@@ -278,7 +278,7 @@
               </label>
             </div>
           </div>
-          <button id="generate-notes-btn" class="primary-button large-button">🔄 Start Transcription & Summarization</button>
+          <button id="generate-notes-btn" class="primary-button large-button">Start Summarization</button>
           <div id="processing-status" class="processing-status hidden"></div>
           <div class="screen-actions">
             <button id="back-to-transcription" class="secondary-button">← Back</button>
@@ -372,6 +372,16 @@
             <div class="setting-group">
               <label for="gemini-api-key">Gemini API Key:</label>
               <input type="password" id="gemini-api-key" placeholder="Enter your Gemini API key">
+              <p style="font-size: 0.9em; color: #666; margin: 0.5rem 0;">
+                Leave empty to keep your existing API key. Only enter a value if you want to change it.
+              </p>
+            </div>
+            <div class="setting-group">
+              <label for="gemini-model">Gemini Model:</label>
+              <input type="text" id="gemini-model" class="form-input" placeholder="gemini-2.0-flash-exp">
+              <p style="font-size: 0.9em; color: #666; margin: 0.5rem 0;">
+                Enter the Gemini model name (e.g., gemini-2.0-flash-exp, gemini-1.5-pro, gemini-1.5-flash)
+              </p>
             </div>
             <div class="setting-group">
               <label for="language-select">UI Language / Sprache:</label>
