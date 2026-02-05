@@ -1,0 +1,353 @@
+"""Session folder utilities."""
+
+from __future__ import annotations
+
+import json
+import shutil
+from datetime import datetime
+from pathlib import Path
+from typing import Any
+from uuid import uuid4
+
+from app.storage.config import (
+    get_campaign,
+    get_campaigns,
+    get_config,
+    increment_session_number,
+    update_campaign,
+)
+
+
+STAGING_DIR_NAME = "_sessions"
+
+
+def get_output_root() -> Path:
+    """Return output root folder."""
+    config = get_config()
+    return Path(config["output_root"]).expanduser()
+
+
+def ensure_output_root() -> Path:
+    """Ensure output root exists."""
+    output_root = get_output_root()
+    output_root.mkdir(parents=True, exist_ok=True)
+    return output_root
+
+
+def get_staging_root() -> Path:
+    """Return staging root for new sessions."""
+    output_root = ensure_output_root()
+    staging_root = output_root / STAGING_DIR_NAME
+    staging_root.mkdir(parents=True, exist_ok=True)
+    return staging_root
+
+
+def _sanitize_folder_name(name: str) -> str:
+    return name.replace("/", "_").replace("\\", "_").replace(":", "_").replace(" ", "_")
+
+
+def create_session(session_id: str | None = None) -> dict[str, Any]:
+    """Create a new session folder and session.json."""
+    output_root = ensure_output_root()
+    session_id = session_id or str(uuid4())
+    session_path = get_staging_root() / session_id
+    session_path.mkdir(parents=True, exist_ok=True)
+
+    session_data = {
+        "session_id": session_id,
+        "session_path": str(session_path),
+        "tracks": [],
+        "speakers": [],
+        "transcription": {},
+        "summary": {},
+        "metadata": {},
+    }
+    _write_session_file(session_path, session_data)
+    return session_data
+
+
+def create_campaign_session(
+    campaign_id: str,
+    session_number: int | None = None,
+    title: str | None = None,
+    date: str | None = None,
+) -> dict[str, Any]:
+    """Create a session under a campaign folder."""
+    campaign = get_campaign(campaign_id)
+    if not campaign:
+        raise FileNotFoundError(f"Campaign not found: {campaign_id}")
+
+    if session_number is None:
+        session_number = int(campaign.get("next_session_number", 1))
+        increment_session_number(campaign_id)
+    else:
+        current_next = int(campaign.get("next_session_number", 1))
+        if session_number >= current_next:
+            update_campaign(
+                campaign_id,
+                {"next_session_number": int(session_number) + 1},
+            )
+
+    session = create_session()
+    set_campaign_metadata(
+        session_id=session["session_id"],
+        campaign_id=campaign_id,
+        session_number=session_number,
+        title=title,
+        date=date,
+    )
+    return load_session(session["session_id"])
+
+
+def _session_file_path(session_path: Path) -> Path:
+    return session_path / "session.json"
+
+
+def _write_session_file(session_path: Path, data: dict[str, Any]) -> None:
+    session_file = _session_file_path(session_path)
+    session_file.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def load_session(session_id: str) -> dict[str, Any]:
+    """Load session data from session.json."""
+    session_path = get_session_path(session_id)
+    session_file = _session_file_path(session_path)
+    if not session_file.exists():
+        raise FileNotFoundError(f"Session not found: {session_id}")
+    return json.loads(session_file.read_text(encoding="utf-8"))
+
+
+def save_session(session_id: str, data: dict[str, Any]) -> None:
+    """Persist session data."""
+    session_path = get_session_path(session_id)
+    _write_session_file(session_path, data)
+
+
+def update_session(session_id: str, updates: dict[str, Any]) -> dict[str, Any]:
+    """Update session data and return it."""
+    data = load_session(session_id)
+    data.update(updates)
+    save_session(session_id, data)
+    return data
+
+
+def set_campaign_metadata(
+    session_id: str,
+    campaign_id: str | None = None,
+    session_number: int | None = None,
+    title: str | None = None,
+    date: str | None = None,
+) -> dict[str, Any]:
+    """Set campaign/session metadata for a session."""
+    data = load_session(session_id)
+    campaign_name = None
+    if campaign_id:
+        for campaign in get_campaigns():
+            if campaign.get("campaign_id") == campaign_id:
+                campaign_name = campaign.get("name")
+                break
+
+    data["campaign"] = {
+        "campaign_id": campaign_id,
+        "campaign_name": campaign_name,
+        "session_number": session_number,
+        "title": title,
+        "date": date,
+    }
+    data = _relocate_session_folder(session_id, data)
+    return data["campaign"]
+
+
+def get_session_path(session_id: str) -> Path:
+    """Get session path from output root."""
+    session_path = _find_session_path(session_id)
+    if not session_path:
+        raise FileNotFoundError(f"Session not found: {session_id}")
+    return session_path
+
+
+def _find_session_path(session_id: str) -> Path | None:
+    staging_path = get_staging_root() / session_id
+    session_file = _session_file_path(staging_path)
+    if session_file.exists():
+        try:
+            data = json.loads(session_file.read_text(encoding="utf-8"))
+            if data.get("session_id") == session_id:
+                return staging_path
+        except json.JSONDecodeError:
+            pass
+
+    output_root = ensure_output_root()
+    for candidate in output_root.rglob("session.json"):
+        try:
+            data = json.loads(candidate.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            continue
+        if data.get("session_id") == session_id:
+            return candidate.parent
+    return None
+
+
+def _rewrite_session_paths(
+    data: dict[str, Any], old_path: Path, new_path: Path
+) -> dict[str, Any]:
+    def _rewrite(value: str | None) -> str | None:
+        if not value:
+            return value
+        path_value = Path(value)
+        if path_value.is_relative_to(old_path):
+            return str(new_path / path_value.relative_to(old_path))
+        return value
+
+    for track in data.get("tracks", []) or []:
+        track["file_path"] = _rewrite(track.get("file_path"))
+
+    transcription = data.get("transcription") or {}
+    transcription["json_path"] = _rewrite(transcription.get("json_path"))
+    transcription["text_path"] = _rewrite(transcription.get("text_path"))
+    data["transcription"] = transcription
+
+    summary = data.get("summary") or {}
+    summary["summary_path"] = _rewrite(summary.get("summary_path"))
+    data["summary"] = summary
+
+    data["session_path"] = str(new_path)
+    return data
+
+
+def _update_transcription_metadata(data: dict[str, Any], new_path: Path) -> None:
+    transcription = data.get("transcription") or {}
+    json_path = transcription.get("json_path")
+    if not json_path:
+        return
+    json_file = Path(json_path)
+    if not json_file.exists():
+        return
+    try:
+        payload = json.loads(json_file.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return
+    metadata = payload.get("metadata") or {}
+    metadata["session_path"] = str(new_path)
+    payload["metadata"] = metadata
+    json_file.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _relocate_session_folder(session_id: str, data: dict[str, Any]) -> dict[str, Any]:
+    campaign = data.get("campaign") or {}
+    campaign_id = campaign.get("campaign_id")
+    session_number = campaign.get("session_number")
+    if not campaign_id or not session_number:
+        save_session(session_id, data)
+        return data
+
+    campaign_name = campaign.get("campaign_name") or campaign_id
+    safe_campaign = _sanitize_folder_name(campaign_name)
+    output_root = ensure_output_root()
+    target_path = output_root / safe_campaign / str(session_number)
+
+    current_path = get_session_path(session_id)
+    if current_path == target_path:
+        data["session_path"] = str(target_path)
+        save_session(session_id, data)
+        return data
+
+    if target_path.exists():
+        raise FileExistsError(
+            f"Target session folder already exists: {target_path}"
+        )
+
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    shutil.move(str(current_path), str(target_path))
+
+    data = _rewrite_session_paths(data, current_path, target_path)
+    _write_session_file(target_path, data)
+    _update_transcription_metadata(data, target_path)
+    return data
+
+
+def list_sessions() -> list[dict[str, Any]]:
+    """List all sessions with basic status info."""
+    sessions = []
+    output_root = ensure_output_root()
+    for session_file in output_root.rglob("session.json"):
+        if session_file.parent.name == "transcriptions":
+            continue
+        try:
+            data = json.loads(session_file.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            continue
+        transcription = data.get("transcription") or {}
+        summary = data.get("summary") or {}
+        sessions.append(
+            {
+                "session_id": data.get("session_id", session_file.parent.name),
+                "session_path": str(session_file.parent),
+                "has_transcription": bool(transcription.get("text_path")),
+                "has_summary": bool(summary.get("summary_path")),
+                "transcript_path": transcription.get("text_path"),
+                "summary_path": summary.get("summary_path"),
+            }
+        )
+    sessions.sort(key=lambda item: item["session_id"], reverse=True)
+    return sessions
+
+
+def list_campaign_sessions(campaign_id: str) -> list[dict[str, Any]]:
+    """List sessions for a campaign."""
+    sessions = []
+    output_root = ensure_output_root()
+    for session_file in output_root.rglob("session.json"):
+        if session_file.parent.name == "transcriptions":
+            continue
+        try:
+            data = json.loads(session_file.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            continue
+        campaign = data.get("campaign") or {}
+        if campaign.get("campaign_id") != campaign_id:
+            continue
+        transcription = data.get("transcription") or {}
+        summary = data.get("summary") or {}
+        sessions.append(
+            {
+                "session_id": data.get("session_id", session_file.parent.name),
+                "session_number": campaign.get("session_number"),
+                "title": campaign.get("title"),
+                "date": campaign.get("date"),
+                "has_transcription": bool(transcription.get("text_path")),
+                "has_summary": bool(summary.get("summary_path")),
+            }
+        )
+    sessions.sort(key=lambda item: item.get("session_number") or 0, reverse=True)
+    return sessions
+
+
+def list_transcripts(session_id: str) -> list[dict[str, Any]]:
+    """List transcript files for a session."""
+    session_path = get_session_path(session_id)
+    transcription_root = session_path / "transcriptions"
+    if not transcription_root.exists():
+        return []
+
+    transcripts: list[dict[str, Any]] = []
+    for transcript_path in transcription_root.glob("*/transcript.txt"):
+        try:
+            stat = transcript_path.stat()
+        except OSError:
+            continue
+        transcripts.append(
+            {
+                "transcript_path": str(transcript_path),
+                "provider_model": transcript_path.parent.name,
+                "modified_time": datetime.fromtimestamp(stat.st_mtime).isoformat(),
+            }
+        )
+    transcripts.sort(key=lambda item: item["modified_time"], reverse=True)
+    return transcripts
+
+
+def delete_session(session_id: str) -> None:
+    """Delete a session folder and data."""
+    session_path = get_session_path(session_id)
+    shutil.rmtree(session_path)

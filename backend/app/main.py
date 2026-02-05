@@ -1,0 +1,380 @@
+"""Chronicle Keeper API - simplified backend."""
+
+from __future__ import annotations
+
+import tempfile
+from pathlib import Path
+
+import fastapi
+from fastapi.middleware.cors import CORSMiddleware
+
+from app.models import (
+    CampaignDetail,
+    CampaignInfo,
+    CampaignSessionInfo,
+    CampaignUpdateRequest,
+    CampaignsResponse,
+    ConfigResponse,
+    CreateCampaignRequest,
+    CreateCampaignSessionRequest,
+    EstimateTokensRequest,
+    EstimateTokensResponse,
+    ExportRequest,
+    ExportResponse,
+    LabelSpeakersRequest,
+    LabelSpeakersResponse,
+    NextSessionNumberResponse,
+    SessionInfo,
+    SessionMetadataRequest,
+    SummarizeRequest,
+    SummarizeResponse,
+    TranscriptInfo,
+    TranscribeRequest,
+    TranscribeResponse,
+    UpdateConfigRequest,
+    UploadResponse,
+)
+from app.services.campaigns import (
+    create_campaign,
+    get_campaign_detail,
+    list_campaigns,
+    next_session_number,
+    update_campaign,
+)
+from app.services.context_window import ContextWindowAnalyzer
+from app.services.export import export_session
+from app.services.sessions import (
+    create_campaign_session,
+    delete_session,
+    load_session,
+    list_campaign_sessions,
+    list_sessions,
+    list_transcripts,
+    save_session,
+    set_campaign_metadata,
+)
+from app.services.summarization import SummarizationError, summarize_session
+from app.services.transcribe import transcribe_session
+from app.services.transcription import get_available_providers
+from app.services.upload import extract_craig_zip
+from app.storage.config import get_config, increment_session_number, update_config
+
+
+app = fastapi.FastAPI(
+    title="Chronicle Keeper API",
+    description="Simplified backend for D&D session processing",
+    version="0.1.0",
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+@app.post("/upload", response_model=UploadResponse)
+async def upload_craig_zip(
+    file: fastapi.UploadFile = fastapi.File(...),
+    session_id: str | None = fastapi.Form(default=None),
+):
+    """Upload and extract a Craig Bot ZIP file."""
+    temp_path = None
+    try:
+        suffix = Path(file.filename or "upload.zip").suffix or ".zip"
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+            temp_path = tmp.name
+            tmp.write(await file.read())
+
+        result = extract_craig_zip(Path(temp_path), session_id=session_id)
+        return UploadResponse(**result)
+    except ValueError as exc:
+        raise fastapi.HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        raise fastapi.HTTPException(status_code=500, detail=str(exc))
+    finally:
+        if temp_path:
+            Path(temp_path).unlink(missing_ok=True)
+
+
+@app.post("/label-speakers", response_model=LabelSpeakersResponse)
+def label_speakers(request: LabelSpeakersRequest):
+    """Save speaker labels for a session."""
+    try:
+        session = load_session(request.session_id)
+        session["speakers"] = [speaker.model_dump() for speaker in request.speakers]
+        save_session(request.session_id, session)
+        return LabelSpeakersResponse(
+            session_id=request.session_id,
+            speakers=request.speakers,
+        )
+    except FileNotFoundError as exc:
+        raise fastapi.HTTPException(status_code=404, detail=str(exc))
+    except Exception as exc:
+        raise fastapi.HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/session-metadata")
+def update_session_metadata(request: SessionMetadataRequest):
+    """Update session metadata (campaign, title, date)."""
+    try:
+        session_number = request.session_number
+        should_increment = False
+        if request.campaign_id and session_number is None:
+            session_number = next_session_number(request.campaign_id)
+            should_increment = True
+
+        campaign = set_campaign_metadata(
+            session_id=request.session_id,
+            campaign_id=request.campaign_id,
+            session_number=session_number,
+            title=request.title,
+            date=request.date,
+        )
+        if should_increment and request.campaign_id:
+            increment_session_number(request.campaign_id)
+        return {"status": "success", "campaign": campaign}
+    except FileNotFoundError as exc:
+        raise fastapi.HTTPException(status_code=404, detail=str(exc))
+    except Exception as exc:
+        raise fastapi.HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/transcribe", response_model=TranscribeResponse)
+def transcribe(request: TranscribeRequest):
+    """Transcribe session tracks using WhisperX."""
+    try:
+        result = transcribe_session(
+            session_id=request.session_id,
+            language=request.language,
+            model=request.model,
+            hf_token=request.hf_token,
+        )
+        return TranscribeResponse(**result)
+    except FileNotFoundError as exc:
+        raise fastapi.HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        raise fastapi.HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/estimate-tokens", response_model=EstimateTokensResponse)
+def estimate_tokens(request: EstimateTokensRequest):
+    """Analyze context window usage for a transcript."""
+    analyzer = ContextWindowAnalyzer()
+    prompt = request.system_prompt or ""
+    result = analyzer.analyze(
+        transcript=request.transcript,
+        prompt=prompt,
+        model=request.model,
+        is_cloud=request.is_cloud,
+    )
+    return EstimateTokensResponse(**result)
+
+
+@app.post("/summarize", response_model=SummarizeResponse)
+def summarize(request: SummarizeRequest):
+    """Summarize a session transcript."""
+    try:
+        result = summarize_session(
+            session_id=request.session_id,
+            transcript_path=request.transcript_path,
+            output_path=request.output_path,
+            title=request.title,
+            context=request.context,
+            provider=request.provider,
+            model=request.model,
+            base_url=request.base_url,
+        )
+        return SummarizeResponse(
+            summary=result.summary,
+            provider=result.provider,
+            model=result.model,
+            summary_path=result.summary_path,
+            metadata=result.metadata,
+        )
+    except FileNotFoundError as exc:
+        raise fastapi.HTTPException(status_code=400, detail=str(exc))
+    except SummarizationError as exc:
+        raise fastapi.HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/export", response_model=ExportResponse)
+def export_notes(request: ExportRequest):
+    """Export session notes to markdown."""
+    try:
+        result = export_session(
+            session_id=request.session_id,
+            use_obsidian_format=request.use_obsidian_format,
+            custom_filename=request.custom_filename,
+        )
+        return ExportResponse(
+            content=result["content"],
+            filename=result["filename"],
+            use_obsidian_format=result["use_obsidian_format"],
+        )
+    except FileNotFoundError as exc:
+        raise fastapi.HTTPException(status_code=404, detail=str(exc))
+    except ValueError as exc:
+        raise fastapi.HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        raise fastapi.HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/config", response_model=ConfigResponse)
+def read_config():
+    config = get_config()
+    return ConfigResponse(
+        output_root=config["output_root"],
+        summary_provider=config["summary_provider"],
+        ollama_base_url=config["ollama_base_url"],
+        ollama_model=config["ollama_model"],
+        ollama_timeout_seconds=config["ollama_timeout_seconds"],
+        gemini_model=config["gemini_model"],
+        default_language=config["default_language"],
+        whisperx_model=config["whisperx_model"],
+        has_gemini_key=bool(config.get("gemini_api_key")),
+        has_hf_token=bool(config.get("hf_token")),
+    )
+
+
+@app.put("/config", response_model=ConfigResponse)
+def write_config(request: UpdateConfigRequest):
+    updated = update_config(request.model_dump(exclude_none=True))
+    return ConfigResponse(
+        output_root=updated["output_root"],
+        summary_provider=updated["summary_provider"],
+        ollama_base_url=updated["ollama_base_url"],
+        ollama_model=updated["ollama_model"],
+        ollama_timeout_seconds=updated["ollama_timeout_seconds"],
+        gemini_model=updated["gemini_model"],
+        default_language=updated["default_language"],
+        whisperx_model=updated["whisperx_model"],
+        has_gemini_key=bool(updated.get("gemini_api_key")),
+        has_hf_token=bool(updated.get("hf_token")),
+    )
+
+
+@app.get("/sessions", response_model=list[SessionInfo])
+def read_sessions():
+    return [SessionInfo(**item) for item in list_sessions()]
+
+
+@app.get("/session/{session_id}")
+def read_session(session_id: str):
+    try:
+        return load_session(session_id)
+    except FileNotFoundError as exc:
+        raise fastapi.HTTPException(status_code=404, detail=str(exc))
+
+
+@app.get("/session/{session_id}/metadata")
+def read_session_metadata(session_id: str):
+    try:
+        session = load_session(session_id)
+        return session.get("campaign", {})
+    except FileNotFoundError as exc:
+        raise fastapi.HTTPException(status_code=404, detail=str(exc))
+
+
+@app.get("/sessions/{session_id}/transcripts", response_model=list[TranscriptInfo])
+def read_session_transcripts(session_id: str):
+    try:
+        return [TranscriptInfo(**item) for item in list_transcripts(session_id)]
+    except FileNotFoundError as exc:
+        raise fastapi.HTTPException(status_code=404, detail=str(exc))
+
+
+@app.delete("/sessions/{session_id}")
+def remove_session(session_id: str):
+    try:
+        delete_session(session_id)
+        return {"status": "deleted", "session_id": session_id}
+    except FileNotFoundError as exc:
+        raise fastapi.HTTPException(status_code=404, detail=str(exc))
+    except Exception as exc:
+        raise fastapi.HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/providers")
+def read_providers():
+    return get_available_providers()
+
+
+@app.get("/campaigns", response_model=CampaignsResponse)
+def read_campaigns():
+    data = list_campaigns()
+    campaigns = [CampaignInfo(**item) for item in data["campaigns"]]
+    return CampaignsResponse(
+        campaigns=campaigns, current_campaign_id=data["current_campaign_id"]
+    )
+
+
+@app.get("/campaigns/{campaign_id}", response_model=CampaignDetail)
+def read_campaign_detail(campaign_id: str):
+    try:
+        campaign = get_campaign_detail(campaign_id)
+        return CampaignDetail(**campaign)
+    except KeyError as exc:
+        raise fastapi.HTTPException(status_code=404, detail=str(exc))
+
+
+@app.put("/campaigns/{campaign_id}", response_model=CampaignDetail)
+def update_campaign_detail(campaign_id: str, request: CampaignUpdateRequest):
+    try:
+        campaign = update_campaign(campaign_id, request.model_dump(exclude_none=True))
+        return CampaignDetail(**campaign)
+    except KeyError as exc:
+        raise fastapi.HTTPException(status_code=404, detail=str(exc))
+
+
+@app.get(
+    "/campaigns/{campaign_id}/sessions",
+    response_model=list[CampaignSessionInfo],
+)
+def read_campaign_sessions(campaign_id: str):
+    return [CampaignSessionInfo(**item) for item in list_campaign_sessions(campaign_id)]
+
+
+@app.post(
+    "/campaigns/{campaign_id}/sessions",
+    response_model=CampaignSessionInfo,
+)
+def create_campaign_session_route(
+    campaign_id: str, request: CreateCampaignSessionRequest
+):
+    try:
+        session = create_campaign_session(
+            campaign_id=campaign_id,
+            session_number=request.session_number,
+            title=request.title,
+            date=request.date,
+        )
+        campaign = session.get("campaign") or {}
+        transcription = session.get("transcription") or {}
+        summary = session.get("summary") or {}
+        return CampaignSessionInfo(
+            session_id=session.get("session_id"),
+            session_number=campaign.get("session_number"),
+            title=campaign.get("title"),
+            date=campaign.get("date"),
+            has_transcription=bool(transcription.get("text_path")),
+            has_summary=bool(summary.get("summary_path")),
+        )
+    except FileNotFoundError as exc:
+        raise fastapi.HTTPException(status_code=404, detail=str(exc))
+
+
+@app.post("/campaigns")
+def create_campaign_route(request: CreateCampaignRequest):
+    campaign = create_campaign(
+        request.campaign_id, request.name, request.start_session_number
+    )
+    return {"status": "success", "campaign": campaign}
+
+
+@app.get("/next-session-number", response_model=NextSessionNumberResponse)
+def read_next_session_number(campaign_id: str | None = None):
+    return NextSessionNumberResponse(
+        next_session_number=next_session_number(campaign_id)
+    )

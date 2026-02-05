@@ -1,0 +1,42 @@
+"""SQLite database helpers for configuration storage."""
+
+from __future__ import annotations
+
+import os
+from pathlib import Path
+import sqlite3
+
+
+DEFAULT_DB_FILENAME = "chronicle_keeper.db"
+
+SCHEMA_STATEMENTS = [
+    """
+    CREATE TABLE IF NOT EXISTS config (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+    )
+    """,
+]
+
+
+def get_db_path() -> Path:
+    """Return the database path for persistence."""
+    default_path = Path.cwd() / DEFAULT_DB_FILENAME
+    return Path(os.getenv("CK_DB_PATH", str(default_path)))
+
+
+def get_connection() -> sqlite3.Connection:
+    """Open a SQLite connection and initialize schema if needed."""
+    db_path = get_db_path()
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    connection = sqlite3.connect(db_path)
+    connection.row_factory = sqlite3.Row
+    ensure_schema(connection)
+    return connection
+
+
+def ensure_schema(connection: sqlite3.Connection) -> None:
+    """Ensure required tables exist."""
+    for statement in SCHEMA_STATEMENTS:
+        connection.execute(statement)
+    connection.commit()

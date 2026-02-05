@@ -2,420 +2,246 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="stylesheet" href="/src/styles.css" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Chronicle Keeper</title>
-    <script type="module" src="/src/main.ts" defer></script>
+    <link rel="stylesheet" href="styles.css" />
+    <script src="app.js" defer></script>
   </head>
-
   <body>
-    <div class="app-container">
-      <!-- Header -->
-      <header class="app-header">
-        <h1>Chronicle Keeper</h1>
-        <p class="subtitle">Generate TTRPG Session Notes from Discord Audio</p>
-        <button id="settings-btn" class="settings-button">⚙️ Settings</button>
-      </header>
-
-      <!-- Main Content Area -->
-      <main class="main-content">
-        <!-- Step 1: Upload -->
-        <section id="upload-screen" class="screen active">
-          <div class="step-header">
-            <h2>Step 1: Upload Craig Bot File</h2>
-            <p>Select your Craig Bot ZIP file containing the session audio tracks</p>
-          </div>
-          <div class="upload-area">
-            <div id="file-drop-zone" class="file-drop-zone">
-              <div class="drop-zone-content">
-                <span class="upload-icon">📁</span>
-                <p>Drag & drop your Craig Bot ZIP file here</p>
-                <p class="upload-or">or</p>
-                <button id="file-select-btn" class="primary-button">Select File</button>
-                <div class="secondary-actions">
-                  <button id="load-history-btn" class="secondary-button">📂 Load Previous Session</button>
-                  <button id="debug-upload-btn" class="secondary-button">🔧 Use Example Recording</button>
-                </div>
-              </div>
-            </div>
-            <div id="upload-status" class="upload-status hidden"></div>
-          </div>
-        </section>
-
-        <!-- History Screen -->
-        <section id="history-screen" class="screen">
-          <div class="step-header">
-            <h2>Session History</h2>
-            <p>Select a previous session to resume or re-summarize</p>
-          </div>
-          <div class="history-container">
-            <div id="sessions-list" class="sessions-list">
-              <!-- Populated dynamically -->
-              <div class="loading-spinner">Loading sessions...</div>
-            </div>
-          </div>
-          <div class="screen-actions">
-            <button id="back-to-upload-from-history" class="secondary-button">← Back</button>
-          </div>
-        </section>
-
-        <!-- Step 2: Label Speakers -->
-        <section id="speakers-screen" class="screen">
-          <div class="step-header">
-            <h2>Step 2: Label Speakers & Characters</h2>
-            <p>Assign player names, character names, and pronouns to each audio track</p>
-          </div>
-          <div id="tracks-container" class="tracks-container"></div>
-          <div class="screen-actions">
-            <button id="back-to-upload" class="secondary-button">← Back</button>
-            <button id="continue-to-metadata" class="primary-button" disabled>Continue →</button>
-          </div>
-        </section>
-
-        <!-- Step 3: Session Metadata -->
-        <section id="metadata-screen" class="screen">
-          <div class="step-header">
-            <h2>Step 3: Session Details</h2>
-            <p>Enter session information for better organization</p>
-          </div>
-          <div class="metadata-form">
-            <div class="form-row">
-              <div class="form-group">
-                <label for="session-date">Session Date:</label>
-                <input type="date" id="session-date" class="form-input">
-              </div>
-              <div class="form-group">
-                <label for="session-number">Session Number:</label>
-                <input type="number" id="session-number" class="form-input" min="1" placeholder="1">
-              </div>
-            </div>
-            <div class="form-group">
-              <label for="campaign-name">Campaign Name:</label>
-              <input type="text" id="campaign-name" class="form-input" placeholder="Enter campaign name">
-            </div>
-            <div class="form-group">
-              <label for="session-locations">Locations:</label>
-              <input type="text" id="session-locations" class="form-input" placeholder="Locations visited (comma separated)">
-            </div>
-            <div class="form-group">
-              <label for="characters-present">Characters Present:</label>
-              <input type="text" id="characters-present" class="form-input" placeholder="Character names (comma separated)">
-            </div>
-            <div class="form-group">
-              <label for="session-tags">Tags:</label>
-              <input type="text" id="session-tags" class="form-input" placeholder="Tags (comma separated)">
-            </div>
-            <div class="form-group">
-              <label for="session-notes">Additional Notes:</label>
-              <textarea id="session-notes" class="form-textarea" rows="3" placeholder="Any additional notes about this session..."></textarea>
-            </div>
-          </div>
-          <div class="screen-actions">
-            <button id="back-to-speakers" class="secondary-button">← Back</button>
-            <button id="continue-to-processing" class="primary-button">Continue →</button>
-          </div>
-        </section>
-
-        <!-- Step 4: Transcription Settings -->
-        <section id="transcription-screen" class="screen">
-          <div class="step-header">
-            <h2>Step 4: Transcription Settings</h2>
-            <p>Configure Whisper model and language for audio transcription</p>
-          </div>
-          <div class="transcription-settings">
-            <div class="setting-group">
-              <label for="whisper-model-select">Whisper Model:</label>
-              <select id="whisper-model-select" class="form-input">
-                <option value="tiny">Tiny (~39 MB, fastest, lowest quality)</option>
-                <option value="base">Base (~74 MB, fast, good quality)</option>
-                <option value="small">Small (~244 MB, balanced)</option>
-                <option value="medium">Medium (~769 MB, high quality)</option>
-                <option value="large-v2" selected>Large-v2 (~1550 MB, best quality, recommended for non-English)</option>
-              </select>
-              <p class="setting-hint">Larger models provide better accuracy but take longer to process</p>
-            </div>
-            <div class="setting-group">
-              <label for="transcription-language-select-wizard">Transcription Language:</label>
-              <select id="transcription-language-select-wizard" class="form-input">
-                <option value="auto">Auto-detect</option>
-                <option value="en">English</option>
-                <option value="de">German (Deutsch)</option>
-                <option value="es">Spanish</option>
-                <option value="fr">French</option>
-                <option value="it">Italian</option>
-                <option value="pt">Portuguese</option>
-                <option value="ru">Russian</option>
-                <option value="ja">Japanese</option>
-                <option value="ko">Korean</option>
-                <option value="zh">Chinese</option>
-              </select>
-              <p class="setting-hint">Choose the language spoken in your audio for better accuracy</p>
-            </div>
-            <div class="setting-group">
-              <label>
-                <input type="checkbox" id="save-transcription-settings">
-                Remember these settings for future sessions
-              </label>
-            </div>
-          </div>
-          <div class="screen-actions">
-            <button id="back-to-metadata" class="secondary-button">← Back</button>
-            <button id="continue-to-summarization" class="primary-button">Continue →</button>
-          </div>
-        </section>
-
-        <!-- Step 4.5: Transcription Results -->
-        <section id="transcription-results-screen" class="screen">
-          <div class="step-header">
-            <h2>Step 4.5: Transcription Results</h2>
-            <p>Review transcription results and estimated processing costs</p>
-          </div>
-
-          <div class="transcription-results">
-            <!-- Transcription Status Display -->
-            <div class="result-section">
-              <h3>Transcription Status</h3>
-              <div id="transcription-status-display" class="status-display">
-                <span class="status-icon">⏳</span>
-                <span class="status-text">Ready to transcribe</span>
-              </div>
-            </div>
-
-            <!-- Start Transcription Button -->
-            <button id="start-transcription-btn" class="primary-button large-button">
-              🎙️ Start Transcription
-            </button>
-
-            <!-- Results Section (hidden until complete) -->
-            <div id="transcription-results-content" class="hidden">
-              <!-- Transcript Preview -->
-              <div class="result-section">
-                <h3>Transcript Preview</h3>
-                <div id="transcript-preview" class="transcript-preview-box">
-                  <!-- Populated after transcription -->
-                </div>
-              </div>
-
-              <!-- Token Count & Cost Estimate -->
-              <div class="result-section">
-                <h3>Processing Estimates</h3>
-                <div class="estimate-cards">
-                  <div class="estimate-card">
-                    <div class="estimate-label">Transcript Size</div>
-                    <div class="estimate-value" id="transcript-size-display">-</div>
-                    <div class="estimate-unit">characters</div>
-                  </div>
-                  <div class="estimate-card">
-                    <div class="estimate-label">Estimated Tokens</div>
-                    <div class="estimate-value" id="token-count-display">-</div>
-                    <div class="estimate-unit">tokens</div>
-                  </div>
-                  <div class="estimate-card">
-                    <div class="estimate-label">Context Usage</div>
-                    <div class="estimate-value" id="context-usage-display">-</div>
-                    <div class="estimate-unit">% of model capacity</div>
-                  </div>
-                  <div class="estimate-card hidden" id="cost-estimate-card">
-                    <div class="estimate-label">Estimated Cost (Gemini)</div>
-                    <div class="estimate-value" id="cost-display">-</div>
-                    <div class="estimate-unit">USD</div>
-                  </div>
-                </div>
-                <div id="context-recommendation" class="context-recommendation hidden">
-                  <!-- Populated with recommendation message -->
-                </div>
-              </div>
-            </div>
-
-            <!-- Error Display -->
-            <div id="transcription-error" class="error-display hidden">
-              <span class="error-icon">❌</span>
-              <span class="error-text" id="transcription-error-text"></span>
-              <button id="retry-transcription-btn" class="secondary-button">🔄 Retry Transcription</button>
-            </div>
-          </div>
-
-          <div class="screen-actions">
-            <button id="back-to-transcription-settings" class="secondary-button">← Back</button>
-            <button id="continue-to-summarization-from-results" class="primary-button" disabled>Continue to Summarization →</button>
-          </div>
-        </section>
-
-        <!-- Step 5: Summarization Settings -->
-        <section id="summarization-screen" class="screen">
-          <div class="step-header">
-            <h2>Step 5: Summarization Settings</h2>
-            <p>Choose your LLM engine and model for generating the session summary</p>
-          </div>
-          <div class="summarization-settings">
-            <div class="setting-group">
-              <label>LLM Engine:</label>
-              <div class="llm-selection">
-                <label class="radio-label">
-                  <input type="radio" name="llm-engine-wizard" value="local" checked>
-                  <span class="radio-custom"></span>
-                  Local LLM (Ollama)
-                </label>
-                <label class="radio-label">
-                  <input type="radio" name="llm-engine-wizard" value="cloud">
-                  <span class="radio-custom"></span>
-                  Cloud LLM (Gemini)
-                </label>
-              </div>
-            </div>
-            <div class="setting-group" id="ollama-model-group">
-              <label for="ollama-model-select-wizard">Ollama Model:</label>
-              <select id="ollama-model-select-wizard" class="form-input">
-                <option value="llama3.2">llama3.2 (default)</option>
-              </select>
-              <button id="refresh-wizard-models-btn" class="secondary-button" style="margin-top: 0.5rem;">🔄 Refresh Models</button>
-              <p class="setting-hint">Larger models provide better summaries but require more resources</p>
-            </div>
-            <div class="setting-group">
-              <label>
-                <input type="checkbox" id="save-summarization-settings">
-                Remember these settings for future sessions
-              </label>
-            </div>
-          </div>
-          <button id="generate-notes-btn" class="primary-button large-button">Start Summarization</button>
-          <div id="processing-status" class="processing-status hidden"></div>
-          <div class="screen-actions">
-            <button id="back-to-transcription" class="secondary-button">← Back</button>
-          </div>
-        </section>
-
-        <!-- Step 6: Review Suggestions -->
-        <section id="suggestions-screen" class="screen">
-          <div class="step-header">
-            <h2>Step 6: Review AI Suggestions</h2>
-            <p>Review and apply the AI-generated metadata suggestions to your session</p>
-          </div>
-          <div class="suggestions-review">
-            <div class="suggestions-section">
-              <h3>Suggested Tags</h3>
-              <div id="review-suggested-tags" class="suggestions-container">
-                <div class="suggestions-chips" id="review-tags-suggestions"></div>
-              </div>
-              <div class="current-metadata">
-                <label>Current Tags:</label>
-                <input type="text" id="review-session-tags" class="form-input" placeholder="No tags set">
-              </div>
-            </div>
-            
-            <div class="suggestions-section">
-              <h3>Mentioned Characters</h3>
-              <div id="review-suggested-characters" class="suggestions-container">
-                <div class="suggestions-chips" id="review-characters-suggestions"></div>
-              </div>
-              <div class="current-metadata">
-                <label>Current Characters:</label>
-                <input type="text" id="review-characters-present" class="form-input" placeholder="No characters set">
-              </div>
-            </div>
-            
-            <div class="suggestions-section">
-              <h3>Mentioned Locations</h3>
-              <div id="review-suggested-locations" class="suggestions-container">
-                <div class="suggestions-chips" id="review-locations-suggestions"></div>
-              </div>
-              <div class="current-metadata">
-                <label>Current Locations:</label>
-                <input type="text" id="review-session-locations" class="form-input" placeholder="No locations set">
-              </div>
-            </div>
-          </div>
-          <div class="screen-actions">
-            <button id="back-to-summarization" class="secondary-button">← Back</button>
-            <button id="continue-to-export" class="primary-button">Continue to Export →</button>
-          </div>
-        </section>
-
-        <!-- Step 7: Export -->
-        <section id="export-screen" class="screen">
-          <div class="step-header">
-            <h2>Step 7: Export Notes</h2>
-            <p>Review and save your session notes</p>
-          </div>
-          <div class="export-options">
-            <div class="export-format">
-              <label class="checkbox-label">
-                <input type="checkbox" id="use-obsidian-format">
-                <span class="checkbox-custom"></span>
-                Export for Obsidian (with YAML frontmatter)
-              </label>
-            </div>
-            <div class="filename-input">
-              <label for="custom-filename">Filename (optional):</label>
-              <input type="text" id="custom-filename" class="form-input" placeholder="Auto-generated filename will be used">
-            </div>
-          </div>
-          <div class="notes-preview">
-            <textarea id="notes-content" class="notes-textarea" readonly></textarea>
-          </div>
-          <div class="screen-actions">
-            <button id="back-to-suggestions" class="secondary-button">← Back</button>
-            <button id="export-notes-btn" class="primary-button">💾 Export as Markdown</button>
-            <button id="start-new-session" class="secondary-button">🆕 New Session</button>
-          </div>
-        </section>
-      </main>
-
-      <!-- Settings Modal -->
-      <div id="settings-modal" class="modal hidden">
-        <div class="modal-content">
-          <div class="modal-header">
-            <h2>Settings</h2>
-            <button id="close-settings" class="close-button">✕</button>
-          </div>
-          <div class="modal-body">
-            <div class="setting-group">
-              <label for="gemini-api-key">Gemini API Key:</label>
-              <input type="password" id="gemini-api-key" placeholder="Enter your Gemini API key">
-              <p style="font-size: 0.9em; color: #666; margin: 0.5rem 0;">
-                Leave empty to keep your existing API key. Only enter a value if you want to change it.
-              </p>
-            </div>
-            <div class="setting-group">
-              <label for="gemini-model">Gemini Model:</label>
-              <input type="text" id="gemini-model" class="form-input" placeholder="gemini-2.0-flash-exp">
-              <p style="font-size: 0.9em; color: #666; margin: 0.5rem 0;">
-                Enter the Gemini model name (e.g., gemini-2.0-flash-exp, gemini-1.5-pro, gemini-1.5-flash)
-              </p>
-            </div>
-            <div class="setting-group">
-              <label for="language-select">UI Language / Sprache:</label>
-              <select id="language-select" class="form-input">
-                <option value="en">English</option>
-                <option value="de">Deutsch</option>
-              </select>
-            </div>
-            <div class="setting-group">
-              <label for="ollama-base-url">Ollama Server URL:</label>
-              <input type="text" id="ollama-base-url" class="form-input" placeholder="http://127.0.0.1:11434">
-              <button id="test-ollama-connection-btn" class="secondary-button" style="margin-top: 0.5rem;">🔗 Test Connection</button>
-              <div id="connection-status" class="model-status hidden"></div>
-              <p style="font-size: 0.9em; color: #666; margin: 0.5rem 0;">
-                Enter the URL of your Ollama server. Use default for local, or enter network address (e.g., http://192.168.1.100:11434)
-              </p>
-            </div>
-            <div class="setting-group">
-              <label for="system-prompt">System Prompt:</label>
-              <textarea id="system-prompt" rows="10" placeholder="Enter your custom system prompt..."></textarea>
-            </div>
-            <div class="setting-group">
-              <label>Debug Export:</label>
-              <p style="font-size: 0.9em; color: #666; margin: 0.5rem 0;">Export debugging information to analyze processing steps and identify issues.</p>
-              <button id="export-debug-btn" class="secondary-button" style="margin-top: 0.5rem;">🔍 Export Debug Files</button>
-              <div id="debug-status" class="model-status hidden"></div>
-            </div>
-          </div>
-          <div class="modal-actions">
-            <button id="save-settings" class="primary-button">Save Settings</button>
-            <button id="cancel-settings" class="secondary-button">Cancel</button>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="header-top">
+          <div class="header-titles">
+            <h1>Chronicle Keeper</h1>
+            <span class="header-subtitle">Session processing workspace</span>
           </div>
         </div>
-      </div>
+
+        <div class="api-config">
+          <label for="api-base">API Base</label>
+          <div class="api-input-row">
+            <input id="api-base" type="text" value="http://127.0.0.1:8000" />
+            <button id="save-api-base" type="button" class="btn secondary">Use</button>
+          </div>
+        </div>
+
+        <nav class="nav-vertical">
+          <button class="nav-btn" data-screen="start">Start</button>
+          <button class="nav-btn" data-screen="campaign">Campaign</button>
+          <button class="nav-btn" data-screen="settings">Settings</button>
+        </nav>
+      </aside>
+
+      <main class="content">
+        <div id="wizard-header" class="wizard-header">
+          <div id="wizard-steps" class="wizard-steps"></div>
+          <div class="wizard-meta">
+            <span id="wizard-session-label"></span>
+          </div>
+        </div>
+
+        <section id="start-screen" class="screen active">
+          <div class="panel">
+            <h2>Choose campaign</h2>
+            <div class="grid two">
+              <div class="card">
+                <label for="campaign-select-input">Campaign</label>
+                <input
+                  id="campaign-select-input"
+                  list="campaign-options"
+                  placeholder="Select or type campaign id"
+                />
+                <datalist id="campaign-options"></datalist>
+                <button id="open-campaign" type="button" class="btn primary">
+                  Open campaign
+                </button>
+                <div id="campaign-select-result" class="status"></div>
+              </div>
+              <div class="card">
+                <h3>Create campaign</h3>
+                <div class="grid three">
+                  <input id="new-campaign-id" type="text" placeholder="ID" />
+                  <input id="new-campaign-name" type="text" placeholder="Name" />
+                  <input id="new-campaign-start" type="number" placeholder="Start #" value="1" />
+                </div>
+                <button id="create-campaign" type="button" class="btn secondary">
+                  Create
+                </button>
+                <div id="campaign-result" class="status"></div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section id="campaign-screen" class="screen">
+          <div class="panel">
+            <h2>Campaign</h2>
+            <div class="grid two">
+              <input id="campaign-system" type="text" placeholder="System" />
+              <input id="campaign-gm" type="text" placeholder="GM/DM" />
+              <input id="campaign-setting" type="text" placeholder="Setting" />
+              <input id="campaign-language" type="text" placeholder="Default language" />
+            </div>
+            <label for="campaign-players">Players (comma separated)</label>
+            <textarea id="campaign-players" rows="2"></textarea>
+            <div class="inline-actions">
+              <button id="save-campaign" type="button" class="btn secondary">
+                Save campaign
+              </button>
+            </div>
+            <div id="campaign-save-result" class="status"></div>
+
+            <h3>Sessions</h3>
+            <div class="grid three">
+              <input id="new-session-number" type="number" placeholder="Session #" />
+              <input id="new-session-title" type="text" placeholder="Title" />
+              <input id="new-session-date" type="date" />
+            </div>
+            <button id="create-session" type="button" class="btn primary">
+              Create session
+            </button>
+            <div id="session-create-result" class="status"></div>
+            <ul id="campaign-sessions"></ul>
+          </div>
+        </section>
+
+        <section id="upload-screen" class="screen">
+          <div class="panel">
+            <h2>Upload Craig ZIP</h2>
+            <form id="upload-form" class="form-row">
+              <input id="zip-file" type="file" accept=".zip" required />
+              <button type="submit" class="btn primary">Upload</button>
+            </form>
+            <div id="upload-result" class="status"></div>
+            <div class="tracks">
+              <h3>Tracks</h3>
+              <ul id="track-list"></ul>
+            </div>
+          </div>
+        </section>
+
+        <section id="speakers-screen" class="screen">
+          <div class="panel">
+            <h2>Speaker Labels</h2>
+            <form id="speakers-form">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Track</th>
+                    <th>Player</th>
+                    <th>Character</th>
+                    <th>Pronouns</th>
+                  </tr>
+                </thead>
+                <tbody id="speakers-body"></tbody>
+              </table>
+              <datalist id="player-options"></datalist>
+              <datalist id="pronoun-options">
+                <option value="he/him"></option>
+                <option value="she/her"></option>
+                <option value="they/them"></option>
+              </datalist>
+              <button type="submit" class="btn primary">Save Speaker Labels</button>
+            </form>
+            <div id="speakers-result" class="status"></div>
+          </div>
+        </section>
+
+        <section id="transcribe-screen" class="screen">
+          <div class="panel">
+            <h2>Transcribe</h2>
+            <div class="grid three">
+              <input id="transcribe-language" type="text" placeholder="Language (en/de)" />
+              <input id="transcribe-model" type="text" placeholder="WhisperX model" />
+              <input id="transcribe-hf-token" type="password" placeholder="HF token (optional)" />
+            </div>
+            <button id="start-transcribe" type="button" class="btn primary">Transcribe</button>
+            <div id="transcribe-result" class="status"></div>
+          </div>
+        </section>
+
+        <section id="summarize-screen" class="screen">
+          <div class="panel">
+            <h2>Summarize</h2>
+            <div class="grid two">
+              <div>
+                <label for="transcript-select">Transcript</label>
+                <select id="transcript-select"></select>
+              </div>
+              <div class="inline-actions">
+                <button id="refresh-transcripts" type="button" class="btn secondary">
+                  Refresh transcripts
+                </button>
+              </div>
+            </div>
+            <div id="transcript-result" class="status"></div>
+            <div class="grid three">
+              <select id="summary-provider">
+                <option value="ollama">Ollama</option>
+                <option value="gemini">Gemini</option>
+              </select>
+              <input id="summary-model" type="text" placeholder="Model (optional)" />
+              <input id="summary-base-url" type="text" placeholder="Ollama base URL (optional)" />
+            </div>
+            <div class="grid two">
+              <input id="summary-title" type="text" placeholder="Summary title" />
+              <input id="summary-context" type="text" placeholder="Context (optional)" />
+            </div>
+            <button id="start-summary" type="button" class="btn primary">Summarize</button>
+            <div id="summary-result" class="status"></div>
+            <h3>Summary</h3>
+            <pre id="summary-text"></pre>
+            <h3>Metadata</h3>
+            <pre id="summary-metadata"></pre>
+          </div>
+        </section>
+
+        <section id="export-screen" class="screen">
+          <div class="panel">
+            <h2>Export</h2>
+            <div class="grid three">
+              <label class="checkbox-row">
+                <input id="use-obsidian" type="checkbox" checked />
+                Obsidian format
+              </label>
+              <input id="export-filename" type="text" placeholder="Custom filename (optional)" />
+              <button id="export-notes" type="button" class="btn primary">Export</button>
+            </div>
+            <div id="export-result" class="status"></div>
+            <textarea id="export-preview" rows="10" readonly></textarea>
+            <a id="download-link" class="download-link" href="#" download>Download</a>
+          </div>
+        </section>
+
+        <section id="settings-screen" class="screen">
+          <div class="panel">
+            <h2>Settings</h2>
+            <div class="grid two">
+              <input id="setting-output-root" type="text" placeholder="Output root" />
+              <input id="setting-summary-provider" type="text" placeholder="summary_provider" />
+              <input id="setting-ollama-base-url" type="text" placeholder="Ollama base URL" />
+              <input id="setting-ollama-model" type="text" placeholder="Ollama model" />
+              <input id="setting-ollama-timeout" type="number" placeholder="Ollama timeout (s)" />
+              <input id="setting-gemini-model" type="text" placeholder="Gemini model" />
+              <input id="setting-gemini-api-key" type="password" placeholder="Gemini API key" />
+              <input id="setting-default-language" type="text" placeholder="Default language" />
+              <input id="setting-whisperx-model" type="text" placeholder="WhisperX model" />
+              <input id="setting-hf-token" type="password" placeholder="HF token" />
+            </div>
+            <button id="save-settings" type="button" class="btn primary">Save Settings</button>
+            <div id="settings-result" class="status"></div>
+          </div>
+        </section>
+
+        <div id="wizard-nav" class="wizard-nav">
+          <button id="wizard-back" type="button" class="btn secondary">Back</button>
+          <button id="wizard-next" type="button" class="btn primary">Next</button>
+        </div>
+
+        <footer class="footer">
+          <p>Static frontend. Serve via a simple static server.</p>
+        </footer>
+      </main>
     </div>
   </body>
 </html>

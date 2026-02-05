@@ -1,0 +1,56 @@
+"""Transcription service for sessions."""
+
+from __future__ import annotations
+
+from app.services.sessions import get_session_path, load_session, save_session
+from app.services.transcription import get_provider
+from app.services.transcription.formatting import save_transcription_result
+from app.storage.config import get_transcription_config
+
+
+def transcribe_session(
+    session_id: str,
+    language: str | None = None,
+    model: str | None = None,
+    hf_token: str | None = None,
+) -> dict:
+    session = load_session(session_id)
+    session_path = get_session_path(session_id)
+    tracks = session.get("tracks") or []
+    if not tracks:
+        raise FileNotFoundError("No tracks found for session.")
+
+    config = get_transcription_config()
+    language = language or "en"
+    model_name = model or config.whisperx_model
+
+    provider = get_provider("whisperx", model_name=model_name)
+    result = provider.transcribe_session(
+        session_path=session_path,
+        tracks=tracks,
+        speakers=session.get("speakers"),
+        language=language,
+    )
+
+    provider_model = model_name
+    segments, json_path, text_path = save_transcription_result(
+        result=result,
+        session_path=session_path,
+        provider_model=provider_model,
+    )
+
+    session["transcription"] = {
+        "language": result.language,
+        "json_path": json_path,
+        "text_path": text_path,
+        "provider": result.provider,
+        "model": provider_model,
+        "segments": segments,
+    }
+    save_session(session_id, session)
+
+    return {
+        "language": result.language,
+        "json_path": json_path,
+        "text_path": text_path,
+    }
