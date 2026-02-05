@@ -99,6 +99,7 @@ venv.bak/
 *.log
 *.pot
 *.pyc
+chronicle_keeper.db
 .mypy_cache/
 .dmypy.json
 .dmypy
