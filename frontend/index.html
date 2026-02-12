@@ -13,118 +13,150 @@
         <div class="header-top">
           <div class="header-titles">
             <h1>Chronicle Keeper</h1>
-            <span class="header-subtitle">Session processing workspace</span>
-          </div>
-        </div>
-
-        <div class="api-config">
-          <label for="api-base">API Base</label>
-          <div class="api-input-row">
-            <input id="api-base" type="text" value="http://127.0.0.1:8000" />
-            <button id="save-api-base" type="button" class="btn secondary">Use</button>
+            <span class="header-subtitle">Campaign sessions workspace</span>
           </div>
         </div>
 
         <nav class="nav-vertical">
-          <button class="nav-btn" data-screen="start">Start</button>
-          <button class="nav-btn" data-screen="campaign">Campaign</button>
+          <button class="nav-btn" data-screen="start">Campaigns</button>
           <button class="nav-btn" data-screen="settings">Settings</button>
         </nav>
       </aside>
 
       <main class="content">
-        <div id="wizard-header" class="wizard-header">
-          <div id="wizard-steps" class="wizard-steps"></div>
-          <div class="wizard-meta">
-            <span id="wizard-session-label"></span>
-          </div>
-        </div>
-
-        <section id="start-screen" class="screen active">
-          <div class="panel">
-            <h2>Choose campaign</h2>
-            <div class="grid two">
-              <div class="card">
-                <label for="campaign-select-input">Campaign</label>
-                <input
-                  id="campaign-select-input"
-                  list="campaign-options"
-                  placeholder="Select or type campaign id"
-                />
-                <datalist id="campaign-options"></datalist>
-                <button id="open-campaign" type="button" class="btn primary">
-                  Open campaign
-                </button>
-                <div id="campaign-select-result" class="status"></div>
-              </div>
-              <div class="card">
-                <h3>Create campaign</h3>
-                <div class="grid three">
-                  <input id="new-campaign-id" type="text" placeholder="ID" />
-                  <input id="new-campaign-name" type="text" placeholder="Name" />
-                  <input id="new-campaign-start" type="number" placeholder="Start #" value="1" />
-                </div>
-                <button id="create-campaign" type="button" class="btn secondary">
-                  Create
-                </button>
-                <div id="campaign-result" class="status"></div>
-              </div>
+        <section id="start-screen" class="screen main-screen active">
+          <div class="screen-header">
+            <div>
+              <h2>Campaigns</h2>
+              <p class="muted">Pick a campaign to continue or start a new one.</p>
             </div>
+            <button id="open-campaign-wizard" type="button" class="btn primary">
+              New campaign
+            </button>
+          </div>
+          <div id="campaign-list" class="card-grid"></div>
+          <div id="campaign-empty" class="empty-state hidden">
+            No campaigns yet. Create your first one.
           </div>
         </section>
 
-        <section id="campaign-screen" class="screen">
-          <div class="panel">
-            <h2>Campaign</h2>
-            <div class="grid two">
-              <input id="campaign-system" type="text" placeholder="System" />
-              <input id="campaign-gm" type="text" placeholder="GM/DM" />
-              <input id="campaign-setting" type="text" placeholder="Setting" />
-              <input id="campaign-language" type="text" placeholder="Default language" />
+        <section id="campaign-screen" class="screen main-screen">
+          <div class="screen-header">
+            <div>
+              <h2 id="campaign-title">Campaign</h2>
+              <p id="campaign-subtitle" class="muted"></p>
             </div>
-            <label for="campaign-players">Players (comma separated)</label>
-            <textarea id="campaign-players" rows="2"></textarea>
-            <div class="inline-actions">
-              <button id="save-campaign" type="button" class="btn secondary">
-                Save campaign
+            <div class="header-actions">
+              <button id="open-session-wizard" type="button" class="btn primary">
+                New session
               </button>
             </div>
-            <div id="campaign-save-result" class="status"></div>
+          </div>
 
+          <div class="grid two">
+            <div class="card">
+              <div class="card-header">
+                <h3>Overview</h3>
+                <button id="toggle-campaign-edit" type="button" class="btn secondary">
+                  Edit
+                </button>
+              </div>
+              <dl class="meta-list">
+                <div>
+                  <dt>System</dt>
+                  <dd id="campaign-system-display">-</dd>
+                </div>
+                <div>
+                  <dt>GM</dt>
+                  <dd id="campaign-gm-display">-</dd>
+                </div>
+                <div>
+                  <dt>Setting</dt>
+                  <dd id="campaign-setting-display">-</dd>
+                </div>
+                <div>
+                  <dt>Language</dt>
+                  <dd id="campaign-language-display">-</dd>
+                </div>
+              </dl>
+            </div>
+            <div class="card">
+              <h3>Players</h3>
+              <table class="table-clean">
+                <thead>
+                  <tr>
+                    <th>Player</th>
+                    <th>Character</th>
+                  </tr>
+                </thead>
+                <tbody id="campaign-player-list"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="card">
+            <h3>Additional information</h3>
+            <textarea id="campaign-extra-display" class="editable-textarea" rows="4" readonly></textarea>
+          </div>
+
+          <div class="panel">
             <h3>Sessions</h3>
-            <div class="grid three">
-              <input id="new-session-number" type="number" placeholder="Session #" />
-              <input id="new-session-title" type="text" placeholder="Title" />
-              <input id="new-session-date" type="date" />
-            </div>
-            <button id="create-session" type="button" class="btn primary">
-              Create session
-            </button>
-            <div id="session-create-result" class="status"></div>
-            <ul id="campaign-sessions"></ul>
+            <table class="table-clean">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Title</th>
+                  <th>Date</th>
+                  <th>Transcribe</th>
+                  <th>Summary</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="campaign-sessions"></tbody>
+            </table>
           </div>
         </section>
 
-        <section id="upload-screen" class="screen">
-          <div class="panel">
-            <h2>Upload Craig ZIP</h2>
-            <form id="upload-form" class="form-row">
-              <input id="zip-file" type="file" accept=".zip" required />
-              <button type="submit" class="btn primary">Upload</button>
-            </form>
-            <div id="upload-result" class="status"></div>
-            <div class="tracks">
-              <h3>Tracks</h3>
-              <ul id="track-list"></ul>
+        <section id="session-screen" class="screen main-screen">
+          <div class="screen-header">
+            <div>
+              <h2 id="session-title">Session</h2>
+              <p id="session-subtitle" class="muted"></p>
+            </div>
+            <div class="header-actions">
+              <button id="toggle-session-edit" type="button" class="btn secondary">
+                Edit session
+              </button>
+              <button id="open-transcribe-modal" type="button" class="btn secondary">
+                Transcribe
+              </button>
+              <button id="open-summarize-modal" type="button" class="btn primary">
+                Summarize
+              </button>
             </div>
           </div>
-        </section>
 
-        <section id="speakers-screen" class="screen">
-          <div class="panel">
-            <h2>Speaker Labels</h2>
-            <form id="speakers-form">
-              <table>
+          <div class="grid two">
+            <div class="card">
+              <h3>Session info</h3>
+              <dl class="meta-list">
+                <div>
+                  <dt>Date</dt>
+                  <dd id="session-date-display">-</dd>
+                </div>
+                <div>
+                  <dt>Session #</dt>
+                  <dd id="session-number-display">-</dd>
+                </div>
+              </dl>
+              <div class="meta-block">
+                <h4>Notes</h4>
+                <p id="session-notes-display" class="muted"></p>
+              </div>
+            </div>
+            <div class="card">
+              <h3>Speakers</h3>
+              <table class="table-clean">
                 <thead>
                   <tr>
                     <th>Track</th>
@@ -133,109 +165,372 @@
                     <th>Pronouns</th>
                   </tr>
                 </thead>
-                <tbody id="speakers-body"></tbody>
+                <tbody id="session-overview-speakers"></tbody>
               </table>
-              <datalist id="player-options"></datalist>
-              <datalist id="pronoun-options">
-                <option value="he/him"></option>
-                <option value="she/her"></option>
-                <option value="they/them"></option>
-              </datalist>
-              <button type="submit" class="btn primary">Save Speaker Labels</button>
-            </form>
-            <div id="speakers-result" class="status"></div>
+              <p id="session-speakers-empty" class="muted hidden">No speakers mapped yet.</p>
+            </div>
+          </div>
+
+          <div class="card">
+            <h3>Transcripts</h3>
+            <table class="table-clean">
+              <thead>
+                <tr>
+                  <th>Provider / Model</th>
+                  <th>Created</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="session-overview-transcripts"></tbody>
+            </table>
+            <p id="session-transcripts-empty" class="muted hidden">No transcripts yet.</p>
           </div>
         </section>
 
-        <section id="transcribe-screen" class="screen">
-          <div class="panel">
-            <h2>Transcribe</h2>
-            <div class="grid three">
-              <input id="transcribe-language" type="text" placeholder="Language (en/de)" />
-              <input id="transcribe-model" type="text" placeholder="WhisperX model" />
-              <input id="transcribe-hf-token" type="password" placeholder="HF token (optional)" />
-            </div>
-            <button id="start-transcribe" type="button" class="btn primary">Transcribe</button>
-            <div id="transcribe-result" class="status"></div>
-          </div>
-        </section>
-
-        <section id="summarize-screen" class="screen">
-          <div class="panel">
-            <h2>Summarize</h2>
-            <div class="grid two">
-              <div>
-                <label for="transcript-select">Transcript</label>
-                <select id="transcript-select"></select>
-              </div>
-              <div class="inline-actions">
-                <button id="refresh-transcripts" type="button" class="btn secondary">
-                  Refresh transcripts
-                </button>
-              </div>
-            </div>
-            <div id="transcript-result" class="status"></div>
-            <div class="grid three">
-              <select id="summary-provider">
-                <option value="ollama">Ollama</option>
-                <option value="gemini">Gemini</option>
-              </select>
-              <input id="summary-model" type="text" placeholder="Model (optional)" />
-              <input id="summary-base-url" type="text" placeholder="Ollama base URL (optional)" />
-            </div>
-            <div class="grid two">
-              <input id="summary-title" type="text" placeholder="Summary title" />
-              <input id="summary-context" type="text" placeholder="Context (optional)" />
-            </div>
-            <button id="start-summary" type="button" class="btn primary">Summarize</button>
-            <div id="summary-result" class="status"></div>
-            <h3>Summary</h3>
-            <pre id="summary-text"></pre>
-            <h3>Metadata</h3>
-            <pre id="summary-metadata"></pre>
-          </div>
-        </section>
-
-        <section id="export-screen" class="screen">
-          <div class="panel">
-            <h2>Export</h2>
-            <div class="grid three">
-              <label class="checkbox-row">
-                <input id="use-obsidian" type="checkbox" checked />
-                Obsidian format
-              </label>
-              <input id="export-filename" type="text" placeholder="Custom filename (optional)" />
-              <button id="export-notes" type="button" class="btn primary">Export</button>
-            </div>
-            <div id="export-result" class="status"></div>
-            <textarea id="export-preview" rows="10" readonly></textarea>
-            <a id="download-link" class="download-link" href="#" download>Download</a>
-          </div>
-        </section>
-
-        <section id="settings-screen" class="screen">
+        <section id="settings-screen" class="screen main-screen">
           <div class="panel">
             <h2>Settings</h2>
-            <div class="grid two">
-              <input id="setting-output-root" type="text" placeholder="Output root" />
-              <input id="setting-summary-provider" type="text" placeholder="summary_provider" />
-              <input id="setting-ollama-base-url" type="text" placeholder="Ollama base URL" />
-              <input id="setting-ollama-model" type="text" placeholder="Ollama model" />
-              <input id="setting-ollama-timeout" type="number" placeholder="Ollama timeout (s)" />
-              <input id="setting-gemini-model" type="text" placeholder="Gemini model" />
-              <input id="setting-gemini-api-key" type="password" placeholder="Gemini API key" />
-              <input id="setting-default-language" type="text" placeholder="Default language" />
-              <input id="setting-whisperx-model" type="text" placeholder="WhisperX model" />
-              <input id="setting-hf-token" type="password" placeholder="HF token" />
+            <div class="settings-grid">
+              <div class="field">
+                <label for="setting-api-base">API Base</label>
+                <input id="setting-api-base" type="text" />
+                <p class="field-hint">Backend URL used by this app.</p>
+              </div>
+              <div class="field">
+                <label for="setting-output-root">Output folder</label>
+                <input id="setting-output-root" type="text" />
+                <p class="field-hint">Where session files are stored on disk.</p>
+              </div>
+              <div class="field">
+                <label for="setting-default-language">Default language</label>
+                <input id="setting-default-language" type="text" />
+              </div>
+              <div class="field">
+                <label for="setting-whisperx-model">WhisperX model</label>
+                <input id="setting-whisperx-model" type="text" />
+                <p class="field-hint">Default transcription model.</p>
+              </div>
+              <div class="field">
+                <label for="setting-hf-token">HF token</label>
+                <input id="setting-hf-token" type="password" />
+                <p class="field-hint">Optional for diarization.</p>
+              </div>
+              <div class="field">
+                <label for="setting-summary-provider">Summary provider</label>
+                <input id="setting-summary-provider" type="text" />
+              </div>
+              <div class="field">
+                <label for="setting-ollama-base-url">Ollama base URL</label>
+                <input id="setting-ollama-base-url" type="text" />
+              </div>
+              <div class="field">
+                <label for="setting-ollama-model">Ollama model</label>
+                <input id="setting-ollama-model" type="text" />
+              </div>
+              <div class="field">
+                <label for="setting-ollama-timeout">Ollama timeout (s)</label>
+                <input id="setting-ollama-timeout" type="number" />
+              </div>
+              <div class="field">
+                <label for="setting-gemini-model">Gemini model</label>
+                <input id="setting-gemini-model" type="text" />
+              </div>
+              <div class="field">
+                <label for="setting-gemini-api-key">Gemini API key</label>
+                <input id="setting-gemini-api-key" type="password" />
+              </div>
             </div>
             <button id="save-settings" type="button" class="btn primary">Save Settings</button>
             <div id="settings-result" class="status"></div>
           </div>
         </section>
 
-        <div id="wizard-nav" class="wizard-nav">
-          <button id="wizard-back" type="button" class="btn secondary">Back</button>
-          <button id="wizard-next" type="button" class="btn primary">Next</button>
+        <section id="campaign-wizard-screen" class="screen wizard-screen">
+          <div class="wizard-shell">
+            <div class="wizard-top">
+              <button id="campaign-wizard-cancel" type="button" class="btn ghost">
+                Back
+              </button>
+              <div>
+                <h2 id="campaign-wizard-title">New campaign</h2>
+                <p id="campaign-wizard-step-label" class="muted"></p>
+              </div>
+              <div id="campaign-wizard-steps" class="wizard-stepper"></div>
+            </div>
+
+            <div class="wizard-body">
+              <div class="wizard-step-panel" data-step="1">
+                <div class="field">
+                  <label for="wizard-campaign-name">Campaign name</label>
+                  <input id="wizard-campaign-name" type="text" />
+                </div>
+                <div class="field">
+                  <label for="wizard-campaign-system">System</label>
+                  <input id="wizard-campaign-system" type="text" />
+                </div>
+                <div class="field">
+                  <label for="wizard-campaign-setting">Setting</label>
+                  <input id="wizard-campaign-setting" type="text" />
+                </div>
+                <div class="field">
+                  <label for="wizard-campaign-language">Default language</label>
+                  <input id="wizard-campaign-language" type="text" />
+                </div>
+                <div class="field">
+                  <label for="wizard-campaign-start">Start session #</label>
+                  <input id="wizard-campaign-start" type="number" />
+                  <p class="field-hint">First session number for this campaign.</p>
+                </div>
+              </div>
+              <div class="wizard-step-panel" data-step="2">
+                <div class="field">
+                  <label for="wizard-campaign-gm">GM/DM name</label>
+                  <input id="wizard-campaign-gm" type="text" />
+                </div>
+                <div class="field">
+                  <label>Players</label>
+                  <div id="wizard-player-rows" class="list-stack"></div>
+                  <button id="wizard-add-player" type="button" class="btn ghost">
+                    Add player
+                  </button>
+                </div>
+              </div>
+              <div class="wizard-step-panel" data-step="3">
+                <label for="wizard-campaign-extra">Additional information</label>
+                <textarea id="wizard-campaign-extra" rows="6"></textarea>
+              </div>
+            </div>
+
+            <div class="wizard-footer">
+              <button id="campaign-wizard-back" type="button" class="btn secondary">Back</button>
+              <button id="campaign-wizard-next" type="button" class="btn primary">Next</button>
+            </div>
+            <div id="campaign-wizard-status" class="status hidden"></div>
+          </div>
+        </section>
+
+        <section id="session-wizard-screen" class="screen wizard-screen">
+          <div class="wizard-shell">
+            <div class="wizard-top">
+              <button id="session-wizard-cancel" type="button" class="btn ghost">
+                Back
+              </button>
+              <div>
+                <h2>Create session</h2>
+                <p id="session-wizard-step-label" class="muted"></p>
+              </div>
+              <div id="session-wizard-steps" class="wizard-stepper"></div>
+            </div>
+
+            <div class="wizard-body">
+              <div class="wizard-step-panel" data-step="1">
+                <form id="session-upload-form" class="form-row">
+                  <input id="session-zip-file" type="file" accept=".zip" required />
+                  <button type="submit" class="btn primary">Upload</button>
+                </form>
+                <div id="session-upload-status" class="status hidden"></div>
+                <div class="tracks">
+                  <h3>Tracks</h3>
+                  <ul id="session-track-list"></ul>
+                </div>
+              </div>
+              <div class="wizard-step-panel" data-step="2">
+                <form id="session-speakers-form">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Track</th>
+                        <th>Player</th>
+                        <th>Character</th>
+                        <th>Pronouns</th>
+                      </tr>
+                    </thead>
+                    <tbody id="session-speakers-body"></tbody>
+                  </table>
+                </form>
+                <datalist id="player-options"></datalist>
+                <datalist id="pronoun-options">
+                  <option value="he/him"></option>
+                  <option value="she/her"></option>
+                  <option value="they/them"></option>
+                </datalist>
+                <div id="session-speakers-status" class="status hidden"></div>
+              </div>
+              <div class="wizard-step-panel" data-step="3">
+                <div class="field">
+                  <label for="session-meta-title">Session title</label>
+                  <input id="session-meta-title" type="text" />
+                </div>
+                <div class="grid two">
+                  <div class="field">
+                    <label for="session-meta-date">Date</label>
+                    <input id="session-meta-date" type="date" />
+                  </div>
+                  <div class="field">
+                    <label for="session-meta-number">Session #</label>
+                    <input id="session-meta-number" type="number" />
+                  </div>
+                </div>
+                <div class="field">
+                  <label for="session-meta-tags">Tags</label>
+                  <input id="session-meta-tags" type="text" placeholder="Coming soon" disabled />
+                  <p class="field-hint">Tag suggestions will appear after summaries later.</p>
+                </div>
+                <div class="field">
+                  <label for="session-meta-notes">Notes</label>
+                  <textarea id="session-meta-notes" rows="5"></textarea>
+                </div>
+                <div id="session-meta-status" class="status hidden"></div>
+              </div>
+            </div>
+
+            <div class="wizard-footer">
+              <button id="session-wizard-back" type="button" class="btn secondary">Back</button>
+              <button id="session-wizard-next" type="button" class="btn primary">Next</button>
+            </div>
+          </div>
+        </section>
+
+        <div id="modal-backdrop" class="modal-backdrop hidden">
+          <div id="campaign-edit-modal" class="modal hidden">
+            <div class="modal-header">
+              <h3>Edit campaign</h3>
+              <button id="close-campaign-edit" type="button" class="btn ghost">Close</button>
+            </div>
+            <div class="modal-body">
+              <div class="field">
+                <label for="campaign-edit-system">System</label>
+                <input id="campaign-edit-system" type="text" />
+                <p class="field-hint">The ruleset or system in play.</p>
+              </div>
+              <div class="field">
+                <label for="campaign-edit-gm">GM/DM</label>
+                <input id="campaign-edit-gm" type="text" />
+              </div>
+              <div class="field">
+                <label for="campaign-edit-setting">Setting</label>
+                <input id="campaign-edit-setting" type="text" />
+              </div>
+              <div class="field">
+                <label for="campaign-edit-language">Default language</label>
+                <input id="campaign-edit-language" type="text" />
+              </div>
+              <div class="field">
+                <label>Players</label>
+                <div id="campaign-player-rows" class="list-stack"></div>
+                <button id="add-campaign-player" type="button" class="btn ghost">
+                  Add player
+                </button>
+              </div>
+              <div class="field">
+                <label for="campaign-edit-extra">Additional information</label>
+                <textarea id="campaign-edit-extra" rows="4"></textarea>
+                <p class="field-hint">World name, frame, or special campaign notes.</p>
+              </div>
+              <div id="campaign-edit-status" class="status hidden"></div>
+            </div>
+            <div class="modal-footer">
+              <button id="save-campaign-edit" type="button" class="btn primary">
+                Save changes
+              </button>
+            </div>
+          </div>
+
+          <div id="session-edit-modal" class="modal hidden">
+            <div class="modal-header">
+              <h3>Edit session</h3>
+              <button id="close-session-edit" type="button" class="btn ghost">Close</button>
+            </div>
+            <div class="modal-body">
+              <div class="field">
+                <label for="session-edit-title">Title</label>
+                <input id="session-edit-title" type="text" />
+              </div>
+              <div class="field">
+                <label for="session-edit-date">Date</label>
+                <input id="session-edit-date" type="date" />
+              </div>
+              <div class="field">
+                <label for="session-edit-number">Session #</label>
+                <input id="session-edit-number" type="number" />
+              </div>
+              <div class="field">
+                <label for="session-edit-notes">Notes</label>
+                <textarea id="session-edit-notes" rows="4"></textarea>
+              </div>
+              <div class="field">
+                <label for="session-edit-tags">Tags</label>
+                <input id="session-edit-tags" type="text" placeholder="Coming soon" disabled />
+              </div>
+              <div id="session-edit-status" class="status hidden"></div>
+            </div>
+            <div class="modal-footer">
+              <button id="save-session-edit" type="button" class="btn primary">Save</button>
+            </div>
+          </div>
+
+          <div id="transcribe-modal" class="modal hidden">
+            <div class="modal-header">
+              <h3>Transcribe session</h3>
+              <button id="close-transcribe-modal" type="button" class="btn ghost">Close</button>
+            </div>
+            <div class="modal-body">
+              <div class="grid two">
+                <div class="field">
+                  <label for="modal-transcribe-provider">Provider</label>
+                  <select id="modal-transcribe-provider"></select>
+                </div>
+                <div class="field">
+                  <label for="modal-transcribe-model">Model</label>
+                  <select id="modal-transcribe-model"></select>
+                </div>
+                <input id="modal-transcribe-language" type="text" placeholder="Language (en/de)" />
+                <input id="modal-transcribe-hf" type="password" placeholder="HF token (optional)" />
+              </div>
+              <div id="modal-transcribe-status" class="status"></div>
+            </div>
+            <div class="modal-footer">
+              <button id="run-transcribe" type="button" class="btn primary">Run</button>
+            </div>
+          </div>
+
+          <div id="transcript-viewer-modal" class="modal hidden">
+            <div class="modal-header">
+              <h3 id="transcript-viewer-title">Transcript</h3>
+              <button id="close-transcript-viewer" type="button" class="btn ghost">Close</button>
+            </div>
+            <div class="modal-body">
+              <pre id="transcript-viewer-content" class="modal-preview-text"></pre>
+            </div>
+          </div>
+
+          <div id="summarize-modal" class="modal hidden">
+            <div class="modal-header">
+              <h3>Summarize session</h3>
+              <button id="close-summarize-modal" type="button" class="btn ghost">Close</button>
+            </div>
+            <div class="modal-body">
+              <div class="grid two">
+                <select id="modal-transcript-select"></select>
+                <select id="modal-summary-provider">
+                  <option value="ollama">Ollama</option>
+                  <option value="gemini">Gemini</option>
+                </select>
+                <input id="modal-summary-model" type="text" placeholder="Model (optional)" />
+                <input id="modal-summary-base-url" type="text" placeholder="Ollama base URL (optional)" />
+                <input id="modal-summary-title" type="text" placeholder="Summary title (optional)" />
+                <input id="modal-summary-context" type="text" placeholder="Context (optional)" />
+              </div>
+              <div id="modal-summary-status" class="status"></div>
+              <div class="modal-preview">
+                <h4>Preview</h4>
+                <pre id="modal-summary-preview"></pre>
+              </div>
+            </div>
+            <div class="modal-footer">
+              <button id="run-summarize" type="button" class="btn primary">Run</button>
+            </div>
+          </div>
         </div>
 
         <footer class="footer">

@@ -9,13 +9,14 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from app.storage.config import (
+from app.storage.campaigns import (
     get_campaign,
-    get_campaigns,
-    get_config,
-    increment_session_number,
+    get_session_metadata,
+    list_sessions_for_campaign,
+    upsert_session_metadata,
     update_campaign,
 )
+from app.storage.config import get_config
 
 
 STAGING_DIR_NAME = "_sessions"
@@ -77,16 +78,27 @@ def create_campaign_session(
     if not campaign:
         raise FileNotFoundError(f"Campaign not found: {campaign_id}")
 
+    current_next = int(campaign.get("next_session_number", 1))
+    campaign_name = campaign.get("name") or campaign_id
+    safe_campaign = _sanitize_folder_name(campaign_name)
+
+    def _session_number_in_use(number: int) -> bool:
+        if any(
+            item.get("session_number") == number
+            for item in list_sessions_for_campaign(campaign_id)
+        ):
+            return True
+        target_path = ensure_output_root() / safe_campaign / str(number)
+        return target_path.exists()
+
     if session_number is None:
-        session_number = int(campaign.get("next_session_number", 1))
-        increment_session_number(campaign_id)
-    else:
-        current_next = int(campaign.get("next_session_number", 1))
-        if session_number >= current_next:
-            update_campaign(
-                campaign_id,
-                {"next_session_number": int(session_number) + 1},
-            )
+        session_number = current_next
+        while _session_number_in_use(session_number):
+            session_number += 1
+    elif _session_number_in_use(session_number):
+        raise FileExistsError(
+            f"Session number already exists for campaign {campaign_id}: {session_number}"
+        )
 
     session = create_session()
     set_campaign_metadata(
@@ -96,6 +108,11 @@ def create_campaign_session(
         title=title,
         date=date,
     )
+    if session_number >= current_next:
+        update_campaign(
+            campaign_id,
+            {"next_session_number": int(session_number) + 1},
+        )
     return load_session(session["session_id"])
 
 
@@ -114,7 +131,9 @@ def load_session(session_id: str) -> dict[str, Any]:
     session_file = _session_file_path(session_path)
     if not session_file.exists():
         raise FileNotFoundError(f"Session not found: {session_id}")
-    return json.loads(session_file.read_text(encoding="utf-8"))
+    data = json.loads(session_file.read_text(encoding="utf-8"))
+    _sync_session_metadata(session_id, data)
+    return data
 
 
 def save_session(session_id: str, data: dict[str, Any]) -> None:
@@ -137,15 +156,16 @@ def set_campaign_metadata(
     session_number: int | None = None,
     title: str | None = None,
     date: str | None = None,
+    tags: list[str] | None = None,
+    notes: str | None = None,
 ) -> dict[str, Any]:
     """Set campaign/session metadata for a session."""
     data = load_session(session_id)
     campaign_name = None
     if campaign_id:
-        for campaign in get_campaigns():
-            if campaign.get("campaign_id") == campaign_id:
-                campaign_name = campaign.get("name")
-                break
+        campaign = get_campaign(campaign_id)
+        if campaign:
+            campaign_name = campaign.get("name")
 
     data["campaign"] = {
         "campaign_id": campaign_id,
@@ -153,7 +173,18 @@ def set_campaign_metadata(
         "session_number": session_number,
         "title": title,
         "date": date,
+        "tags": tags or [],
+        "notes": notes or "",
     }
+    upsert_session_metadata(
+        session_id=session_id,
+        campaign_id=campaign_id,
+        session_number=session_number,
+        title=title,
+        date=date,
+        tags=tags,
+        notes=notes,
+    )
     data = _relocate_session_folder(session_id, data)
     return data["campaign"]
 
@@ -295,6 +326,31 @@ def list_sessions() -> list[dict[str, Any]]:
 
 def list_campaign_sessions(campaign_id: str) -> list[dict[str, Any]]:
     """List sessions for a campaign."""
+    db_sessions = list_sessions_for_campaign(campaign_id)
+    if db_sessions:
+        sessions: list[dict[str, Any]] = []
+        for item in db_sessions:
+            session_id = item.get("session_id")
+            transcription = {}
+            summary = {}
+            try:
+                session = load_session(session_id)
+                transcription = session.get("transcription") or {}
+                summary = session.get("summary") or {}
+            except FileNotFoundError:
+                pass
+            sessions.append(
+                {
+                    "session_id": session_id,
+                    "session_number": item.get("session_number"),
+                    "title": item.get("title"),
+                    "date": item.get("date"),
+                    "has_transcription": bool(transcription.get("text_path")),
+                    "has_summary": bool(summary.get("summary_path")),
+                }
+            )
+        return sessions
+
     sessions = []
     output_root = ensure_output_root()
     for session_file in output_root.rglob("session.json"):
@@ -323,6 +379,43 @@ def list_campaign_sessions(campaign_id: str) -> list[dict[str, Any]]:
     return sessions
 
 
+def get_campaign_metadata(session_id: str) -> dict[str, Any]:
+    """Return campaign metadata from the database or session file."""
+    db_metadata = get_session_metadata(session_id)
+    if db_metadata:
+        campaign_name = None
+        if db_metadata.get("campaign_id"):
+            campaign = get_campaign(db_metadata["campaign_id"])
+            if campaign:
+                campaign_name = campaign.get("name")
+        return {
+            "campaign_id": db_metadata.get("campaign_id"),
+            "campaign_name": campaign_name,
+            "session_number": db_metadata.get("session_number"),
+            "title": db_metadata.get("title"),
+            "date": db_metadata.get("date"),
+            "tags": db_metadata.get("tags") or [],
+            "notes": db_metadata.get("notes") or "",
+        }
+    session = load_session(session_id)
+    return session.get("campaign", {})
+
+
+def _sync_session_metadata(session_id: str, data: dict[str, Any]) -> None:
+    campaign = data.get("campaign") or {}
+    if not campaign:
+        return
+    upsert_session_metadata(
+        session_id=session_id,
+        campaign_id=campaign.get("campaign_id"),
+        session_number=campaign.get("session_number"),
+        title=campaign.get("title"),
+        date=campaign.get("date"),
+        tags=campaign.get("tags"),
+        notes=campaign.get("notes"),
+    )
+
+
 def list_transcripts(session_id: str) -> list[dict[str, Any]]:
     """List transcript files for a session."""
     session_path = get_session_path(session_id)
@@ -345,6 +438,32 @@ def list_transcripts(session_id: str) -> list[dict[str, Any]]:
         )
     transcripts.sort(key=lambda item: item["modified_time"], reverse=True)
     return transcripts
+
+
+def delete_transcript(session_id: str, provider_model: str) -> None:
+    """Delete a specific transcript folder for a session."""
+    session_path = get_session_path(session_id)
+    transcript_dir = session_path / "transcriptions" / provider_model
+    if not transcript_dir.exists():
+        raise FileNotFoundError(f"Transcript not found: {provider_model}")
+    shutil.rmtree(transcript_dir)
+
+    # If the session's active transcription pointed into this folder, clear it
+    data = load_session(session_id)
+    transcription = data.get("transcription") or {}
+    text_path = transcription.get("text_path") or ""
+    if text_path and Path(text_path).is_relative_to(transcript_dir):
+        data["transcription"] = {}
+        save_session(session_id, data)
+
+
+def read_transcript_content(session_id: str, provider_model: str) -> str:
+    """Read and return the text content of a transcript."""
+    session_path = get_session_path(session_id)
+    transcript_file = session_path / "transcriptions" / provider_model / "transcript.txt"
+    if not transcript_file.exists():
+        raise FileNotFoundError(f"Transcript file not found: {provider_model}")
+    return transcript_file.read_text(encoding="utf-8")
 
 
 def delete_session(session_id: str) -> None:

@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+from app.logging_config import get_logger
 from app.services.sessions import get_session_path, load_session, save_session
 from app.services.transcription import get_provider
 from app.services.transcription.formatting import save_transcription_result
 from app.storage.config import get_transcription_config
+
+log = get_logger("transcribe")
 
 
 def transcribe_session(
@@ -13,7 +16,9 @@ def transcribe_session(
     language: str | None = None,
     model: str | None = None,
     hf_token: str | None = None,
+    provider: str | None = None,
 ) -> dict:
+    log.info("transcribe session=%s provider=%s model=%s lang=%s", session_id, provider, model, language)
     session = load_session(session_id)
     session_path = get_session_path(session_id)
     tracks = session.get("tracks") or []
@@ -22,9 +27,10 @@ def transcribe_session(
 
     config = get_transcription_config()
     language = language or "en"
+    provider_name = provider or "whisperx"
     model_name = model or config.whisperx_model
 
-    provider = get_provider("whisperx", model_name=model_name)
+    provider = get_provider(provider_name, model_name=model_name)
     result = provider.transcribe_session(
         session_path=session_path,
         tracks=tracks,
@@ -37,6 +43,7 @@ def transcribe_session(
         result=result,
         session_path=session_path,
         provider_model=provider_model,
+        speakers=session.get("speakers"),
     )
 
     session["transcription"] = {

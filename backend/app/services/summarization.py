@@ -10,9 +10,12 @@ from typing import Any
 import requests
 from google import genai
 
+from app.logging_config import get_logger
 from app.prompts import build_metadata_prompt, build_summary_prompt
 from app.services.sessions import get_session_path, load_session, save_session
 from app.storage.config import get_summarization_config
+
+log = get_logger("summarization")
 
 
 class SummarizationError(Exception):
@@ -28,27 +31,39 @@ class SummarizeResult:
     metadata: dict[str, Any] | None
 
 
+def _log_prompt(provider: str, prompt: str) -> None:
+    log.debug("[%s] prompt (%d chars):\n%s", provider, len(prompt), prompt)
+
+
+def _log_response(provider: str, text: str) -> None:
+    log.debug("[%s] response (%d chars):\n%s", provider, len(text), text)
+
+
 def _call_ollama(prompt: str, *, model: str, base_url: str, timeout: int) -> str:
+    url = f"{base_url.rstrip('/')}/api/generate"
+    log.info("Ollama request  model=%s url=%s", model, url)
+    _log_prompt("ollama", prompt)
     response = requests.post(
-        f"{base_url.rstrip('/')}/api/generate",
-        json={
-            "model": model,
-            "prompt": prompt,
-            "stream": False,
-        },
+        url,
+        json={"model": model, "prompt": prompt, "stream": False},
         timeout=timeout,
     )
     response.raise_for_status()
-    payload = response.json()
-    return (payload.get("response") or "").strip()
+    result = (response.json().get("response") or "").strip()
+    _log_response("ollama", result)
+    return result
 
 
 def _call_gemini(prompt: str, *, api_key: str, model: str) -> str:
     if not api_key:
         raise SummarizationError("Gemini API key is required.")
+    log.info("Gemini request  model=%s", model)
+    _log_prompt("gemini", prompt)
     client = genai.Client(api_key=api_key)
     response = client.models.generate_content(model=model, contents=prompt)
-    return (response.text or "").strip()
+    result = (response.text or "").strip()
+    _log_response("gemini", result)
+    return result
 
 
 def _parse_metadata(raw_text: str) -> dict[str, Any] | None:
@@ -69,6 +84,7 @@ def summarize_session(
     base_url: str | None = None,
 ) -> SummarizeResult:
     """Summarize a session transcript and persist results."""
+    log.info("summarize session=%s provider=%s model=%s", session_id, provider, model)
     session = load_session(session_id)
     config = get_summarization_config()
 

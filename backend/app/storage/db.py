@@ -16,6 +16,35 @@ SCHEMA_STATEMENTS = [
         value TEXT NOT NULL
     )
     """,
+    """
+    CREATE TABLE IF NOT EXISTS campaigns (
+        campaign_id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        next_session_number INTEGER NOT NULL DEFAULT 1,
+        system TEXT,
+        gm TEXT,
+        setting TEXT,
+        default_language TEXT,
+        players_json TEXT NOT NULL DEFAULT '[]',
+        extra_info TEXT
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS sessions (
+        session_id TEXT PRIMARY KEY,
+        campaign_id TEXT,
+        session_number INTEGER,
+        title TEXT,
+        date TEXT,
+        tags_json TEXT NOT NULL DEFAULT '[]',
+        notes TEXT,
+        FOREIGN KEY (campaign_id) REFERENCES campaigns(campaign_id)
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_sessions_campaign_id
+    ON sessions(campaign_id)
+    """,
 ]
 
 

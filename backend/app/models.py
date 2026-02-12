@@ -53,6 +53,8 @@ class SessionMetadataRequest(BaseModel):
     session_number: int | None = None
     title: str | None = None
     date: str | None = None
+    tags: list[str] | None = None
+    notes: str | None = None
 
 
 class TranscribeRequest(BaseModel):
@@ -60,8 +62,12 @@ class TranscribeRequest(BaseModel):
 
     session_id: str
     language: str | None = Field(default=None, description="Language code override")
-    model: str | None = Field(default=None, description="WhisperX model override")
+    model: str | None = Field(default=None, description="Whisper model override")
     hf_token: str | None = Field(default=None, description="HuggingFace token override")
+    provider: str | None = Field(
+        default=None,
+        description="Transcription provider (whisperx or insanely-fast-whisper)",
+    )
 
 
 class TranscribeResponse(BaseModel):
@@ -205,7 +211,8 @@ class CampaignDetail(BaseModel):
     gm: str | None = None
     setting: str | None = None
     default_language: str | None = None
-    players: list[str] = []
+    players: list[dict] = []
+    extra_info: str | None = None
 
 
 class CampaignsResponse(BaseModel):
@@ -231,7 +238,8 @@ class CampaignUpdateRequest(BaseModel):
     gm: str | None = None
     setting: str | None = None
     default_language: str | None = None
-    players: list[str] | str | None = None
+    players: list[dict] | list[str] | str | None = None
+    extra_info: str | None = None
     next_session_number: int | None = None
 
 

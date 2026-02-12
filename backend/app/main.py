@@ -8,6 +8,10 @@ from pathlib import Path
 import fastapi
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.logging_config import setup_logging
+
+setup_logging()
+
 from app.models import (
     CampaignDetail,
     CampaignInfo,
@@ -46,10 +50,13 @@ from app.services.export import export_session
 from app.services.sessions import (
     create_campaign_session,
     delete_session,
+    delete_transcript,
+    get_campaign_metadata,
     load_session,
     list_campaign_sessions,
     list_sessions,
     list_transcripts,
+    read_transcript_content,
     save_session,
     set_campaign_metadata,
 )
@@ -57,7 +64,8 @@ from app.services.summarization import SummarizationError, summarize_session
 from app.services.transcribe import transcribe_session
 from app.services.transcription import get_available_providers
 from app.services.upload import extract_craig_zip
-from app.storage.config import get_config, increment_session_number, update_config
+from app.storage.campaigns import increment_session_number
+from app.storage.config import get_config, update_config
 
 
 app = fastapi.FastAPI(
@@ -131,6 +139,8 @@ def update_session_metadata(request: SessionMetadataRequest):
             session_number=session_number,
             title=request.title,
             date=request.date,
+            tags=request.tags,
+            notes=request.notes,
         )
         if should_increment and request.campaign_id:
             increment_session_number(request.campaign_id)
@@ -143,13 +153,14 @@ def update_session_metadata(request: SessionMetadataRequest):
 
 @app.post("/transcribe", response_model=TranscribeResponse)
 def transcribe(request: TranscribeRequest):
-    """Transcribe session tracks using WhisperX."""
+    """Transcribe session tracks."""
     try:
         result = transcribe_session(
             session_id=request.session_id,
             language=request.language,
             model=request.model,
             hf_token=request.hf_token,
+            provider=request.provider,
         )
         return TranscribeResponse(**result)
     except FileNotFoundError as exc:
@@ -271,8 +282,7 @@ def read_session(session_id: str):
 @app.get("/session/{session_id}/metadata")
 def read_session_metadata(session_id: str):
     try:
-        session = load_session(session_id)
-        return session.get("campaign", {})
+        return get_campaign_metadata(session_id)
     except FileNotFoundError as exc:
         raise fastapi.HTTPException(status_code=404, detail=str(exc))
 
@@ -283,6 +293,28 @@ def read_session_transcripts(session_id: str):
         return [TranscriptInfo(**item) for item in list_transcripts(session_id)]
     except FileNotFoundError as exc:
         raise fastapi.HTTPException(status_code=404, detail=str(exc))
+
+
+@app.get("/sessions/{session_id}/transcripts/{provider_model}/content")
+def read_transcript_text(session_id: str, provider_model: str):
+    """Return the text content of a specific transcript."""
+    try:
+        content = read_transcript_content(session_id, provider_model)
+        return fastapi.responses.PlainTextResponse(content)
+    except FileNotFoundError as exc:
+        raise fastapi.HTTPException(status_code=404, detail=str(exc))
+
+
+@app.delete("/sessions/{session_id}/transcripts/{provider_model}")
+def remove_transcript(session_id: str, provider_model: str):
+    """Delete a specific transcript."""
+    try:
+        delete_transcript(session_id, provider_model)
+        return {"status": "deleted", "provider_model": provider_model}
+    except FileNotFoundError as exc:
+        raise fastapi.HTTPException(status_code=404, detail=str(exc))
+    except Exception as exc:
+        raise fastapi.HTTPException(status_code=500, detail=str(exc))
 
 
 @app.delete("/sessions/{session_id}")
@@ -363,6 +395,8 @@ def create_campaign_session_route(
         )
     except FileNotFoundError as exc:
         raise fastapi.HTTPException(status_code=404, detail=str(exc))
+    except FileExistsError as exc:
+        raise fastapi.HTTPException(status_code=409, detail=str(exc))
 
 
 @app.post("/campaigns")

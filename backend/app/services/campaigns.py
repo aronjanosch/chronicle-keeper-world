@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from app.storage.config import (
+from app.storage.campaigns import (
     create_campaign as _create_campaign,
     get_campaign as _get_campaign,
     get_campaigns as _get_campaigns,

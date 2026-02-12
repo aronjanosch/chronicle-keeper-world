@@ -16,4 +16,6 @@ dependencies = [
     "numpy==2.0.2",
     "ollama>=0.6.1",
     "google-genai>=1.55.0",
+    "insanely-fast-whisper>=0.0.15",
+    "mlx-audio[stt]>=0.2.10",
 ]
