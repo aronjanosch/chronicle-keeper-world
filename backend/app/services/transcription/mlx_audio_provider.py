@@ -154,7 +154,7 @@ class MLXAudioProvider(TranscriptionProvider):
     def _load_model(self):
         """Lazy-load the mlx-audio STT model."""
         if self._model is None:
-            from mlx_audio.stt import load
+            from mlx_audio.stt.utils import load
 
             log.info("Loading mlx-audio STT model: %s", self._model_name)
             self._model = load(self._model_name)
@@ -165,8 +165,14 @@ class MLXAudioProvider(TranscriptionProvider):
         model = self._load_model()
 
         log.info("Transcribing: %s", audio_path)
-        result = model.generate(str(audio_path))
 
+        # Use chunked processing for Parakeet to avoid OOM on long files.
+        # Parakeet processes the full audio at once by default (chunk_duration=None),
+        # which exceeds Metal buffer limits on long recordings.
+        if "parakeet" in self._model_name.lower():
+            result = model.generate(str(audio_path), chunk_duration=600.0)
+        else:
+            result = model.generate(str(audio_path))
         return _parse_result(result)
 
     def transcribe_session(

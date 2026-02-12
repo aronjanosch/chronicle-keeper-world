@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import shutil
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -15,6 +14,12 @@ from app.storage.campaigns import (
     list_sessions_for_campaign,
     upsert_session_metadata,
     update_campaign,
+)
+from app.storage.artifacts import (
+    delete_artifact,
+    delete_artifacts_for_session,
+    get_artifact,
+    list_artifacts,
 )
 from app.storage.config import get_config
 
@@ -308,16 +313,17 @@ def list_sessions() -> list[dict[str, Any]]:
             data = json.loads(session_file.read_text(encoding="utf-8"))
         except json.JSONDecodeError:
             continue
-        transcription = data.get("transcription") or {}
-        summary = data.get("summary") or {}
+        sid = data.get("session_id", session_file.parent.name)
+        transcripts = list_artifacts(sid, "transcript")
+        summaries = list_artifacts(sid, "summary")
         sessions.append(
             {
-                "session_id": data.get("session_id", session_file.parent.name),
+                "session_id": sid,
                 "session_path": str(session_file.parent),
-                "has_transcription": bool(transcription.get("text_path")),
-                "has_summary": bool(summary.get("summary_path")),
-                "transcript_path": transcription.get("text_path"),
-                "summary_path": summary.get("summary_path"),
+                "has_transcription": bool(transcripts),
+                "has_summary": bool(summaries),
+                "transcript_path": transcripts[0]["file_path"] if transcripts else None,
+                "summary_path": summaries[0]["file_path"] if summaries else None,
             }
         )
     sessions.sort(key=lambda item: item["session_id"], reverse=True)
@@ -331,22 +337,16 @@ def list_campaign_sessions(campaign_id: str) -> list[dict[str, Any]]:
         sessions: list[dict[str, Any]] = []
         for item in db_sessions:
             session_id = item.get("session_id")
-            transcription = {}
-            summary = {}
-            try:
-                session = load_session(session_id)
-                transcription = session.get("transcription") or {}
-                summary = session.get("summary") or {}
-            except FileNotFoundError:
-                pass
+            transcripts = list_artifacts(session_id, "transcript")
+            summaries = list_artifacts(session_id, "summary")
             sessions.append(
                 {
                     "session_id": session_id,
                     "session_number": item.get("session_number"),
                     "title": item.get("title"),
                     "date": item.get("date"),
-                    "has_transcription": bool(transcription.get("text_path")),
-                    "has_summary": bool(summary.get("summary_path")),
+                    "has_transcription": bool(transcripts),
+                    "has_summary": bool(summaries),
                 }
             )
         return sessions
@@ -363,16 +363,17 @@ def list_campaign_sessions(campaign_id: str) -> list[dict[str, Any]]:
         campaign = data.get("campaign") or {}
         if campaign.get("campaign_id") != campaign_id:
             continue
-        transcription = data.get("transcription") or {}
-        summary = data.get("summary") or {}
+        sid = data.get("session_id", session_file.parent.name)
+        transcripts = list_artifacts(sid, "transcript")
+        summaries = list_artifacts(sid, "summary")
         sessions.append(
             {
-                "session_id": data.get("session_id", session_file.parent.name),
+                "session_id": sid,
                 "session_number": campaign.get("session_number"),
                 "title": campaign.get("title"),
                 "date": campaign.get("date"),
-                "has_transcription": bool(transcription.get("text_path")),
-                "has_summary": bool(summary.get("summary_path")),
+                "has_transcription": bool(transcripts),
+                "has_summary": bool(summaries),
             }
         )
     sessions.sort(key=lambda item: item.get("session_number") or 0, reverse=True)
@@ -416,37 +417,18 @@ def _sync_session_metadata(session_id: str, data: dict[str, Any]) -> None:
     )
 
 
-def list_transcripts(session_id: str) -> list[dict[str, Any]]:
-    """List transcript files for a session."""
-    session_path = get_session_path(session_id)
-    transcription_root = session_path / "transcriptions"
-    if not transcription_root.exists():
-        return []
+def delete_transcript(session_id: str, artifact_id: int) -> None:
+    """Delete a transcript artifact and its files."""
+    artifact = get_artifact(artifact_id)
+    if not artifact or artifact["session_id"] != session_id:
+        raise FileNotFoundError(f"Transcript artifact not found: {artifact_id}")
 
-    transcripts: list[dict[str, Any]] = []
-    for transcript_path in transcription_root.glob("*/transcript.txt"):
-        try:
-            stat = transcript_path.stat()
-        except OSError:
-            continue
-        transcripts.append(
-            {
-                "transcript_path": str(transcript_path),
-                "provider_model": transcript_path.parent.name,
-                "modified_time": datetime.fromtimestamp(stat.st_mtime).isoformat(),
-            }
-        )
-    transcripts.sort(key=lambda item: item["modified_time"], reverse=True)
-    return transcripts
+    file_path = Path(artifact["file_path"])
+    transcript_dir = file_path.parent
+    if transcript_dir.exists():
+        shutil.rmtree(transcript_dir)
 
-
-def delete_transcript(session_id: str, provider_model: str) -> None:
-    """Delete a specific transcript folder for a session."""
-    session_path = get_session_path(session_id)
-    transcript_dir = session_path / "transcriptions" / provider_model
-    if not transcript_dir.exists():
-        raise FileNotFoundError(f"Transcript not found: {provider_model}")
-    shutil.rmtree(transcript_dir)
+    delete_artifact(artifact_id)
 
     # If the session's active transcription pointed into this folder, clear it
     data = load_session(session_id)
@@ -457,16 +439,33 @@ def delete_transcript(session_id: str, provider_model: str) -> None:
         save_session(session_id, data)
 
 
-def read_transcript_content(session_id: str, provider_model: str) -> str:
-    """Read and return the text content of a transcript."""
-    session_path = get_session_path(session_id)
-    transcript_file = session_path / "transcriptions" / provider_model / "transcript.txt"
-    if not transcript_file.exists():
-        raise FileNotFoundError(f"Transcript file not found: {provider_model}")
-    return transcript_file.read_text(encoding="utf-8")
+def delete_summary(session_id: str, artifact_id: int) -> None:
+    """Delete a summary artifact and its file."""
+    artifact = get_artifact(artifact_id)
+    if not artifact or artifact["session_id"] != session_id:
+        raise FileNotFoundError(f"Summary artifact not found: {artifact_id}")
+
+    file_path = Path(artifact["file_path"])
+    summary_dir = file_path.parent
+    if summary_dir.exists():
+        shutil.rmtree(summary_dir)
+
+    delete_artifact(artifact_id)
+
+
+def read_artifact_content(session_id: str, artifact_id: int) -> str:
+    """Read and return the text content of an artifact."""
+    artifact = get_artifact(artifact_id)
+    if not artifact or artifact["session_id"] != session_id:
+        raise FileNotFoundError(f"Artifact not found: {artifact_id}")
+    file_path = Path(artifact["file_path"])
+    if not file_path.exists():
+        raise FileNotFoundError(f"Artifact file not found: {file_path}")
+    return file_path.read_text(encoding="utf-8")
 
 
 def delete_session(session_id: str) -> None:
-    """Delete a session folder and data."""
+    """Delete a session folder, data, and artifact rows."""
     session_path = get_session_path(session_id)
+    delete_artifacts_for_session(session_id)
     shutil.rmtree(session_path)

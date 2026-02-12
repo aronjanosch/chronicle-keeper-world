@@ -7,12 +7,15 @@ from pathlib import Path
 
 import fastapi
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
-from app.logging_config import setup_logging
+from app.logging_config import get_logger, setup_logging
 
 setup_logging()
+log = get_logger("api")
 
 from app.models import (
+    ArtifactInfo,
     CampaignDetail,
     CampaignInfo,
     CampaignSessionInfo,
@@ -32,7 +35,6 @@ from app.models import (
     SessionMetadataRequest,
     SummarizeRequest,
     SummarizeResponse,
-    TranscriptInfo,
     TranscribeRequest,
     TranscribeResponse,
     UpdateConfigRequest,
@@ -50,16 +52,17 @@ from app.services.export import export_session
 from app.services.sessions import (
     create_campaign_session,
     delete_session,
+    delete_summary,
     delete_transcript,
     get_campaign_metadata,
     load_session,
     list_campaign_sessions,
     list_sessions,
-    list_transcripts,
-    read_transcript_content,
+    read_artifact_content,
     save_session,
     set_campaign_metadata,
 )
+from app.storage.artifacts import list_artifacts
 from app.services.summarization import SummarizationError, summarize_session
 from app.services.transcribe import transcribe_session
 from app.services.transcription import get_available_providers
@@ -82,6 +85,13 @@ app.add_middleware(
 )
 
 
+@app.exception_handler(Exception)
+async def _unhandled_error(_request: fastapi.Request, exc: Exception):
+    """Log full traceback for any unhandled exception, then return 500."""
+    log.exception("Unhandled error: %s", exc)
+    return JSONResponse(status_code=500, content={"detail": str(exc)})
+
+
 @app.post("/upload", response_model=UploadResponse)
 async def upload_craig_zip(
     file: fastapi.UploadFile = fastapi.File(...),
@@ -99,8 +109,6 @@ async def upload_craig_zip(
         return UploadResponse(**result)
     except ValueError as exc:
         raise fastapi.HTTPException(status_code=400, detail=str(exc))
-    except Exception as exc:
-        raise fastapi.HTTPException(status_code=500, detail=str(exc))
     finally:
         if temp_path:
             Path(temp_path).unlink(missing_ok=True)
@@ -119,8 +127,6 @@ def label_speakers(request: LabelSpeakersRequest):
         )
     except FileNotFoundError as exc:
         raise fastapi.HTTPException(status_code=404, detail=str(exc))
-    except Exception as exc:
-        raise fastapi.HTTPException(status_code=500, detail=str(exc))
 
 
 @app.post("/session-metadata")
@@ -147,8 +153,6 @@ def update_session_metadata(request: SessionMetadataRequest):
         return {"status": "success", "campaign": campaign}
     except FileNotFoundError as exc:
         raise fastapi.HTTPException(status_code=404, detail=str(exc))
-    except Exception as exc:
-        raise fastapi.HTTPException(status_code=500, detail=str(exc))
 
 
 @app.post("/transcribe", response_model=TranscribeResponse)
@@ -165,8 +169,6 @@ def transcribe(request: TranscribeRequest):
         return TranscribeResponse(**result)
     except FileNotFoundError as exc:
         raise fastapi.HTTPException(status_code=400, detail=str(exc))
-    except Exception as exc:
-        raise fastapi.HTTPException(status_code=500, detail=str(exc))
 
 
 @app.post("/estimate-tokens", response_model=EstimateTokensResponse)
@@ -183,6 +185,14 @@ def estimate_tokens(request: EstimateTokensRequest):
     return EstimateTokensResponse(**result)
 
 
+@app.get("/prompts")
+def get_prompts():
+    """Return available system prompt presets."""
+    from app.prompts import get_available_prompts
+
+    return get_available_prompts()
+
+
 @app.post("/summarize", response_model=SummarizeResponse)
 def summarize(request: SummarizeRequest):
     """Summarize a session transcript."""
@@ -196,6 +206,7 @@ def summarize(request: SummarizeRequest):
             provider=request.provider,
             model=request.model,
             base_url=request.base_url,
+            system_prompt=request.system_prompt,
         )
         return SummarizeResponse(
             summary=result.summary,
@@ -228,8 +239,6 @@ def export_notes(request: ExportRequest):
         raise fastapi.HTTPException(status_code=404, detail=str(exc))
     except ValueError as exc:
         raise fastapi.HTTPException(status_code=400, detail=str(exc))
-    except Exception as exc:
-        raise fastapi.HTTPException(status_code=500, detail=str(exc))
 
 
 @app.get("/config", response_model=ConfigResponse)
@@ -287,34 +296,54 @@ def read_session_metadata(session_id: str):
         raise fastapi.HTTPException(status_code=404, detail=str(exc))
 
 
-@app.get("/sessions/{session_id}/transcripts", response_model=list[TranscriptInfo])
+@app.get("/sessions/{session_id}/transcripts", response_model=list[ArtifactInfo])
 def read_session_transcripts(session_id: str):
-    try:
-        return [TranscriptInfo(**item) for item in list_transcripts(session_id)]
-    except FileNotFoundError as exc:
-        raise fastapi.HTTPException(status_code=404, detail=str(exc))
+    return [ArtifactInfo(**item) for item in list_artifacts(session_id, "transcript")]
 
 
-@app.get("/sessions/{session_id}/transcripts/{provider_model}/content")
-def read_transcript_text(session_id: str, provider_model: str):
+@app.get("/sessions/{session_id}/transcripts/{artifact_id}/content")
+def read_transcript_text(session_id: str, artifact_id: int):
     """Return the text content of a specific transcript."""
     try:
-        content = read_transcript_content(session_id, provider_model)
+        content = read_artifact_content(session_id, artifact_id)
         return fastapi.responses.PlainTextResponse(content)
     except FileNotFoundError as exc:
         raise fastapi.HTTPException(status_code=404, detail=str(exc))
 
 
-@app.delete("/sessions/{session_id}/transcripts/{provider_model}")
-def remove_transcript(session_id: str, provider_model: str):
+@app.delete("/sessions/{session_id}/transcripts/{artifact_id}")
+def remove_transcript(session_id: str, artifact_id: int):
     """Delete a specific transcript."""
     try:
-        delete_transcript(session_id, provider_model)
-        return {"status": "deleted", "provider_model": provider_model}
+        delete_transcript(session_id, artifact_id)
+        return {"status": "deleted", "artifact_id": artifact_id}
     except FileNotFoundError as exc:
         raise fastapi.HTTPException(status_code=404, detail=str(exc))
-    except Exception as exc:
-        raise fastapi.HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/sessions/{session_id}/summaries", response_model=list[ArtifactInfo])
+def read_session_summaries(session_id: str):
+    return [ArtifactInfo(**item) for item in list_artifacts(session_id, "summary")]
+
+
+@app.get("/sessions/{session_id}/summaries/{artifact_id}/content")
+def read_summary_text(session_id: str, artifact_id: int):
+    """Return the text content of a specific summary."""
+    try:
+        content = read_artifact_content(session_id, artifact_id)
+        return fastapi.responses.PlainTextResponse(content)
+    except FileNotFoundError as exc:
+        raise fastapi.HTTPException(status_code=404, detail=str(exc))
+
+
+@app.delete("/sessions/{session_id}/summaries/{artifact_id}")
+def remove_summary(session_id: str, artifact_id: int):
+    """Delete a specific summary."""
+    try:
+        delete_summary(session_id, artifact_id)
+        return {"status": "deleted", "artifact_id": artifact_id}
+    except FileNotFoundError as exc:
+        raise fastapi.HTTPException(status_code=404, detail=str(exc))
 
 
 @app.delete("/sessions/{session_id}")
@@ -324,8 +353,6 @@ def remove_session(session_id: str):
         return {"status": "deleted", "session_id": session_id}
     except FileNotFoundError as exc:
         raise fastapi.HTTPException(status_code=404, detail=str(exc))
-    except Exception as exc:
-        raise fastapi.HTTPException(status_code=500, detail=str(exc))
 
 
 @app.get("/providers")
@@ -383,15 +410,14 @@ def create_campaign_session_route(
             date=request.date,
         )
         campaign = session.get("campaign") or {}
-        transcription = session.get("transcription") or {}
-        summary = session.get("summary") or {}
+        sid = session.get("session_id")
         return CampaignSessionInfo(
-            session_id=session.get("session_id"),
+            session_id=sid,
             session_number=campaign.get("session_number"),
             title=campaign.get("title"),
             date=campaign.get("date"),
-            has_transcription=bool(transcription.get("text_path")),
-            has_summary=bool(summary.get("summary_path")),
+            has_transcription=bool(list_artifacts(sid, "transcript")),
+            has_summary=bool(list_artifacts(sid, "summary")),
         )
     except FileNotFoundError as exc:
         raise fastapi.HTTPException(status_code=404, detail=str(exc))

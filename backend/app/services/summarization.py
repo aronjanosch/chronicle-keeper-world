@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 import json
 from pathlib import Path
 from typing import Any
@@ -13,6 +14,8 @@ from google import genai
 from app.logging_config import get_logger
 from app.prompts import build_metadata_prompt, build_summary_prompt
 from app.services.sessions import get_session_path, load_session, save_session
+from app.storage.artifacts import insert_artifact
+from app.storage.campaigns import get_campaign
 from app.storage.config import get_summarization_config
 
 log = get_logger("summarization")
@@ -31,12 +34,22 @@ class SummarizeResult:
     metadata: dict[str, Any] | None
 
 
+_MAX_LOG_CHARS = 2000
+
+
+def _truncate(text: str) -> str:
+    if len(text) <= _MAX_LOG_CHARS:
+        return text
+    half = _MAX_LOG_CHARS // 2
+    return f"{text[:half]}\n\n... ({len(text) - _MAX_LOG_CHARS} chars truncated) ...\n\n{text[-half:]}"
+
+
 def _log_prompt(provider: str, prompt: str) -> None:
-    log.debug("[%s] prompt (%d chars):\n%s", provider, len(prompt), prompt)
+    log.debug("[%s] prompt (%d chars):\n%s", provider, len(prompt), _truncate(prompt))
 
 
 def _log_response(provider: str, text: str) -> None:
-    log.debug("[%s] response (%d chars):\n%s", provider, len(text), text)
+    log.debug("[%s] response (%d chars):\n%s", provider, len(text), _truncate(text))
 
 
 def _call_ollama(prompt: str, *, model: str, base_url: str, timeout: int) -> str:
@@ -82,6 +95,7 @@ def summarize_session(
     provider: str | None = None,
     model: str | None = None,
     base_url: str | None = None,
+    system_prompt: str | None = None,
 ) -> SummarizeResult:
     """Summarize a session transcript and persist results."""
     log.info("summarize session=%s provider=%s model=%s", session_id, provider, model)
@@ -95,8 +109,32 @@ def summarize_session(
     transcript_text = Path(transcript_path).read_text(encoding="utf-8")
     language = config.default_language
 
+    # Gather session & campaign metadata for the prompt
+    session_context: dict[str, Any] = {}
+    campaign_data = session.get("campaign") or {}
+    if campaign_data.get("campaign_id"):
+        campaign = get_campaign(campaign_data["campaign_id"])
+        if campaign:
+            session_context["campaign_name"] = campaign.get("name")
+            session_context["system"] = campaign.get("system")
+            session_context["setting"] = campaign.get("setting")
+            session_context["gm"] = campaign.get("gm")
+            session_context["extra_info"] = campaign.get("extra_info")
+        session_context["campaign_name"] = session_context.get("campaign_name") or campaign_data.get("campaign_name")
+    session_context["session_number"] = campaign_data.get("session_number")
+    session_context["title"] = campaign_data.get("title") or title
+    session_context["date"] = campaign_data.get("date")
+    session_context["speakers"] = session.get("speakers") or []
+
     summary_prompt = build_summary_prompt(
-        transcript_text, title=title, context=context, language=language
+        transcript_text,
+        title=title,
+        context=context,
+        language=language,
+        system_prompt=system_prompt,
+        session_context=session_context if any(
+            v for k, v in session_context.items() if k != "speakers" and v
+        ) or session_context.get("speakers") else None,
     )
 
     provider = (provider or config.summary_provider).lower()
@@ -132,11 +170,16 @@ def summarize_session(
     if output_path:
         summary_path = Path(output_path)
     else:
-        summary_dir = session_path / "summaries"
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        safe_provider = provider.replace("/", "_")
+        safe_model = model_name.replace("/", "_")
+        summary_dir = session_path / "summaries" / f"{safe_provider}_{safe_model}_{timestamp}"
         summary_dir.mkdir(parents=True, exist_ok=True)
         summary_path = summary_dir / "summary.md"
 
     summary_path.write_text(summary_text, encoding="utf-8")
+
+    insert_artifact(session_id, "summary", provider, model_name, str(summary_path))
 
     session["summary"] = {
         "summary_path": str(summary_path),

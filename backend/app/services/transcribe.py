@@ -6,6 +6,7 @@ from app.logging_config import get_logger
 from app.services.sessions import get_session_path, load_session, save_session
 from app.services.transcription import get_provider
 from app.services.transcription.formatting import save_transcription_result
+from app.storage.artifacts import insert_artifact
 from app.storage.config import get_transcription_config
 
 log = get_logger("transcribe")
@@ -43,8 +44,9 @@ def transcribe_session(
         result=result,
         session_path=session_path,
         provider_model=provider_model,
-        speakers=session.get("speakers"),
     )
+
+    insert_artifact(session_id, "transcript", result.provider, provider_model, text_path)
 
     session["transcription"] = {
         "language": result.language,

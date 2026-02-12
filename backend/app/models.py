@@ -116,6 +116,10 @@ class SummarizeRequest(BaseModel):
     provider: str | None = Field(default=None, description="Provider override")
     model: str | None = Field(default=None, description="Model override")
     base_url: str | None = Field(default=None, description="Provider base URL override")
+    system_prompt: str | None = Field(
+        default=None,
+        description="Custom system prompt; overrides the built-in template when set",
+    )
 
 
 class SummarizeResponse(BaseModel):
@@ -155,12 +159,16 @@ class SessionInfo(BaseModel):
     summary_path: str | None = None
 
 
-class TranscriptInfo(BaseModel):
-    """Transcript file information."""
+class ArtifactInfo(BaseModel):
+    """Artifact (transcript or summary) information."""
 
-    transcript_path: str
-    provider_model: str
-    modified_time: str
+    id: int
+    session_id: str
+    kind: str
+    provider: str
+    model: str
+    file_path: str
+    created_at: str
 
 
 class UpdateConfigRequest(BaseModel):

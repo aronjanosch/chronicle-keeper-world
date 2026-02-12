@@ -611,6 +611,7 @@ pre {
   box-shadow: var(--shadow-soft);
   padding: 20px;
   width: min(720px, 90vw);
+  max-height: calc(100vh - 48px);
   display: flex;
   flex-direction: column;
   gap: 16px;
@@ -630,6 +631,8 @@ pre {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  overflow-y: auto;
+  min-height: 0;
 }
 
 .modal-preview {
@@ -652,6 +655,14 @@ pre {
   margin-bottom: 6px;
   font-size: 0.85rem;
   color: var(--text-secondary);
+}
+
+textarea#modal-system-prompt {
+  width: 100%;
+  font-family: var(--font-mono, "Fira Code", "Cascadia Code", monospace);
+  font-size: 0.82rem;
+  line-height: 1.5;
+  min-height: 120px;
 }
 
 textarea#export-preview {

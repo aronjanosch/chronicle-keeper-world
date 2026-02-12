@@ -45,6 +45,22 @@ SCHEMA_STATEMENTS = [
     CREATE INDEX IF NOT EXISTS idx_sessions_campaign_id
     ON sessions(campaign_id)
     """,
+    """
+    CREATE TABLE IF NOT EXISTS artifacts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        model TEXT NOT NULL,
+        file_path TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (session_id) REFERENCES sessions(session_id)
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_artifacts_session
+    ON artifacts(session_id, kind)
+    """,
 ]
 
 

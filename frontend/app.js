@@ -8,8 +8,10 @@ const state = {
   sessionTracks: [],
   sessionSpeakers: [],
   transcripts: [],
+  summaries: [],
   selectedTranscriptPath: null,
   providers: null,
+  promptPresets: null,
   campaignWizard: { step: 1, mode: "create" },
   sessionWizard: { step: 1, sessionId: null },
 };
@@ -355,6 +357,7 @@ function renderSessionOverview() {
 
   renderSessionSpeakers();
   renderSessionTranscripts();
+  renderSessionSummaries();
 
   qs("open-transcribe-modal").disabled = !session.tracks?.length;
   qs("open-summarize-modal").disabled = !state.transcripts.length;
@@ -393,13 +396,37 @@ function renderSessionTranscripts() {
   empty.classList.add("hidden");
   state.transcripts.forEach((item) => {
     const row = document.createElement("tr");
-    const date = new Date(item.modified_time).toLocaleString();
+    const date = new Date(item.created_at).toLocaleString();
     row.innerHTML = `
-      <td>${item.provider_model}</td>
+      <td>${item.provider} / ${item.model}</td>
       <td>${date}</td>
       <td>
-        <button class="btn secondary" data-action="open-transcript" data-provider="${item.provider_model}">Open</button>
-        <button class="btn ghost" data-action="delete-transcript" data-provider="${item.provider_model}">Delete</button>
+        <button class="btn secondary" data-action="open-transcript" data-id="${item.id}">Open</button>
+        <button class="btn ghost" data-action="delete-transcript" data-id="${item.id}">Delete</button>
+      </td>
+    `;
+    body.appendChild(row);
+  });
+}
+
+function renderSessionSummaries() {
+  const body = qs("session-overview-summaries");
+  const empty = qs("session-summaries-empty");
+  body.innerHTML = "";
+  if (!state.summaries.length) {
+    empty.classList.remove("hidden");
+    return;
+  }
+  empty.classList.add("hidden");
+  state.summaries.forEach((item) => {
+    const row = document.createElement("tr");
+    const date = new Date(item.created_at).toLocaleString();
+    row.innerHTML = `
+      <td>${item.provider} / ${item.model}</td>
+      <td>${date}</td>
+      <td>
+        <button class="btn secondary" data-action="open-summary" data-id="${item.id}">Open</button>
+        <button class="btn ghost" data-action="delete-summary" data-id="${item.id}">Delete</button>
       </td>
     `;
     body.appendChild(row);
@@ -522,7 +549,7 @@ async function loadSession(sessionId) {
   ) {
     await openCampaign(session.campaign.campaign_id);
   }
-  await loadTranscripts();
+  await Promise.all([loadTranscripts(), loadSummaries()]);
   renderSessionOverview();
   showScreen("session");
 }
@@ -675,6 +702,13 @@ async function loadTranscripts() {
   return state.transcripts;
 }
 
+async function loadSummaries() {
+  if (!state.currentSession?.session_id) return [];
+  const list = await apiFetch(`/sessions/${state.currentSession.session_id}/summaries`);
+  state.summaries = list || [];
+  return state.summaries;
+}
+
 function populateTranscriptSelect() {
   const select = qs("modal-transcript-select");
   select.innerHTML = "";
@@ -690,12 +724,68 @@ function populateTranscriptSelect() {
   select.disabled = false;
   state.transcripts.forEach((item, index) => {
     const option = document.createElement("option");
-    option.value = item.transcript_path;
-    option.textContent = `${item.provider_model} (${new Date(item.modified_time).toLocaleString()})`;
+    option.value = item.file_path;
+    option.textContent = `${item.provider} / ${item.model} (${new Date(item.created_at).toLocaleString()})`;
     if (index === 0) option.selected = true;
     select.appendChild(option);
   });
   state.selectedTranscriptPath = select.value;
+}
+
+async function loadPromptPresets() {
+  if (state.promptPresets) return state.promptPresets;
+  try {
+    state.promptPresets = await apiFetch("/prompts");
+  } catch {
+    state.promptPresets = {};
+  }
+  return state.promptPresets;
+}
+
+function populatePromptPresetSelect() {
+  const select = qs("modal-prompt-preset");
+  const textarea = qs("modal-system-prompt");
+  select.innerHTML = "";
+
+  const presets = state.promptPresets || {};
+  const keys = Object.keys(presets);
+
+  if (!keys.length) {
+    const opt = document.createElement("option");
+    opt.value = "";
+    opt.textContent = "No presets available";
+    select.appendChild(opt);
+    select.disabled = true;
+    textarea.value = "";
+    return;
+  }
+
+  select.disabled = false;
+
+  keys.forEach((key, index) => {
+    const opt = document.createElement("option");
+    opt.value = key;
+    opt.textContent = presets[key].label;
+    if (index === 0) opt.selected = true;
+    select.appendChild(opt);
+  });
+
+  // Add "Custom" option at the end
+  const customOpt = document.createElement("option");
+  customOpt.value = "__custom__";
+  customOpt.textContent = "Custom";
+  select.appendChild(customOpt);
+
+  // Populate textarea with first preset
+  textarea.value = presets[keys[0]].text;
+
+  select.onchange = () => {
+    const val = select.value;
+    if (val && val !== "__custom__" && presets[val]) {
+      textarea.value = presets[val].text;
+    }
+    // When "Custom" is selected, leave the textarea as-is for manual editing
+  };
 }
 
 async function loadConfig() {
@@ -888,6 +978,8 @@ document.addEventListener("DOMContentLoaded", () => {
     qs("modal-summary-status").textContent = "";
     qs("modal-summary-preview").textContent = "";
     populateTranscriptSelect();
+    await loadPromptPresets();
+    populatePromptPresetSelect();
     openModal("summarize-modal");
   });
 
@@ -933,6 +1025,7 @@ document.addEventListener("DOMContentLoaded", () => {
       base_url: qs("modal-summary-base-url").value.trim() || null,
       title: qs("modal-summary-title").value.trim() || null,
       context: qs("modal-summary-context").value.trim() || null,
+      system_prompt: qs("modal-system-prompt").value.trim() || null,
     };
     try {
       const data = await apiFetch("/summarize", {
@@ -1001,18 +1094,21 @@ document.addEventListener("DOMContentLoaded", () => {
     const button = event.target.closest("button[data-action]");
     if (!button) return;
     const action = button.dataset.action;
-    const provider = button.dataset.provider;
+    const artifactId = button.dataset.id;
     const sessionId = state.currentSession?.session_id;
-    if (!sessionId || !provider) return;
+    if (!sessionId || !artifactId) return;
 
     if (action === "open-transcript") {
       try {
         const response = await fetch(
-          apiUrl(`/sessions/${sessionId}/transcripts/${encodeURIComponent(provider)}/content`)
+          apiUrl(`/sessions/${sessionId}/transcripts/${artifactId}/content`)
         );
         if (!response.ok) throw new Error("Failed to load transcript");
         const text = await response.text();
-        qs("transcript-viewer-title").textContent = provider;
+        const item = state.transcripts.find((t) => String(t.id) === artifactId);
+        qs("transcript-viewer-title").textContent = item
+          ? `${item.provider} / ${item.model}`
+          : "Transcript";
         qs("transcript-viewer-content").textContent = text;
         openModal("transcript-viewer-modal");
       } catch (error) {
@@ -1021,9 +1117,48 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     if (action === "delete-transcript") {
-      if (!confirm(`Delete transcript "${provider}"?`)) return;
+      if (!confirm("Delete this transcript?")) return;
       try {
-        await apiFetch(`/sessions/${sessionId}/transcripts/${encodeURIComponent(provider)}`, {
+        await apiFetch(`/sessions/${sessionId}/transcripts/${artifactId}`, {
+          method: "DELETE",
+        });
+        await loadSession(sessionId);
+      } catch (error) {
+        alert(error.message);
+      }
+    }
+  });
+
+  qs("session-overview-summaries").addEventListener("click", async (event) => {
+    const button = event.target.closest("button[data-action]");
+    if (!button) return;
+    const action = button.dataset.action;
+    const artifactId = button.dataset.id;
+    const sessionId = state.currentSession?.session_id;
+    if (!sessionId || !artifactId) return;
+
+    if (action === "open-summary") {
+      try {
+        const response = await fetch(
+          apiUrl(`/sessions/${sessionId}/summaries/${artifactId}/content`)
+        );
+        if (!response.ok) throw new Error("Failed to load summary");
+        const text = await response.text();
+        const item = state.summaries.find((s) => String(s.id) === artifactId);
+        qs("transcript-viewer-title").textContent = item
+          ? `${item.provider} / ${item.model}`
+          : "Summary";
+        qs("transcript-viewer-content").textContent = text;
+        openModal("transcript-viewer-modal");
+      } catch (error) {
+        alert(error.message);
+      }
+    }
+
+    if (action === "delete-summary") {
+      if (!confirm("Delete this summary?")) return;
+      try {
+        await apiFetch(`/sessions/${sessionId}/summaries/${artifactId}`, {
           method: "DELETE",
         });
         await loadSession(sessionId);

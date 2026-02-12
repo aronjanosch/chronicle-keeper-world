@@ -185,6 +185,21 @@
             </table>
             <p id="session-transcripts-empty" class="muted hidden">No transcripts yet.</p>
           </div>
+
+          <div class="card">
+            <h3>Summaries</h3>
+            <table class="table-clean">
+              <thead>
+                <tr>
+                  <th>Provider / Model</th>
+                  <th>Created</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="session-overview-summaries"></tbody>
+            </table>
+            <p id="session-summaries-empty" class="muted hidden">No summaries yet.</p>
+          </div>
         </section>
 
         <section id="settings-screen" class="screen main-screen">
@@ -521,10 +536,17 @@
                 <input id="modal-summary-title" type="text" placeholder="Summary title (optional)" />
                 <input id="modal-summary-context" type="text" placeholder="Context (optional)" />
               </div>
+              <div class="field">
+                <label for="modal-prompt-preset">System prompt</label>
+                <select id="modal-prompt-preset">
+                  <option value="">Loading presets…</option>
+                </select>
+                <textarea id="modal-system-prompt" rows="6" placeholder="System prompt sent to the LLM…"></textarea>
+              </div>
               <div id="modal-summary-status" class="status"></div>
               <div class="modal-preview">
                 <h4>Preview</h4>
-                <pre id="modal-summary-preview"></pre>
+                <pre id="modal-summary-preview" class="modal-preview-text"></pre>
               </div>
             </div>
             <div class="modal-footer">
