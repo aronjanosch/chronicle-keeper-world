@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from app.logging_config import get_logger
 from app.services.sessions import get_session_path, load_session, save_session
-from app.services.transcription import get_provider
+from app.services.transcription import get_default_provider, get_provider
 from app.services.transcription.formatting import save_transcription_result
 from app.storage.artifacts import insert_artifact
 from app.storage.config import get_transcription_config
@@ -28,7 +28,7 @@ def transcribe_session(
 
     config = get_transcription_config()
     language = language or "en"
-    provider_name = provider or "whisperx"
+    provider_name = provider or get_default_provider()
     model_name = model or config.whisperx_model
 
     provider = get_provider(provider_name, model_name=model_name)

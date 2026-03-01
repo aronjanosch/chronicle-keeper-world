@@ -42,6 +42,21 @@ class TranscriptionResult:
         ]
 
 
+def speaker_label(speaker: dict | None, fallback: str) -> str:
+    """Build a display label from a speaker mapping entry."""
+    if not speaker:
+        return fallback
+    character = speaker.get("character_name")
+    player = speaker.get("player_name")
+    if character and player:
+        return f"{character} ({player})"
+    if character:
+        return character
+    if player:
+        return player
+    return fallback
+
+
 class TranscriptionProvider:
     """Abstract base class for transcription providers."""
 

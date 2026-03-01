@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-from app.services.transcription.insanely_fast_whisper_provider import (
-    InsanelyFastWhisperProvider,
-)
+import platform
+
 from app.services.transcription.mlx_audio_provider import MLXAudioProvider
-from app.services.transcription.whisperx_provider import WhisperXProvider
+from app.services.transcription.onnx_asr_provider import OnnxAsrProvider
 
 PROVIDERS = {
     "mlx-audio": {
@@ -53,65 +52,48 @@ PROVIDERS = {
             },
         ],
     },
-    "whisperx": {
-        "factory": WhisperXProvider,
-        "display_name": "WhisperX",
-        "description": "WhisperX transcription with alignment",
+    "onnx-asr": {
+        "factory": OnnxAsrProvider,
+        "display_name": "ONNX ASR",
+        "description": "Cross-platform (CPU/NVIDIA GPU) - multiple STT models via ONNX Runtime",
         "supports_diarization": False,
-        "default_model": "large-v2",
+        "default_model": "nemo-parakeet-tdt-0.6b-v3",
         "models": [
             {
-                "id": "large-v3",
-                "name": "Whisper Large v3",
-                "description": "Latest, highest accuracy",
+                "id": "nemo-parakeet-tdt-0.6b-v3",
+                "name": "Parakeet TDT 0.6B v3",
+                "description": "NVIDIA's fast & accurate, 25 EU languages (recommended)",
             },
             {
-                "id": "large-v3-turbo",
+                "id": "nemo-parakeet-tdt-0.6b-v2",
+                "name": "Parakeet TDT 0.6B v2",
+                "description": "NVIDIA's STT, English only",
+            },
+            {
+                "id": "nemo-canary-1b-v2",
+                "name": "Canary 1B v2",
+                "description": "NVIDIA's best accuracy, multilingual",
+            },
+            {
+                "id": "whisper-base",
+                "name": "Whisper Base",
+                "description": "Fast, lower accuracy",
+            },
+            {
+                "id": "onnx-community/whisper-large-v3-turbo",
                 "name": "Whisper Large v3 Turbo",
-                "description": "Fast, near-equal accuracy to v3",
-            },
-            {
-                "id": "large-v2",
-                "name": "Whisper Large v2",
-                "description": "High accuracy, slower",
-            },
-            {
-                "id": "medium",
-                "name": "Whisper Medium",
-                "description": "Balanced speed/quality",
-            },
-            {
-                "id": "small",
-                "name": "Whisper Small",
-                "description": "Faster, lower accuracy",
-            },
-        ],
-    },
-    "insanely-fast-whisper": {
-        "factory": InsanelyFastWhisperProvider,
-        "display_name": "Insanely Fast Whisper",
-        "description": "Fast Whisper transcription via CLI (no diarization)",
-        "supports_diarization": False,
-        "default_model": "openai/whisper-large-v3",
-        "models": [
-            {
-                "id": "openai/whisper-large-v3",
-                "name": "Whisper Large v3",
-                "description": "High accuracy (default)",
-            },
-            {
-                "id": "openai/whisper-large-v3-turbo",
-                "name": "Whisper Large v3 Turbo",
-                "description": "Faster, near-equal accuracy",
-            },
-            {
-                "id": "distil-whisper/distil-large-v3",
-                "name": "Distil Large v3",
-                "description": "Distilled, fastest",
+                "description": "Good balance of speed/accuracy, 99+ languages",
             },
         ],
     },
 }
+
+
+def get_default_provider() -> str:
+    """Auto-select the best provider for the current platform."""
+    if platform.system() == "Darwin" and platform.machine() == "arm64":
+        return "mlx-audio"
+    return "onnx-asr"
 
 
 def get_provider(name: str, **kwargs):

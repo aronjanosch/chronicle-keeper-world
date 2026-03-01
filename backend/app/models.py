@@ -66,7 +66,7 @@ class TranscribeRequest(BaseModel):
     hf_token: str | None = Field(default=None, description="HuggingFace token override")
     provider: str | None = Field(
         default=None,
-        description="Transcription provider (whisperx or insanely-fast-whisper)",
+        description="Transcription provider (mlx-audio or onnx-asr)",
     )
 
 

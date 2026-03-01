@@ -18,23 +18,10 @@ from app.services.transcription.base import (
     TranscriptionProvider,
     TranscriptionResult,
     TranscriptionSegment,
+    speaker_label,
 )
 
 log = get_logger("mlx-audio")
-
-
-def _speaker_label(speaker: dict | None, fallback: str) -> str:
-    if not speaker:
-        return fallback
-    character = speaker.get("character_name")
-    player = speaker.get("player_name")
-    if character and player:
-        return f"{character} ({player})"
-    if character:
-        return character
-    if player:
-        return player
-    return fallback
 
 
 def _parse_result(result) -> list[dict]:
@@ -199,7 +186,7 @@ class MLXAudioProvider(TranscriptionProvider):
                     log.warning("Track file not found, skipping: %s", track_path)
                     continue
 
-                label = _speaker_label(speaker_map.get(track["id"]), track["id"])
+                label = speaker_label(speaker_map.get(track["id"]), track["id"])
                 parsed = self._transcribe_file(track_path, language)
 
                 for seg in parsed:
