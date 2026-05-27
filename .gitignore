@@ -4,3 +4,10 @@ debug-exports/
 # Rust build artifacts
 /target/
 **/target/
+
+# Local editor / tooling state
+.claude/
+
+# Stray frontend tooling (frontend is vanilla JS, no build step)
+node_modules/
+frontend/dist/

@@ -1,128 +1,76 @@
 # Chronicle Keeper
 
-A local-first, cross-platform desktop app that generates structured D&D session notes
-from Discord audio files (Craig Bot recordings). Everything runs on your machine and
-works offline — you bring your own LLM (local Ollama or any cloud key).
+Turn your D&D session recordings into clean, structured notes — on your own machine,
+offline, with whatever LLM you like.
 
-## Features
+Drop in a [Craig Bot](https://craig.chat) recording, label who's who, and Chronicle Keeper
+transcribes every track on-device and writes up the session. The notes land as Markdown with
+Obsidian frontmatter, ready to paste into your vault. Nothing leaves your computer unless you
+choose to.
 
-- **Craig Bot ZIP Processing**: Extract and process multi-track audio (one track per speaker)
-- **Speaker Mapping**: Assign player/character names to audio tracks
-- **On-device Transcription**: Native Parakeet TDT v3 (int8) via sherpa-onnx — 25 European
-  languages including German, several× realtime on CPU. No cloud, no model-cache weirdness;
-  the model downloads once into app-data.
-- **Bring-your-own LLM**: Local Ollama, native Anthropic, or any OpenAI-compatible cloud provider (keys stay client-side)
-- **Customizable Prompts**: User-defined system prompts for session summarization
-- **Export**: Save notes as Markdown with Obsidian frontmatter
+## Why
 
-## Architecture
+- **Local-first and private.** Transcription runs on your device. Your recordings and notes
+  stay with you. No per-minute cloud bills, no account required.
+- **Bring your own LLM.** Local [Ollama](https://ollama.com), Anthropic, or any
+  OpenAI-compatible provider. Your API keys never leave the machine.
+- **A pipeline, not a workspace.** Record → transcribe → summarize → export. You live in
+  Obsidian or Notion; this just generates the content and gets out of the way.
 
-One Rust core, embedded in a Tauri shell — **no Python, no sidecar process**.
+## Quick start
 
-- **Tauri shell** (`src-tauri`): native window + webview. Serves the static frontend and
-  hosts the core as an in-process tokio task (axum HTTP on `127.0.0.1:<ephemeral>`).
-  Injects the base URL + a per-launch bearer token into the webview; the frontend sends
-  `X-CK-Token` on every request.
-- **Rust core** (`crates/ck-core`): the whole backend — SQLite storage, Craig ZIP extraction,
-  transcription (sherpa-onnx + Parakeet v3), LLM summarization over HTTP, markdown/Obsidian export.
-  Exposes ~25 HTTP endpoints. Also builds a standalone dev binary, `ck-serve`.
-- **Frontend** (`frontend`): vanilla HTML/CSS/JS, no build step. Talks to the core over HTTP at
-  the injected base URL (falls back to `http://127.0.0.1:8000` for standalone dev).
-
-The same core binary will later run in server mode on a VPS for the optional paid multi-device
-sync tier (transcription always stays client-side). See `docs/REWRITE_PLAN.md`.
-
-> The Python app under `backend/` is retained only as the **port specification** for the Rust
-> core's behavior — it is not built or shipped.
-
-## Prerequisites
-
-1. **Rust** and **Cargo** (stable)
-2. **Tauri** system deps for your OS — see <https://tauri.app/start/prerequisites/>
-3. **Ollama** for local LLM (optional) — <https://ollama.ai>, or a cloud LLM API key
-
-No Python, Node, or GPU required.
-
-## Development
-
-### Run the full desktop app
+You'll need [Rust](https://rustup.rs) and the
+[Tauri system prerequisites](https://tauri.app/start/prerequisites/) for your OS. That's it —
+no Python, Node, or GPU.
 
 ```bash
-# From the repo root
 cargo tauri dev
 ```
 
-This builds the Rust core + shell and opens the app with the static `frontend/` served
-directly (no Vite/npm step).
+That builds the app and opens it. The transcription model (Parakeet TDT v3) downloads once on
+first use and is reused after that.
 
-### Run the core standalone (HTTP only, no window)
-
-Useful for hitting the API directly or developing the frontend in a browser.
+For an LLM, either run Ollama locally:
 
 ```bash
-# Starts the axum server on 127.0.0.1:8000 (override with CK_PORT)
-cargo run -p ck-core --bin ck-serve
-
-# Then open frontend/index.html (or serve the folder) — it defaults to
-# http://127.0.0.1:8000 and uses localStorage `ck_api_base` to override.
+ollama serve && ollama pull llama3.2
 ```
 
-Set `RUST_LOG=debug` for verbose logs.
+…or paste a cloud API key into Settings.
 
-### Build installers
+## How it works
+
+```
+Upload Craig ZIP → label speakers → transcribe on-device → summarize (your LLM) → export
+```
+
+It's a single Rust core embedded in a [Tauri](https://tauri.app) window — no Python, no
+sidecar. Transcription uses [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) with NVIDIA's
+Parakeet TDT v3 model (25 European languages, several× realtime on CPU). Everything persists in
+one SQLite database in your app-data folder.
+
+Optional **multi-device sync** keeps your notes in step across machines via a small self-hostable
+server ([chronicle-keeper-sync-server](https://github.com/aronjanosch/chronicle-keeper-sync-server)).
+Transcription always stays on your device; only the text syncs. Sync is off until you add a
+server URL in Settings.
+
+## Development
 
 ```bash
+# Run just the core API (no window) — handy for the frontend or hitting the API directly
+cargo run -p ck-core --bin ck-serve     # serves http://127.0.0.1:8000 (override with CK_PORT)
+
+# Build installers for your OS
 cargo tauri build
+
+# Verbose logs
+RUST_LOG=debug cargo run -p ck-core --bin ck-serve
 ```
 
-Produces per-OS installers. First build downloads the sherpa-onnx prebuilt library for
-your platform. (Linux verified; macOS/Windows packaging in progress — see the rewrite plan.)
-
-### LLM setup (optional, local)
-
-```bash
-ollama serve
-ollama pull llama3.2
-```
-
-Cloud providers: add your API key in the app's Settings panel (stored locally, never sent
-to any Chronicle Keeper server).
-
-## Workflow
-
-1. **Upload**: Import a Craig Bot ZIP (multi-track audio)
-2. **Label Speakers**: Assign player/character names per track
-3. **Transcribe**: On-device Parakeet transcription
-4. **Summarize**: Pick your LLM (local Ollama / cloud) and generate notes
-5. **Export**: Save as Markdown with Obsidian frontmatter
-
-## Project structure
-
-```
-chronicle-keeper/
-├── crates/ck-core/         # Rust core: HTTP API, transcription, storage, LLM, export
-│   └── src/bin/ck_serve.rs # standalone dev server binary
-├── src-tauri/              # Tauri shell (hosts the core in-process)
-├── frontend/               # vanilla HTML/CSS/JS UI (no build step)
-├── backend/                # legacy Python app — port spec only, not shipped
-├── spike/transcribe-spike/ # Sprint 0 transcription proof-of-concept
-├── docs/REWRITE_PLAN.md    # the native-Rust rewrite plan + status
-└── Cargo.toml              # workspace
-```
-
-## Configuration
-
-Settings + sessions live in a platform-appropriate app-data directory (SQLite). The
-transcription model downloads once into app-data and is reused on every launch.
-
-## Troubleshooting
-
-- **Linux blank/garbled webview**: a WebKitGTK reliability fix (`GDK_BACKEND=x11` + DMABUF
-  disable) is applied automatically on Linux when those env vars are unset.
-- **Ollama connection**: verify `ollama serve` is running and the model is pulled.
-- **Cloud LLM**: check API key validity and quota in Settings.
-- **Logs**: run with `RUST_LOG=debug` for detailed output.
+The frontend (`frontend/`) is plain HTML/CSS/JS with no build step. Architecture and roadmap
+live in [`docs/ROADMAP.md`](docs/ROADMAP.md); the sync protocol in
+[`docs/SYNC_PROTOCOL.md`](docs/SYNC_PROTOCOL.md).
 
 ## License
 
-Built for Chronicle Keeper — D&D Session Note Generator.
+[MIT](LICENSE). Free to use, including commercially.
