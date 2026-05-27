@@ -1,5 +1,6 @@
 const state = {
   apiBase: "http://127.0.0.1:8000",
+  apiToken: null,
   configFromApi: null,
   campaigns: [],
   campaignDetails: [],
@@ -66,8 +67,16 @@ function apiUrl(path) {
   return `${state.apiBase}${path}`;
 }
 
+function authHeaders() {
+  return state.apiToken ? { "X-CK-Token": state.apiToken } : {};
+}
+
 async function apiFetch(path, options = {}) {
-  const response = await fetch(apiUrl(path), options);
+  const opts = {
+    ...options,
+    headers: { ...(options.headers || {}), ...authHeaders() },
+  };
+  const response = await fetch(apiUrl(path), opts);
   if (!response.ok) {
     let detail = response.statusText;
     try {
@@ -82,8 +91,16 @@ async function apiFetch(path, options = {}) {
 }
 
 function loadApiBase() {
-  const saved = localStorage.getItem("ck_api_base");
-  if (saved) state.apiBase = saved;
+  // The Tauri shell injects the embedded server's base URL + per-launch token
+  // before page scripts run. Fall back to localStorage for the standalone dev
+  // server (browser against `ck-serve`).
+  if (window.__CK_API_BASE__) {
+    state.apiBase = window.__CK_API_BASE__;
+  } else {
+    const saved = localStorage.getItem("ck_api_base");
+    if (saved) state.apiBase = saved;
+  }
+  if (window.__CK_TOKEN__) state.apiToken = window.__CK_TOKEN__;
   const apiField = qs("setting-api-base");
   if (apiField) apiField.value = state.apiBase;
 }
@@ -1502,7 +1519,8 @@ document.addEventListener("DOMContentLoaded", () => {
     if (action === "open-transcript") {
       try {
         const response = await fetch(
-          apiUrl(`/sessions/${sessionId}/transcripts/${artifactId}/content`)
+          apiUrl(`/sessions/${sessionId}/transcripts/${artifactId}/content`),
+          { headers: authHeaders() }
         );
         if (!response.ok) throw new Error("Failed to load transcript");
         const text = await response.text();
@@ -1541,7 +1559,8 @@ document.addEventListener("DOMContentLoaded", () => {
     if (action === "open-summary") {
       try {
         const response = await fetch(
-          apiUrl(`/sessions/${sessionId}/summaries/${artifactId}/content`)
+          apiUrl(`/sessions/${sessionId}/summaries/${artifactId}/content`),
+          { headers: authHeaders() }
         );
         if (!response.ok) throw new Error("Failed to load summary");
         const text = await response.text();

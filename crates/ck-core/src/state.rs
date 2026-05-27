@@ -14,6 +14,10 @@ use crate::paths::Paths;
 pub struct AppState {
     pub db: Arc<Mutex<Connection>>,
     pub paths: Paths,
+    /// When set, every request (except /health and CORS preflight) must carry a
+    /// matching `x-ck-token` header. The Tauri shell sets a per-launch token;
+    /// the standalone dev server leaves it `None`. Also the Sprint-2 auth seam.
+    pub auth_token: Option<String>,
 }
 
 impl AppState {
@@ -22,6 +26,7 @@ impl AppState {
         Ok(Self {
             db: Arc::new(Mutex::new(conn)),
             paths,
+            auth_token: None,
         })
     }
 

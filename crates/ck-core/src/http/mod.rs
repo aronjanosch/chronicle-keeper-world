@@ -6,6 +6,9 @@ mod transcribe;
 mod upload;
 
 use axum::extract::{DefaultBodyLimit, State};
+use axum::http::{HeaderMap, Method, Request, StatusCode};
+use axum::middleware::{self, Next};
+use axum::response::Response;
 use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use serde_json::{json, Value};
@@ -61,8 +64,29 @@ pub fn router(state: AppState) -> Router {
         .route("/sessions/:id/summaries/:aid/content", get(artifacts::summary_content))
         .route("/sessions/:id/summaries/:aid", delete(artifacts::delete_summary))
         .layer(DefaultBodyLimit::max(2 * 1024 * 1024 * 1024))
+        .layer(middleware::from_fn_with_state(state.clone(), require_token))
         .with_state(state)
         .layer(cors)
+}
+
+/// Gate requests on `x-ck-token` when the state carries a token. `/health` and
+/// CORS preflight (OPTIONS) are always allowed.
+async fn require_token(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    req: Request<axum::body::Body>,
+    next: Next,
+) -> Result<Response, StatusCode> {
+    if let Some(expected) = &state.auth_token {
+        let exempt = req.method() == Method::OPTIONS || req.uri().path() == "/health";
+        if !exempt {
+            let provided = headers.get("x-ck-token").and_then(|v| v.to_str().ok());
+            if provided != Some(expected.as_str()) {
+                return Err(StatusCode::UNAUTHORIZED);
+            }
+        }
+    }
+    Ok(next.run(req).await)
 }
 
 async fn health() -> Json<Value> {
