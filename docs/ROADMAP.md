@@ -136,8 +136,8 @@ Sprint 2 work is the paid-tier plumbing (Stripe + VPS) and release infra.
 - [x] Sync status indicator (off / token-missing / on)
 
 **Infra:**
-- [ ] Add MIT `LICENSE` file to app repo
-- [ ] Add AGPL v3 `LICENSE` to sync server repo
+- [x] Add MIT `LICENSE` file to app repo
+- [x] Add AGPL v3 `LICENSE` to sync server repo
 - [ ] GitHub Actions: build + release on tag (macOS DMG; Windows on hosted runner)
 
 ### 🔲 Sprint 3 — Drop internal HTTP server
