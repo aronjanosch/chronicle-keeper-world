@@ -169,6 +169,8 @@ pub fn collect_dirty(conn: &Connection) -> AppResult<SyncPayload> {
     }
     drop(stmt);
 
+    payload.deleted_artifact_ids = crate::store::artifacts::collect_deleted_dirty(conn)?;
+
     Ok(payload)
 }
 
@@ -187,6 +189,7 @@ fn clear_dirty(conn: &Connection, payload: &SyncPayload) -> AppResult<()> {
     for a in &payload.artifacts {
         conn.execute("UPDATE artifacts SET dirty = 0 WHERE artifact_id = ?1", params![a.artifact_id])?;
     }
+    crate::store::artifacts::clear_deleted_dirty(conn, &payload.deleted_artifact_ids)?;
     Ok(())
 }
 
@@ -248,7 +251,8 @@ pub fn apply_pull(conn: &Connection, pull: &SyncPayload) -> AppResult<()> {
     }
 
     for aid in &pull.deleted_artifact_ids {
-        conn.execute("DELETE FROM artifacts WHERE artifact_id = ?1", params![aid])?;
+        // Remote-initiated: delete without tombstoning (must not echo back).
+        crate::store::artifacts::apply_remote_deletion(conn, aid)?;
     }
 
     Ok(())
@@ -373,5 +377,48 @@ mod tests {
         apply_pull(&conn, &pull).unwrap();
         let arts = artifacts::list_artifacts(&conn, "s1", None).unwrap();
         assert_eq!(arts.len(), 1, "duplicate artifact_id ignored");
+    }
+
+    #[test]
+    fn deletions_are_collected_and_cleared() {
+        let conn = crate::db::open_in_memory().unwrap();
+        conn.execute("INSERT INTO sessions (session_id) VALUES ('s1')", []).unwrap();
+        let art = artifacts::insert_artifact(&conn, "s1", "summary", "p", "m", "x").unwrap();
+
+        // Deleting an artifact tombstones it for the next push.
+        artifacts::delete_artifact(&conn, art.id).unwrap();
+        let push = collect_dirty(&conn).unwrap();
+        assert_eq!(push.deleted_artifact_ids, vec![art.artifact_id.clone()]);
+
+        // After clearing, the tombstone is no longer pushed.
+        clear_dirty(&conn, &push).unwrap();
+        let again = collect_dirty(&conn).unwrap();
+        assert!(again.deleted_artifact_ids.is_empty());
+    }
+
+    #[test]
+    fn deleting_a_session_soft_deletes_and_tombstones_artifacts() {
+        use crate::store::{campaigns, sessions};
+        let conn = crate::db::open_in_memory().unwrap();
+        campaigns::create_campaign(&conn, "c1", "Camp", 1).unwrap();
+        // Direct insert (avoids create_campaign_session's filesystem side effects).
+        conn.execute(
+            "INSERT INTO sessions (session_id, campaign_id, session_number) VALUES ('s1', 'c1', 1)",
+            [],
+        )
+        .unwrap();
+        artifacts::insert_artifact(&conn, "s1", "transcript", "sherpa", "m", "hi").unwrap();
+
+        sessions::delete_session(&conn, "s1").unwrap();
+
+        // Hidden from listings…
+        let listed = sessions::list_campaign_sessions(&conn, "c1").unwrap();
+        assert!(listed.iter().all(|x| x.session_id != "s1"), "deleted session hidden");
+
+        // …but pushed as a soft-deleted record + its artifact tombstoned.
+        let push = collect_dirty(&conn).unwrap();
+        let pushed = push.sessions.iter().find(|x| x.session_id == "s1").expect("soft-deleted session pushed");
+        assert!(pushed.deleted, "session pushed with deleted=true");
+        assert_eq!(push.deleted_artifact_ids.len(), 1, "session's artifact tombstoned");
     }
 }

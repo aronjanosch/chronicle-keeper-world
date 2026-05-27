@@ -234,7 +234,7 @@ pub fn get_campaign_metadata(conn: &Connection, session_id: &str) -> AppResult<V
 }
 
 pub fn list_sessions(conn: &Connection) -> AppResult<Vec<SessionInfo>> {
-    let mut stmt = conn.prepare("SELECT session_id, session_path FROM sessions ORDER BY session_id DESC")?;
+    let mut stmt = conn.prepare("SELECT session_id, session_path FROM sessions WHERE deleted = 0 ORDER BY session_id DESC")?;
     let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
     let mut out = Vec::new();
     for r in rows {
@@ -255,7 +255,7 @@ pub fn list_sessions(conn: &Connection) -> AppResult<Vec<SessionInfo>> {
 pub fn list_campaign_sessions(conn: &Connection, campaign_id: &str) -> AppResult<Vec<CampaignSessionInfo>> {
     let mut stmt = conn.prepare(
         "SELECT session_id, session_number, title, date, metadata_json FROM sessions \
-         WHERE campaign_id = ?1 ORDER BY session_number DESC",
+         WHERE campaign_id = ?1 AND deleted = 0 ORDER BY session_number DESC",
     )?;
     let rows = stmt.query_map(params![campaign_id], |r| {
         Ok((
@@ -354,8 +354,15 @@ pub fn delete_session(conn: &Connection, session_id: &str) -> AppResult<()> {
     let Some(path) = path else {
         return Err(AppError::NotFound(format!("Session not found: {session_id}")));
     };
+    // Artifacts are hard-deleted + tombstoned (so the deletion syncs). The
+    // session row is *soft*-deleted: kept with deleted=1 + dirty=1 so the
+    // tombstone propagates to other devices; list queries filter it out.
     artifacts::delete_artifacts_for_session(conn, session_id)?;
-    conn.execute("DELETE FROM sessions WHERE session_id = ?1", params![session_id])?;
+    conn.execute(
+        "UPDATE sessions SET deleted = 1, dirty = 1, updated_at = ?1 WHERE session_id = ?2",
+        params![now(), session_id],
+    )?;
+    // Audio is device-local and now orphaned — reclaim the disk.
     if !path.is_empty() {
         let _ = std::fs::remove_dir_all(&path);
     }

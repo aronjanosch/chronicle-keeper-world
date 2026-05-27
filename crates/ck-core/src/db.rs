@@ -147,5 +147,15 @@ fn migrate(conn: &Connection) -> Result<()> {
         [],
     )?;
 
+    // Tombstones for locally hard-deleted artifacts, so the deletion propagates
+    // to other devices on the next sync. `dirty` = not yet pushed.
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS deleted_artifacts (
+            artifact_id TEXT PRIMARY KEY,
+            dirty       INTEGER NOT NULL DEFAULT 1
+        )",
+        [],
+    )?;
+
     Ok(())
 }

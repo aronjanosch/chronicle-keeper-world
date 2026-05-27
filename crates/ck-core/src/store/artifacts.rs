@@ -89,13 +89,66 @@ pub fn get_content(conn: &Connection, id: i64) -> AppResult<Option<String>> {
     Ok(content)
 }
 
+/// Record a tombstone so a hard delete propagates to other devices on sync.
+fn tombstone(conn: &Connection, artifact_id: &str) -> AppResult<()> {
+    if artifact_id.is_empty() {
+        return Ok(());
+    }
+    conn.execute(
+        "INSERT INTO deleted_artifacts (artifact_id, dirty) VALUES (?1, 1) \
+         ON CONFLICT(artifact_id) DO UPDATE SET dirty = 1",
+        params![artifact_id],
+    )?;
+    Ok(())
+}
+
 pub fn delete_artifact(conn: &Connection, id: i64) -> AppResult<()> {
+    let artifact_id: Option<String> = conn
+        .query_row("SELECT artifact_id FROM artifacts WHERE id = ?1", params![id], |r| r.get(0))
+        .optional()?;
     conn.execute("DELETE FROM artifacts WHERE id = ?1", params![id])?;
+    if let Some(aid) = artifact_id {
+        tombstone(conn, &aid)?;
+    }
     Ok(())
 }
 
 pub fn delete_artifacts_for_session(conn: &Connection, session_id: &str) -> AppResult<()> {
+    let mut stmt = conn.prepare("SELECT artifact_id FROM artifacts WHERE session_id = ?1")?;
+    let ids: Vec<String> = stmt
+        .query_map(params![session_id], |r| r.get::<_, String>(0))?
+        .filter_map(|r| r.ok())
+        .collect();
+    drop(stmt);
     conn.execute("DELETE FROM artifacts WHERE session_id = ?1", params![session_id])?;
+    for aid in ids {
+        tombstone(conn, &aid)?;
+    }
+    Ok(())
+}
+
+/// Artifact ids deleted locally but not yet pushed (for the sync push payload).
+pub fn collect_deleted_dirty(conn: &Connection) -> AppResult<Vec<String>> {
+    let mut stmt = conn.prepare("SELECT artifact_id FROM deleted_artifacts WHERE dirty = 1")?;
+    let ids = stmt
+        .query_map([], |r| r.get::<_, String>(0))?
+        .filter_map(|r| r.ok())
+        .collect();
+    Ok(ids)
+}
+
+/// Mark the given deletion tombstones as pushed.
+pub fn clear_deleted_dirty(conn: &Connection, ids: &[String]) -> AppResult<()> {
+    for aid in ids {
+        conn.execute("UPDATE deleted_artifacts SET dirty = 0 WHERE artifact_id = ?1", params![aid])?;
+    }
+    Ok(())
+}
+
+/// Apply a deletion received from the server: drop the artifact, no tombstone
+/// (we didn't initiate it, so it must not echo back on our next push).
+pub fn apply_remote_deletion(conn: &Connection, artifact_id: &str) -> AppResult<()> {
+    conn.execute("DELETE FROM artifacts WHERE artifact_id = ?1", params![artifact_id])?;
     Ok(())
 }
 
