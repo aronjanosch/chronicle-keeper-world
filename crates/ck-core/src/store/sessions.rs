@@ -8,7 +8,7 @@ use crate::config::get_config_map;
 use crate::error::{AppError, AppResult};
 use crate::models::{CampaignSessionInfo, SessionInfo, SessionMetadataRequest};
 use crate::normalize::{normalize_metadata, sanitize_folder_name};
-use crate::store::{artifacts, campaigns};
+use crate::store::{artifacts, campaigns, now};
 
 fn output_root(conn: &Connection) -> AppResult<PathBuf> {
     let map = get_config_map(conn)?;
@@ -80,8 +80,8 @@ pub fn create_campaign_session(
     let metadata = normalize_metadata(&Value::Null);
     conn.execute(
         "INSERT INTO sessions \
-         (session_id, campaign_id, session_number, title, date, metadata_json, notes, session_path, tracks_json, speakers_json) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, '', ?7, '[]', '[]')",
+         (session_id, campaign_id, session_number, title, date, metadata_json, notes, session_path, tracks_json, speakers_json, updated_at, dirty) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, '', ?7, '[]', '[]', ?8, 1)",
         params![
             session_id,
             campaign_id,
@@ -89,7 +89,8 @@ pub fn create_campaign_session(
             title,
             date,
             metadata.to_string(),
-            session_path.to_string_lossy()
+            session_path.to_string_lossy(),
+            now()
         ],
     )?;
 
@@ -129,7 +130,7 @@ pub fn set_campaign_metadata(conn: &Connection, req: &SessionMetadataRequest) ->
     let notes = req.notes.clone().unwrap_or_default();
     conn.execute(
         "UPDATE sessions SET campaign_id = ?1, session_number = ?2, title = ?3, date = ?4, \
-         metadata_json = ?5, notes = ?6 WHERE session_id = ?7",
+         metadata_json = ?5, notes = ?6, updated_at = ?7, dirty = 1 WHERE session_id = ?8",
         params![
             req.campaign_id,
             session_number,
@@ -137,6 +138,7 @@ pub fn set_campaign_metadata(conn: &Connection, req: &SessionMetadataRequest) ->
             req.date,
             metadata.to_string(),
             notes,
+            now(),
             req.session_id
         ],
     )?;
@@ -237,13 +239,12 @@ pub fn list_sessions(conn: &Connection) -> AppResult<Vec<SessionInfo>> {
     let mut out = Vec::new();
     for r in rows {
         let (sid, path) = r?;
-        let transcript_path = artifacts::latest_path(conn, &sid, "transcript")?;
-        let summary_path = artifacts::latest_path(conn, &sid, "summary")?;
         out.push(SessionInfo {
-            has_transcription: transcript_path.is_some(),
-            has_summary: summary_path.is_some(),
-            transcript_path,
-            summary_path,
+            has_transcription: artifacts::has_kind(conn, &sid, "transcript")?,
+            has_summary: artifacts::has_kind(conn, &sid, "summary")?,
+            // Artifacts live inline in SQLite now; no file paths to surface.
+            transcript_path: None,
+            summary_path: None,
             session_id: sid,
             session_path: path,
         });
@@ -303,17 +304,17 @@ pub fn resolve_for_upload(conn: &Connection, session_id: Option<&str>) -> AppRes
         .map_err(|e| AppError::Internal(anyhow::anyhow!("create session dir: {e}")))?;
     let metadata = normalize_metadata(&Value::Null);
     conn.execute(
-        "INSERT INTO sessions (session_id, metadata_json, notes, session_path, tracks_json, speakers_json) \
-         VALUES (?1, ?2, '', ?3, '[]', '[]')",
-        params![sid, metadata.to_string(), path.to_string_lossy()],
+        "INSERT INTO sessions (session_id, metadata_json, notes, session_path, tracks_json, speakers_json, updated_at, dirty) \
+         VALUES (?1, ?2, '', ?3, '[]', '[]', ?4, 1)",
+        params![sid, metadata.to_string(), path.to_string_lossy(), now()],
     )?;
     Ok((sid, path))
 }
 
 pub fn set_tracks(conn: &Connection, session_id: &str, tracks: &Value) -> AppResult<()> {
     conn.execute(
-        "UPDATE sessions SET tracks_json = ?1 WHERE session_id = ?2",
-        params![tracks.to_string(), session_id],
+        "UPDATE sessions SET tracks_json = ?1, updated_at = ?2, dirty = 1 WHERE session_id = ?3",
+        params![tracks.to_string(), now(), session_id],
     )?;
     Ok(())
 }
@@ -323,8 +324,8 @@ pub fn set_speakers(conn: &Connection, session_id: &str, speakers: &Value) -> Ap
         return Err(AppError::NotFound(format!("Session not found: {session_id}")));
     }
     conn.execute(
-        "UPDATE sessions SET speakers_json = ?1 WHERE session_id = ?2",
-        params![speakers.to_string(), session_id],
+        "UPDATE sessions SET speakers_json = ?1, updated_at = ?2, dirty = 1 WHERE session_id = ?3",
+        params![speakers.to_string(), now(), session_id],
     )?;
     Ok(())
 }

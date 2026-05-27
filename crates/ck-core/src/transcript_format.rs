@@ -1,11 +1,6 @@
-use std::path::{Path, PathBuf};
-
-use anyhow::Result;
-use chrono::Local;
-use serde_json::{json, Value};
+use serde_json::Value;
 
 use crate::models::Segment;
-use crate::normalize::sanitize_folder_name;
 
 /// Build a display label from a speaker mapping entry (mirrors the Python
 /// `speaker_label`): "Character (Player)" / Character / Player / fallback.
@@ -43,51 +38,4 @@ pub fn segments_to_plain_text(segments: &[Segment]) -> String {
         lines.push(text.to_string());
     }
     lines.join("\n")
-}
-
-/// Persist transcription to `transcriptions/{provider}_{model}/` as JSON + txt.
-/// Returns `(json_path, text_path)`.
-pub fn write_transcription(
-    session_path: &Path,
-    provider: &str,
-    provider_model: &str,
-    language: &str,
-    segments: &[Segment],
-) -> Result<(String, String)> {
-    let subfolder = format!("{provider}_{}", sanitize_folder_name(provider_model));
-    let dir: PathBuf = session_path.join("transcriptions").join(subfolder);
-    std::fs::create_dir_all(&dir)?;
-
-    let segments_json: Vec<Value> = segments
-        .iter()
-        .map(|s| {
-            json!({
-                "text": s.text,
-                "start": s.start,
-                "end": s.end,
-                "speaker": s.speaker,
-                "source": s.source,
-                "words": s.words,
-            })
-        })
-        .collect();
-
-    let data = json!({
-        "segments": segments_json,
-        "language": language,
-        "provider": provider,
-        "metadata": {
-            "provider_model": provider_model,
-            "transcribed_at": Local::now().naive_local().format("%Y-%m-%dT%H:%M:%S%.6f").to_string(),
-            "session_path": session_path.to_string_lossy(),
-        }
-    });
-
-    let json_path = dir.join("transcription.json");
-    std::fs::write(&json_path, serde_json::to_vec_pretty(&data)?)?;
-
-    let text_path = dir.join("transcript.txt");
-    std::fs::write(&text_path, segments_to_plain_text(segments))?;
-
-    Ok((json_path.to_string_lossy().into_owned(), text_path.to_string_lossy().into_owned()))
 }

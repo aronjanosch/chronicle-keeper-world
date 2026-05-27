@@ -15,6 +15,11 @@ path = "src/lib.rs"
 name = "ck-serve"
 path = "src/bin/ck_serve.rs"
 
+# Manual VAD smoke test — needs the heavy transcription stack to build.
+[[example]]
+name = "vad_smoke"
+required-features = ["transcription"]
+
 [features]
 default = []
 transcription = ["dep:sherpa-onnx", "dep:symphonia", "dep:tar", "dep:bzip2"]

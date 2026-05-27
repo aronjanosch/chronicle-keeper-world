@@ -11,7 +11,7 @@ A **pipeline, not a workspace.**
 
 ```
 Craig Bot ZIP
-  → extract audio tracks (temp, deleted after transcription)
+  → extract audio tracks (kept on device for re-transcription)
   → transcribe on-device (Parakeet via sherpa-onnx, no cloud)
   → summarize on-device (Ollama) or via BYO cloud key
   → store everything in SQLite
@@ -28,7 +28,7 @@ Users live in Obsidian or Notion. Chronicle Keeper generates the content and get
 2. **Pipeline, not workspace.** Create → process → store → export. The app is a factory; the user's note-taking tool is the destination.
 3. **Local and private by default.** Transcription runs on the user's device. LLM keys never leave the device. No telemetry.
 4. **Maximum simplicity.** Solo developer. Every feature must earn its maintenance cost.
-5. **Audio is ephemeral.** Craig tracks are extracted, transcribed, then deleted. Only the transcript text is kept.
+5. **Audio is kept on device.** Craig tracks are extracted and retained locally so the user can re-transcribe with a different engine as more models land (e.g. Whisper Turbo). Audio stays device-local — never synced (too large), never uploaded. Only transcript/summary text goes to SQLite and sync.
 
 ---
 
@@ -106,17 +106,24 @@ Fixed settings screen 400 on save. Removed dead ONNX/MLX/WhisperX UI. README + C
 
 **Goal:** second device sees synced data; server rejects unauthenticated requests.
 
+**Conflict model (decided 2026-05-27):** server-authoritative. The server stamps every
+accepted record with a monotonic `server_seq` (its own clock); **last push received wins**.
+Client `updated_at` is informational, never used for conflicts — immune to client clock skew.
+Auth stays a single shared `CK_SYNC_TOKEN` for v1 (one token = one data scope); per-user
+Stripe-scoped tokens are a later upgrade. See `docs/SYNC_PROTOCOL.md`.
+
 **Sync server** (`chronicle-keeper-sync-server`, AGPL v3):
 - [ ] Rebuild around `POST /sync` — replace current CRUD endpoints
-- [ ] Schema: add `updated_at` to campaigns + sessions; `artifact_id` (client UUID) to artifacts; `deleted_records` table
-- [ ] Merge logic: last `updated_at` wins; artifacts immutable (push-once, ignore duplicate `artifact_id`)
+- [ ] Schema: `server_seq` (monotonic) + `server_updated_at` on campaigns/sessions/artifacts; `artifact_id` (client UUID) on artifacts; `deleted_records` table
+- [ ] Merge logic: last push received wins (overwrite + bump `server_seq`); artifacts immutable (ignore duplicate `artifact_id`)
 - [ ] Stripe webhook for subscription validation
 - [ ] VPS provision + Caddy (TLS) + deploy
 
 **Rust core** (`crates/ck-core`):
-- [ ] Migrate local artifacts from `file_path` to inline `content` in SQLite (match sync server schema + core principle #1)
-- [ ] Delete audio tracks after transcription (core principle #5)
-- [ ] `sync` module: `updated_at` on all writes, `last_sync_at` in config, `SyncClient` (reqwest), dirty-record collection
+- [x] Migrate local artifacts from `file_path` to inline `content` in SQLite (match sync server schema + core principle #1)
+- [x] Schema groundwork: `updated_at` + `deleted` + `dirty` on campaigns/sessions; `artifact_id` (UUID, unique) + `content` + `dirty` on artifacts; idempotent migration + backfill (`db.rs`)
+- [x] `sync` module (`sync.rs`): `dirty` flag set on every campaign/session/artifact write, `last_sync_at` cursor + `ck_client_id` in config, wire DTOs, `collect_dirty`/`apply_pull`/`clear_dirty`, `SyncClient` + `sync_once` (reqwest `POST /sync`); round-trip unit-tested
+- [ ] Push-side deletions: tombstone for hard-deleted artifacts + UI filtering of soft-deleted (`deleted=1`) campaigns/sessions
 - [ ] Background `tokio::time::interval` sync task in Tauri shell
 - [ ] On startup + shutdown: flush sync
 
@@ -163,7 +170,6 @@ Why now and not earlier: the original justification (shared HTTP contract with s
 |---|---|
 | Windows build unverified | ⚠️ Open — needs Windows host or CI |
 | CoreML EP for Parakeet int8 unverified | ⚠️ Open — plumbed, not tested |
-| Artifacts stored as file_path locally | ⚠️ Must fix in Sprint 2 (violates core principle #1) |
-| Audio tracks not deleted after transcription | ⚠️ Must fix in Sprint 2 (violates core principle #5) |
+| Artifacts stored as file_path locally | ✅ Fixed — inline `content` in SQLite (Sprint 2 groundwork) |
 | Internal HTTP port exposure | ⚠️ Technical debt — fixed in Sprint 3 |
 | Rust learning curve (solo dev) | 🟡 Manageable — keep surface small, lean on examples |

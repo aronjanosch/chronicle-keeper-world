@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
 use crate::error::{AppError, AppResult};
@@ -24,12 +24,19 @@ fn default_config() -> Vec<(&'static str, String)> {
         ("litellm_timeout_seconds", "120".into()),
         ("default_language", "en".into()),
         ("whisperx_model", "nemo-parakeet-tdt-0.6b-v3".into()),
+        ("transcription_accelerator", "cpu".into()),
         ("current_campaign_id", "".into()),
     ]
 }
 
 /// Native transcription provider id (replaces the old mlx-audio/onnx-asr split).
 pub const NATIVE_TRANSCRIPTION_PROVIDER: &str = "sherpa";
+
+/// Hardware backends accepted for `transcription_accelerator`. `cpu` is the
+/// safe default; the rest are opt-in and only effective if the bundled
+/// onnxruntime was built with that execution provider — otherwise the engine
+/// falls back to CPU at recognizer-create time (see `transcription::mod`).
+pub const ACCELERATORS: [&str; 4] = ["cpu", "coreml", "cuda", "directml"];
 
 pub fn resolve_transcription_provider(pref: &str) -> String {
     match pref.trim() {
@@ -53,6 +60,7 @@ pub struct ConfigResponse {
     pub whisperx_model: String,
     pub transcription_provider: String,
     pub transcription_provider_effective: String,
+    pub transcription_accelerator: String,
     pub has_litellm_key: bool,
 }
 
@@ -71,6 +79,7 @@ pub struct UpdateConfigRequest {
     pub default_language: Option<String>,
     pub whisperx_model: Option<String>,
     pub transcription_provider: Option<String>,
+    pub transcription_accelerator: Option<String>,
 }
 
 fn ensure_defaults(conn: &Connection) -> AppResult<()> {
@@ -93,6 +102,24 @@ pub fn get_config_map(conn: &Connection) -> AppResult<HashMap<String, String>> {
         map.insert(k, v);
     }
     Ok(map)
+}
+
+/// Read a single config value by key (None if unset/empty).
+pub fn get_value(conn: &Connection, key: &str) -> AppResult<Option<String>> {
+    let v: Option<String> = conn
+        .query_row("SELECT value FROM config WHERE key = ?1", [key], |r| r.get(0))
+        .optional()?;
+    Ok(v.filter(|s| !s.is_empty()))
+}
+
+/// Upsert a single config value by key.
+pub fn set_value(conn: &Connection, key: &str, value: &str) -> AppResult<()> {
+    conn.execute(
+        "INSERT INTO config (key, value) VALUES (?1, ?2) \
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        (key, value),
+    )?;
+    Ok(())
 }
 
 fn get_str(map: &HashMap<String, String>, key: &str) -> String {
@@ -118,6 +145,10 @@ pub fn to_response(map: &HashMap<String, String>) -> ConfigResponse {
         whisperx_model: get_str(map, "whisperx_model"),
         transcription_provider_effective: resolve_transcription_provider(&pref),
         transcription_provider: pref,
+        transcription_accelerator: {
+            let a = get_str(map, "transcription_accelerator");
+            if a.is_empty() { "cpu".into() } else { a }
+        },
         has_litellm_key: !get_str(map, "litellm_api_key").is_empty(),
     }
 }
@@ -128,6 +159,15 @@ pub fn apply_update(conn: &Connection, req: &UpdateConfigRequest) -> AppResult<(
         if !matches!(v.as_str(), "auto" | NATIVE_TRANSCRIPTION_PROVIDER) {
             return Err(AppError::BadRequest(format!(
                 "transcription_provider must be one of: auto, {NATIVE_TRANSCRIPTION_PROVIDER}"
+            )));
+        }
+    }
+    if let Some(v) = &req.transcription_accelerator {
+        let v = v.trim().to_lowercase();
+        if !ACCELERATORS.contains(&v.as_str()) {
+            return Err(AppError::BadRequest(format!(
+                "transcription_accelerator must be one of: {}",
+                ACCELERATORS.join(", ")
             )));
         }
     }
@@ -153,5 +193,6 @@ pub fn apply_update(conn: &Connection, req: &UpdateConfigRequest) -> AppResult<(
     set("default_language", req.default_language.clone())?;
     set("whisperx_model", req.whisperx_model.clone())?;
     set("transcription_provider", req.transcription_provider.as_ref().map(|s| s.trim().to_lowercase()))?;
+    set("transcription_accelerator", req.transcription_accelerator.as_ref().map(|s| s.trim().to_lowercase()))?;
     Ok(())
 }

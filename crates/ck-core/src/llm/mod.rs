@@ -1,8 +1,8 @@
-//! LLM provider registry + clients. Replaces the Python litellm layer with two
-//! native transports: Ollama (`/api/chat`) and a generic OpenAI-compatible
+//! LLM provider registry + clients. Replaces the Python litellm layer with
+//! native transports: Ollama (`/api/chat`), a generic OpenAI-compatible
 //! `/chat/completions` client (covers openai/groq/deepseek/mistral/together/
-//! perplexity/minimax + Gemini's OpenAI-compat endpoint). Anthropic's native
-//! Messages API is a planned follow-up.
+//! perplexity/minimax + Gemini's OpenAI-compat endpoint), and Anthropic's
+//! native Messages API (`/v1/messages`). Cohere is still a follow-up.
 
 use std::collections::HashMap;
 use std::time::Duration;
@@ -17,6 +17,8 @@ use crate::error::AppResult;
 pub enum Transport {
     Ollama,
     OpenAiCompat,
+    /// Anthropic native Messages API (`/v1/messages`).
+    Anthropic,
     /// Listed for parity but not yet wired (native client pending).
     Unsupported,
 }
@@ -54,10 +56,10 @@ pub static REGISTRY: &[Provider] = &[
         id: "anthropic",
         name: "Anthropic",
         needs_key: true,
-        default_api_base: None,
+        default_api_base: Some("https://api.anthropic.com"),
         models: &["claude-opus-4-7", "claude-sonnet-4-6", "claude-haiku-4-5-20251001"],
         default_model: "claude-sonnet-4-6",
-        transport: Transport::Unsupported,
+        transport: Transport::Anthropic,
     },
     Provider {
         id: "gemini",
@@ -233,6 +235,34 @@ pub async fn chat(
             let v: Value = resp.json().await.map_err(|e| LlmError(e.to_string()))?;
             Ok(extract_openai_content(&v))
         }
+        Transport::Anthropic => {
+            // Native Messages API. There is no `response_format`; to force JSON
+            // we prefill the assistant turn with "{" and prepend it back on.
+            let base = if api_base.is_empty() { "https://api.anthropic.com" } else { api_base };
+            let mut messages = vec![json!({ "role": "user", "content": prompt })];
+            if json_mode {
+                messages.push(json!({ "role": "assistant", "content": "{" }));
+            }
+            let body = json!({
+                "model": model,
+                "max_tokens": 8192,
+                "messages": messages,
+            });
+            let url = format!("{}/v1/messages", base.trim_end_matches('/'));
+            let resp = client
+                .post(url)
+                .header("x-api-key", api_key)
+                .header("anthropic-version", "2023-06-01")
+                .json(&body)
+                .send()
+                .await
+                .map_err(|e| LlmError(e.to_string()))?;
+            let resp = error_for_status(resp).await?;
+            let v: Value = resp.json().await.map_err(|e| LlmError(e.to_string()))?;
+            let text = extract_anthropic_content(&v);
+            // Prefill ate the opening brace; the model emits the rest incl. "}".
+            Ok(if json_mode { format!("{{{text}").trim().to_string() } else { text })
+        }
         Transport::Unsupported => Err(LlmError(
             "This provider's native client is not yet available in this build.".into(),
         )),
@@ -246,6 +276,19 @@ async fn error_for_status(resp: reqwest::Response) -> Result<reqwest::Response, 
     let status = resp.status();
     let body = resp.text().await.unwrap_or_default();
     Err(LlmError(format!("HTTP {status}: {}", body.trim())))
+}
+
+fn extract_anthropic_content(v: &Value) -> String {
+    let Some(blocks) = v.get("content").and_then(Value::as_array) else {
+        return String::new();
+    };
+    blocks
+        .iter()
+        .filter_map(|b| b.get("text").and_then(Value::as_str))
+        .collect::<Vec<_>>()
+        .join("")
+        .trim()
+        .to_string()
 }
 
 fn extract_openai_content(v: &Value) -> String {

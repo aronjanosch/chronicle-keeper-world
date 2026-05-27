@@ -1,12 +1,8 @@
-use std::path::PathBuf;
-
-use chrono::Local;
 use serde_json::{json, Map, Value};
 
 use crate::error::{AppError, AppResult};
 use crate::llm::{self, Transport};
 use crate::models::{SummarizeRequest, SummarizeResponse};
-use crate::normalize::sanitize_folder_name;
 use crate::prompts::{build_metadata_prompt, build_summary_prompt};
 use crate::state::AppState;
 use crate::store::{artifacts, sessions};
@@ -27,12 +23,11 @@ pub async fn summarize_session(state: &AppState, req: &SummarizeRequest) -> AppR
         let session = sessions::get_session_object(conn, &req.session_id)?;
         let cfg = crate::config::get_config_map(conn)?;
 
-        let transcript_path = match &req.transcript_path {
-            Some(p) if !p.is_empty() => Some(p.clone()),
-            _ => artifacts::latest_path(conn, &req.session_id, "transcript")?,
-        };
-        let transcript_path = transcript_path
-            .ok_or_else(|| AppError::BadRequest("Transcript not found for session.".into()))?;
+        let transcript_text = match req.transcript_id {
+            Some(id) => artifacts::get_content(conn, id)?,
+            None => artifacts::latest_content(conn, &req.session_id, "transcript")?,
+        }
+        .ok_or_else(|| AppError::BadRequest("Transcript not found for session.".into()))?;
 
         let provider = req
             .provider
@@ -80,7 +75,7 @@ pub async fn summarize_session(state: &AppState, req: &SummarizeRequest) -> AppR
         };
 
         let language = cfg.get("default_language").cloned().unwrap_or_else(|| "en".into());
-        Ok((session, transcript_path, language, Resolved {
+        Ok((session, transcript_text, language, Resolved {
             provider,
             transport: p.transport,
             api_base,
@@ -90,11 +85,8 @@ pub async fn summarize_session(state: &AppState, req: &SummarizeRequest) -> AppR
             needs_key: p.needs_key,
         }))
     })?;
-    let (session, transcript_path, language, resolved) = prep;
+    let (session, transcript_text, language, resolved) = prep;
     let _ = resolved.needs_key;
-
-    let transcript_text = std::fs::read_to_string(&transcript_path)
-        .map_err(|_| AppError::BadRequest("Transcript not found for session.".into()))?;
 
     let session_context = build_context(&session, req.title.as_deref());
     let summary_prompt = build_summary_prompt(
@@ -135,31 +127,14 @@ pub async fn summarize_session(state: &AppState, req: &SummarizeRequest) -> AppR
     .unwrap_or_default();
     let metadata = parse_metadata(&metadata_text);
 
-    // --- persist ---
-    let session_path = session.get("session_path").and_then(Value::as_str).unwrap_or("").to_string();
-    let summary_path = match &req.output_path {
-        Some(p) if !p.is_empty() => PathBuf::from(p),
-        _ => {
-            let ts = Local::now().format("%Y%m%d_%H%M%S").to_string();
-            let dir = PathBuf::from(&session_path).join("summaries").join(format!(
-                "{}_{}_{}",
-                resolved.provider,
-                sanitize_folder_name(&resolved.model),
-                ts
-            ));
-            std::fs::create_dir_all(&dir).map_err(|e| AppError::Internal(e.into()))?;
-            dir.join("summary.md")
-        }
-    };
-    std::fs::write(&summary_path, &summary_text).map_err(|e| AppError::Internal(e.into()))?;
-    let summary_path_str = summary_path.to_string_lossy().into_owned();
-
+    // --- persist (inline content in SQLite; no loose files — core principle #1) ---
     let session_id = req.session_id.clone();
     let provider = resolved.provider.clone();
     let model = resolved.model.clone();
     let metadata_for_merge = metadata.clone();
+    let summary_for_db = summary_text.clone();
     state.with_db(|conn| -> AppResult<()> {
-        artifacts::insert_artifact(conn, &session_id, "summary", &provider, &model, &summary_path_str)?;
+        artifacts::insert_artifact(conn, &session_id, "summary", &provider, &model, &summary_for_db)?;
         if let Some(md) = &metadata_for_merge {
             merge_metadata(conn, &session_id, md)?;
         }
@@ -170,7 +145,7 @@ pub async fn summarize_session(state: &AppState, req: &SummarizeRequest) -> AppR
         summary: summary_text,
         provider: resolved.provider,
         model: resolved.model,
-        summary_path: Some(summary_path_str),
+        summary_path: None,
         metadata,
     })
 }

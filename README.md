@@ -11,7 +11,7 @@ works offline — you bring your own LLM (local Ollama or any cloud key).
 - **On-device Transcription**: Native Parakeet TDT v3 (int8) via sherpa-onnx — 25 European
   languages including German, several× realtime on CPU. No cloud, no model-cache weirdness;
   the model downloads once into app-data.
-- **Bring-your-own LLM**: Local Ollama or any OpenAI-compatible cloud provider (keys stay client-side)
+- **Bring-your-own LLM**: Local Ollama, native Anthropic, or any OpenAI-compatible cloud provider (keys stay client-side)
 - **Customizable Prompts**: User-defined system prompts for session summarization
 - **Export**: Save notes as Markdown with Obsidian frontmatter
 

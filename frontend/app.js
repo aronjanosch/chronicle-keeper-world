@@ -11,7 +11,7 @@ const state = {
   sessionSpeakers: [],
   transcripts: [],
   summaries: [],
-  selectedTranscriptPath: null,
+  selectedTranscriptId: null,
   providers: null,
   promptPresets: null,
   llmProviders: null,
@@ -857,18 +857,18 @@ function populateTranscriptSelect() {
     option.textContent = "No transcripts found";
     select.appendChild(option);
     select.disabled = true;
-    state.selectedTranscriptPath = null;
+    state.selectedTranscriptId = null;
     return;
   }
   select.disabled = false;
   state.transcripts.forEach((item, index) => {
     const option = document.createElement("option");
-    option.value = item.file_path;
+    option.value = item.id;
     option.textContent = `${item.provider} / ${item.model} (${new Date(item.created_at).toLocaleString()})`;
     if (index === 0) option.selected = true;
     select.appendChild(option);
   });
-  state.selectedTranscriptPath = select.value;
+  state.selectedTranscriptId = Number(select.value) || null;
 }
 
 function populateExportSummarySelect() {
@@ -1172,6 +1172,11 @@ async function loadConfig() {
   providerSel.value = [...providerSel.options].some((o) => o.value === storedProvider)
     ? storedProvider
     : "auto";
+  const accelSel = qs("setting-transcription-accelerator");
+  const storedAccel = config.transcription_accelerator || "cpu";
+  accelSel.value = [...accelSel.options].some((o) => o.value === storedAccel)
+    ? storedAccel
+    : "cpu";
   qs("setting-default-language").value = config.default_language || "";
   qs("setting-whisperx-model").value = config.whisperx_model || "";
 
@@ -1194,6 +1199,7 @@ async function saveConfig() {
   const payload = {
     output_root: qs("setting-output-root").value.trim(),
     transcription_provider: qs("setting-transcription-provider").value.trim() || "auto",
+    transcription_accelerator: qs("setting-transcription-accelerator").value.trim() || "cpu",
     summary_provider: qs("setting-summary-provider")?.value.trim() || "ollama",
     default_language: qs("setting-default-language").value.trim(),
     whisperx_model: qs("setting-whisperx-model").value.trim(),
@@ -1469,7 +1475,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const modelVal = qs("modal-summary-model")?.value.trim() || null;
     const payload = {
       session_id: state.currentSession.session_id,
-      transcript_path: state.selectedTranscriptPath || null,
+      transcript_id: state.selectedTranscriptId || null,
       provider: providerVal,
       model: modelVal,
       base_url: null,
@@ -1494,7 +1500,7 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   qs("modal-transcript-select").addEventListener("change", () => {
-    state.selectedTranscriptPath = qs("modal-transcript-select").value || null;
+    state.selectedTranscriptId = Number(qs("modal-transcript-select").value) || null;
   });
 
   qs("accept-metadata").addEventListener("click", () => {

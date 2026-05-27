@@ -11,6 +11,7 @@ pub mod prompts;
 pub mod state;
 pub mod store;
 pub mod summarize;
+pub mod sync;
 pub mod transcript_format;
 #[cfg(feature = "transcription")]
 pub mod transcription;

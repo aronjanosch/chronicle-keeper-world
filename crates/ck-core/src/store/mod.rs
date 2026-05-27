@@ -1,3 +1,10 @@
 pub mod artifacts;
 pub mod campaigns;
 pub mod sessions;
+
+use chrono::Utc;
+
+/// Current UTC timestamp as RFC 3339 — used for sync `updated_at` stamps.
+pub(crate) fn now() -> String {
+    Utc::now().to_rfc3339()
+}

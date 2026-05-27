@@ -278,6 +278,19 @@
                   </p>
                 </div>
                 <div class="field">
+                  <label for="setting-transcription-accelerator">Hardware acceleration</label>
+                  <select id="setting-transcription-accelerator">
+                    <option value="cpu">CPU (default, always works)</option>
+                    <option value="coreml">CoreML (Apple Silicon)</option>
+                    <option value="cuda">CUDA (NVIDIA)</option>
+                    <option value="directml">DirectML (Windows)</option>
+                  </select>
+                  <p class="field-hint">
+                    Opt-in execution provider for on-device transcription. CPU is already several× realtime; the others
+                    only help if your build's onnxruntime supports them — otherwise the engine silently falls back to CPU.
+                  </p>
+                </div>
+                <div class="field">
                   <label for="setting-default-language">Default language</label>
                   <input id="setting-default-language" type="text" placeholder="en" />
                   <p class="field-hint">

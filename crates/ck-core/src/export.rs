@@ -1,4 +1,3 @@
-use std::path::PathBuf;
 
 use serde_json::Value;
 
@@ -47,13 +46,8 @@ pub fn export_session(state: &AppState, req: &ExportRequest) -> AppResult<Export
         },
     };
 
-    if let Some(path) = session.get("session_path").and_then(Value::as_str) {
-        let export_dir = PathBuf::from(path).join("exports");
-        if std::fs::create_dir_all(&export_dir).is_ok() {
-            let _ = std::fs::write(export_dir.join(&filename), &content);
-        }
-    }
-
+    // Export content is returned to the caller for download; no loose file is
+    // written to disk (core principle #1: SQLite is the only store).
     Ok(ExportResponse {
         content,
         filename,
@@ -69,15 +63,10 @@ fn resolve_summary_text(conn: &rusqlite::Connection, session_id: &str, summary_i
         if art.kind != "summary" {
             return Err(AppError::BadRequest("Selected artifact is not a summary.".into()));
         }
-        return std::fs::read_to_string(&art.file_path)
-            .map_err(|_| AppError::BadRequest("Selected summary file does not exist.".into()));
+        return artifacts::get_content(conn, art.id)?
+            .ok_or_else(|| AppError::BadRequest("Selected summary was not found for this session.".into()));
     }
-    if let Some(path) = artifacts::latest_path(conn, session_id, "summary")? {
-        if let Ok(text) = std::fs::read_to_string(&path) {
-            return Ok(text);
-        }
-    }
-    Ok(String::new())
+    Ok(artifacts::latest_content(conn, session_id, "summary")?.unwrap_or_default())
 }
 
 fn format_frontmatter(fields: &[(&str, Option<Value>)]) -> String {

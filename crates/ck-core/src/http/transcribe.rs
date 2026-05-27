@@ -34,18 +34,23 @@ pub async fn transcribe(
 
     use crate::error::AppError;
     use crate::store::sessions;
-    use crate::transcript_format::{speaker_label, write_transcription};
+    use crate::transcript_format::{segments_to_plain_text, speaker_label};
     use crate::transcription::{model, transcribe_tracks};
 
     // Gather session inputs.
-    let (tracks_val, speakers_val, session_path, default_lang) = state.with_db(|conn| {
+    let (tracks_val, speakers_val, session_path, default_lang, accelerator) = state.with_db(|conn| {
         let tracks = sessions::get_tracks(conn, &req.session_id)?;
         let speakers = sessions::get_speakers(conn, &req.session_id)?;
         let path = sessions::session_path_of(conn, &req.session_id)?
             .ok_or_else(|| AppError::NotFound(format!("Session not found: {}", req.session_id)))?;
-        let lang = crate::config::get_config_map(conn)?
-            .get("default_language").cloned().unwrap_or_else(|| "en".into());
-        Ok::<_, AppError>((tracks, speakers, path, lang))
+        let cfg = crate::config::get_config_map(conn)?;
+        let lang = cfg.get("default_language").cloned().unwrap_or_else(|| "en".into());
+        let accel = cfg
+            .get("transcription_accelerator")
+            .cloned()
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| "cpu".into());
+        Ok::<_, AppError>((tracks, speakers, path, lang, accel))
     })?;
 
     let track_list = tracks_val.as_array().cloned().unwrap_or_default();
@@ -86,24 +91,33 @@ pub async fn transcribe(
             return Err(AppError::Internal(e));
         }
     };
-    let segments = tokio::task::spawn_blocking(move || transcribe_tracks(&model_dir, &tracks))
-        .await
-        .map_err(|e| AppError::Internal(anyhow::anyhow!("transcription task: {e}")))?
-        .map_err(AppError::Internal)?;
+    // Best-effort VAD model fetch (None → fixed-window fallback inside the engine).
+    let vad_model = model::ensure_vad(&state.paths).await;
+    let segments = tokio::task::spawn_blocking(move || {
+        transcribe_tracks(&model_dir, &accelerator, vad_model.as_deref(), &tracks)
+    })
+    .await
+    .map_err(|e| AppError::Internal(anyhow::anyhow!("transcription task: {e}")))?
+    .map_err(AppError::Internal)?;
 
-    let session_path = PathBuf::from(session_path);
-    let (json_path, text_path) =
-        write_transcription(&session_path, "sherpa", MODEL_ID, &language, &segments)
-            .map_err(AppError::Internal)?;
+    let _ = session_path; // session folder no longer holds transcript files
+    let transcript_text = segments_to_plain_text(&segments);
 
     state.with_db(|conn| {
-        crate::store::artifacts::insert_artifact(conn, &req.session_id, "transcript", "sherpa", MODEL_ID, &text_path)
+        crate::store::artifacts::insert_artifact(
+            conn,
+            &req.session_id,
+            "transcript",
+            "sherpa",
+            MODEL_ID,
+            &transcript_text,
+        )
     })?;
 
     Ok(Json(TranscribeResponse {
         language,
-        json_path: Some(json_path),
-        text_path: Some(text_path),
+        json_path: None,
+        text_path: None,
     }))
 }
 

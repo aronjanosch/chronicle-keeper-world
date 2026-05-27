@@ -9,6 +9,8 @@ use crate::state::ModelProgress;
 
 pub const MODEL_DIR_NAME: &str = "sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8";
 const MODEL_URL: &str = "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8.tar.bz2";
+const VAD_MODEL_NAME: &str = "silero_vad.onnx";
+const VAD_MODEL_URL: &str = "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad.onnx";
 const REQUIRED: [&str; 4] = [
     "encoder.int8.onnx",
     "decoder.int8.onnx",
@@ -51,6 +53,35 @@ pub async fn ensure(paths: &Paths, progress: &Arc<Mutex<ModelProgress>>) -> Resu
     tracing::info!("model ready at {}", dir.display());
     ModelProgress::set(progress, "ready", 0, 0);
     Ok(dir)
+}
+
+/// Ensure the Silero VAD model (~2MB) is available, downloading it once if
+/// missing. Best-effort: returns `None` (logged) on any failure so transcription
+/// degrades to fixed-window chunking rather than aborting.
+pub async fn ensure_vad(paths: &Paths) -> Option<PathBuf> {
+    let dest = paths.models_dir().join(VAD_MODEL_NAME);
+    if dest.exists() {
+        return Some(dest);
+    }
+    if let Err(e) = std::fs::create_dir_all(paths.models_dir()) {
+        tracing::warn!("VAD: create models dir failed: {e}");
+        return None;
+    }
+    tracing::info!("downloading Silero VAD model (~2MB, one time)…");
+    match download_simple(VAD_MODEL_URL, &dest).await {
+        Ok(()) => Some(dest),
+        Err(e) => {
+            tracing::warn!("VAD model download failed ({e}); using fixed-window chunking");
+            let _ = std::fs::remove_file(&dest);
+            None
+        }
+    }
+}
+
+async fn download_simple(url: &str, dest: &Path) -> Result<()> {
+    let bytes = reqwest::get(url).await?.error_for_status()?.bytes().await?;
+    std::fs::write(dest, &bytes)?;
+    Ok(())
 }
 
 async fn download(url: &str, dest: &Path, progress: &Arc<Mutex<ModelProgress>>) -> Result<()> {

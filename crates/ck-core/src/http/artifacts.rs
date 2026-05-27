@@ -1,5 +1,3 @@
-use std::path::Path;
-
 use axum::extract::{Path as AxPath, State};
 use axum::Json;
 use serde_json::{json, Value};
@@ -19,19 +17,16 @@ async fn content(state: &AppState, session_id: &str, artifact_id: i64) -> AppRes
         .with_db(|conn| artifacts::get_artifact(conn, artifact_id))?
         .filter(|a| a.session_id == session_id)
         .ok_or_else(|| AppError::NotFound(format!("Artifact not found: {artifact_id}")))?;
-    std::fs::read_to_string(&art.file_path)
-        .map_err(|_| AppError::NotFound(format!("Artifact file not found: {}", art.file_path)))
+    state
+        .with_db(|conn| artifacts::get_content(conn, art.id))?
+        .ok_or_else(|| AppError::NotFound(format!("Artifact not found: {artifact_id}")))
 }
 
 async fn delete(state: &AppState, session_id: &str, artifact_id: i64) -> AppResult<Json<Value>> {
-    let art = state
+    let _art = state
         .with_db(|conn| artifacts::get_artifact(conn, artifact_id))?
         .filter(|a| a.session_id == session_id)
         .ok_or_else(|| AppError::NotFound(format!("Artifact not found: {artifact_id}")))?;
-    // Artifacts live one-per-folder; remove the folder.
-    if let Some(dir) = Path::new(&art.file_path).parent() {
-        let _ = std::fs::remove_dir_all(dir);
-    }
     state.with_db(|conn| artifacts::delete_artifact(conn, artifact_id))?;
     Ok(Json(json!({ "status": "deleted", "artifact_id": artifact_id })))
 }

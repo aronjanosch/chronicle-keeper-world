@@ -5,6 +5,7 @@ use crate::config::get_config_map;
 use crate::error::{AppError, AppResult};
 use crate::models::{CampaignDetail, CampaignInfo, CampaignUpdateRequest};
 use crate::normalize::normalize_players;
+use crate::store::now;
 
 fn default_language(conn: &Connection) -> String {
     get_config_map(conn)
@@ -77,9 +78,9 @@ pub fn create_campaign(
     let lang = default_language(conn);
     conn.execute(
         "INSERT INTO campaigns \
-         (campaign_id, name, next_session_number, system, gm, setting, default_language, players_json, extra_info) \
-         VALUES (?1, ?2, ?3, '', '', '', ?4, '[]', '')",
-        params![campaign_id, name, start_session_number, lang],
+         (campaign_id, name, next_session_number, system, gm, setting, default_language, players_json, extra_info, updated_at, dirty) \
+         VALUES (?1, ?2, ?3, '', '', '', ?4, '[]', '', ?5, 1)",
+        params![campaign_id, name, start_session_number, lang, now()],
     )?;
     set_current_campaign_id(conn, campaign_id)?;
     get_campaign(conn, campaign_id)?.ok_or_else(|| AppError::Internal(anyhow::anyhow!("campaign vanished")))
@@ -117,12 +118,14 @@ pub fn update_campaign(
         sets.push("players_json = ?".into());
         vals.push(Box::new(normalize_players(players).to_string()));
     }
-    if !sets.is_empty() {
-        vals.push(Box::new(campaign_id.to_string()));
-        let sql = format!("UPDATE campaigns SET {} WHERE campaign_id = ?", sets.join(", "));
-        let refs: Vec<&dyn rusqlite::ToSql> = vals.iter().map(|b| b.as_ref()).collect();
-        conn.execute(&sql, refs.as_slice())?;
-    }
+    // Always stamp the sync columns, even if no user-facing field changed.
+    sets.push("updated_at = ?".into());
+    vals.push(Box::new(now()));
+    sets.push("dirty = 1".into());
+    vals.push(Box::new(campaign_id.to_string()));
+    let sql = format!("UPDATE campaigns SET {} WHERE campaign_id = ?", sets.join(", "));
+    let refs: Vec<&dyn rusqlite::ToSql> = vals.iter().map(|b| b.as_ref()).collect();
+    conn.execute(&sql, refs.as_slice())?;
     get_campaign(conn, campaign_id)?.ok_or_else(|| AppError::NotFound(format!("Campaign not found: {campaign_id}")))
 }
 

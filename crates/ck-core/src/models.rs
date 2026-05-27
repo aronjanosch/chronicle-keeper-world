@@ -64,11 +64,11 @@ pub struct LabelSpeakersRequest {
 #[derive(Debug, Serialize)]
 pub struct ArtifactInfo {
     pub id: i64,
+    pub artifact_id: String,
     pub session_id: String,
     pub kind: String,
     pub provider: String,
     pub model: String,
-    pub file_path: String,
     pub created_at: String,
 }
 
@@ -105,6 +105,7 @@ pub struct NextSessionNumberResponse {
 #[derive(Debug, Deserialize)]
 pub struct SummarizeRequest {
     pub session_id: String,
+    pub transcript_id: Option<i64>,
     pub transcript_path: Option<String>,
     pub output_path: Option<String>,
     pub title: Option<String>,
