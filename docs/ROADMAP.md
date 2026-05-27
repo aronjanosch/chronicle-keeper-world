@@ -112,10 +112,14 @@ Client `updated_at` is informational, never used for conflicts — immune to cli
 Auth stays a single shared `CK_SYNC_TOKEN` for v1 (one token = one data scope); per-user
 Stripe-scoped tokens are a later upgrade. See `docs/SYNC_PROTOCOL.md`.
 
+**Core sync is functionally complete and verified end-to-end** (Rust client ↔ live Python
+server over HTTP: campaigns, sessions, artifacts, and deletions all round-trip). Remaining
+Sprint 2 work is the paid-tier plumbing (Stripe + VPS) and release infra.
+
 **Sync server** (`chronicle-keeper-sync-server`, AGPL v3):
-- [ ] Rebuild around `POST /sync` — replace current CRUD endpoints
-- [ ] Schema: `server_seq` (monotonic) + `server_updated_at` on campaigns/sessions/artifacts; `artifact_id` (client UUID) on artifacts; `deleted_records` table
-- [ ] Merge logic: last push received wins (overwrite + bump `server_seq`); artifacts immutable (ignore duplicate `artifact_id`)
+- [x] Rebuilt around `POST /sync` — replaced the CRUD endpoints (+ `GET /health`)
+- [x] Schema: monotonic `server_seq` on campaigns/sessions/artifacts; `artifact_id` (client UUID) PK on artifacts; `deleted_artifacts` tombstones; `updated_at`/`deleted` columns
+- [x] Merge logic: last push received wins (overwrite + bump `server_seq`); artifacts push-once (`INSERT OR IGNORE`); deletions tombstoned; null JSON coerced. 6 tests
 - [ ] Stripe webhook for subscription validation
 - [ ] VPS provision + Caddy (TLS) + deploy
 
@@ -123,13 +127,13 @@ Stripe-scoped tokens are a later upgrade. See `docs/SYNC_PROTOCOL.md`.
 - [x] Migrate local artifacts from `file_path` to inline `content` in SQLite (match sync server schema + core principle #1)
 - [x] Schema groundwork: `updated_at` + `deleted` + `dirty` on campaigns/sessions; `artifact_id` (UUID, unique) + `content` + `dirty` on artifacts; idempotent migration + backfill (`db.rs`)
 - [x] `sync` module (`sync.rs`): `dirty` flag set on every campaign/session/artifact write, `last_sync_at` cursor + `ck_client_id` in config, wire DTOs, `collect_dirty`/`apply_pull`/`clear_dirty`, `SyncClient` + `sync_once` (reqwest `POST /sync`); round-trip unit-tested
-- [ ] Push-side deletions: tombstone for hard-deleted artifacts + UI filtering of soft-deleted (`deleted=1`) campaigns/sessions
-- [ ] Background `tokio::time::interval` sync task in Tauri shell
-- [ ] On startup + shutdown: flush sync
+- [x] Push-side deletions: `deleted_artifacts` tombstones for hard-deleted artifacts; sessions soft-deleted (`deleted=1`) + UI list filtering
+- [x] Background `tokio::time::interval` sync task in the Tauri shell (startup flush + every 5 min)
+- [x] Shutdown durability: dirty flags persist in SQLite, so unsynced writes flush on next launch (no explicit shutdown hook needed)
 
 **Frontend:**
-- [ ] Sync settings UI (server URL + token field)
-- [ ] Sync status indicator (last synced at, error state)
+- [x] Sync settings UI (server URL + write-only token field)
+- [x] Sync status indicator (off / token-missing / on)
 
 **Infra:**
 - [ ] Add MIT `LICENSE` file to app repo
