@@ -653,6 +653,23 @@
             </div>
           </div>
 
+          <div id="export-modal" class="modal hidden">
+            <div class="modal-header">
+              <h3>Export session</h3>
+              <button id="close-export-modal" type="button" class="btn ghost">Close</button>
+            </div>
+            <div class="modal-body">
+              <div class="field">
+                <label for="modal-export-summary-select">Summary</label>
+                <select id="modal-export-summary-select"></select>
+                <p class="field-hint">Choose which summary version to export.</p>
+              </div>
+            </div>
+            <div class="modal-footer">
+              <button id="run-export" type="button" class="btn primary">Export</button>
+            </div>
+          </div>
+
           <!-- Providers modal -->
           <div id="providers-modal" class="modal hidden" role="dialog" aria-modal="true">
             <div class="modal-header">

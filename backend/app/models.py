@@ -138,6 +138,7 @@ class ExportRequest(BaseModel):
     """Request parameters for exporting notes."""
 
     session_id: str
+    summary_id: int | None = None
     use_obsidian_format: bool = True
     custom_filename: str | None = None
 

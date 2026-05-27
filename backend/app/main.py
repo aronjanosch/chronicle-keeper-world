@@ -242,6 +242,7 @@ def export_notes(request: ExportRequest):
     try:
         result = export_session(
             session_id=request.session_id,
+            summary_id=request.summary_id,
             use_obsidian_format=request.use_obsidian_format,
             custom_filename=request.custom_filename,
         )

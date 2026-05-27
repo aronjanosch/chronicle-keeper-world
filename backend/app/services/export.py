@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from app.services.sessions import get_session_path, load_session
+from app.storage.artifacts import get_artifact, list_artifacts
 
 
 def _sanitize_filename(name: str) -> str:
@@ -28,16 +29,37 @@ def _format_frontmatter(metadata: dict) -> str:
 
 def export_session(
     session_id: str,
+    summary_id: int | None = None,
     use_obsidian_format: bool = True,
     custom_filename: str | None = None,
 ) -> dict:
     session = load_session(session_id)
     session_path = get_session_path(session_id)
 
-    summary_path = session.get("summary", {}).get("summary_path")
     summary_text = ""
-    if summary_path:
-        summary_text = Path(summary_path).read_text(encoding="utf-8")
+    if summary_id is not None:
+        summary_artifact = get_artifact(summary_id)
+        if not summary_artifact or summary_artifact.get("session_id") != session_id:
+            raise ValueError("Selected summary was not found for this session.")
+        if summary_artifact.get("kind") != "summary":
+            raise ValueError("Selected artifact is not a summary.")
+        summary_path = Path(summary_artifact["file_path"])
+        if not summary_path.exists():
+            raise ValueError("Selected summary file does not exist.")
+        summary_text = summary_path.read_text(encoding="utf-8")
+    else:
+        summaries = list_artifacts(session_id, "summary")
+        if summaries:
+            latest_summary_path = Path(summaries[0]["file_path"])
+            if latest_summary_path.exists():
+                summary_text = latest_summary_path.read_text(encoding="utf-8")
+
+    if not summary_text:
+        summary_path = session.get("summary", {}).get("summary_path")
+        if summary_path:
+            file_path = Path(summary_path)
+            if file_path.exists():
+                summary_text = file_path.read_text(encoding="utf-8")
 
     if not summary_text:
         summary_text = session.get("summary", {}).get("summary", "")

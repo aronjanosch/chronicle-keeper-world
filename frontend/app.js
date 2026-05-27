@@ -811,6 +811,28 @@ function populateTranscriptSelect() {
   state.selectedTranscriptPath = select.value;
 }
 
+function populateExportSummarySelect() {
+  const select = qs("modal-export-summary-select");
+  if (!select) return;
+  select.innerHTML = "";
+  if (!state.summaries.length) {
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = "No summaries found";
+    select.appendChild(option);
+    select.disabled = true;
+    return;
+  }
+  select.disabled = false;
+  state.summaries.forEach((item, index) => {
+    const option = document.createElement("option");
+    option.value = String(item.id);
+    option.textContent = `${item.provider} / ${item.model} (${new Date(item.created_at).toLocaleString()})`;
+    if (index === 0) option.selected = true;
+    select.appendChild(option);
+  });
+}
+
 async function loadPromptPresets() {
   if (state.promptPresets) return state.promptPresets;
   try {
@@ -1346,6 +1368,9 @@ document.addEventListener("DOMContentLoaded", () => {
   qs("close-summarize-modal").addEventListener("click", () =>
     closeModal("summarize-modal")
   );
+  qs("close-export-modal").addEventListener("click", () =>
+    closeModal("export-modal")
+  );
 
   qs("run-transcribe").addEventListener("click", async () => {
     if (!state.currentSession?.session_id) return;
@@ -1560,12 +1585,27 @@ document.addEventListener("DOMContentLoaded", () => {
 
   qs("export-obsidian").addEventListener("click", async () => {
     if (!state.currentSession?.session_id) return;
+    await loadSummaries();
+    populateExportSummarySelect();
+    openModal("export-modal");
+  });
+
+  qs("run-export").addEventListener("click", async () => {
+    if (!state.currentSession?.session_id) return;
+    const summarySelect = qs("modal-export-summary-select");
+    const summaryId = Number(summarySelect?.value);
+    if (!Number.isFinite(summaryId) || summaryId <= 0) {
+      alert("Select a summary to export.");
+      return;
+    }
     try {
+      closeModal("export-modal");
       const data = await apiFetch("/export", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           session_id: state.currentSession.session_id,
+          summary_id: summaryId,
           use_obsidian_format: true,
         }),
       });
