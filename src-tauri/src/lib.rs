@@ -7,6 +7,20 @@ use tauri::{WebviewUrl, WebviewWindowBuilder};
 /// the page scripts run. The server is an in-process tokio task (no sidecar).
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Linux/WebKitGTK reliability: some compositors (nested/VM Wayland, certain
+    // GPU drivers) crash the webview with "Error 71 (Protocol error)" or render
+    // blank. Force the X11 backend (via Xwayland) and disable the DMABUF
+    // renderer unless the user has set these explicitly. No-op on macOS/Windows.
+    #[cfg(target_os = "linux")]
+    {
+        if std::env::var_os("GDK_BACKEND").is_none() {
+            std::env::set_var("GDK_BACKEND", "x11");
+        }
+        if std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
+            std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+        }
+    }
+
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
