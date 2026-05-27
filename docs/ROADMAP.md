@@ -1,7 +1,12 @@
 # Chronicle Keeper — Roadmap
 
 > Last updated: 2026-05-27  
-> Branch: `native-rust-core`
+> Branch: `main` (the native-Rust rewrite is merged; `native-rust-core` retired)
+>
+> **Status in one line:** standalone app works offline end-to-end; multi-device sync is
+> functionally complete and verified client↔server. Repo cleaned + licensed (app MIT, server
+> AGPL-3.0). What's left is the **paid tier** (Stripe + VPS), **release engineering** (CI,
+> Windows, signing), and **Sprint 3** (drop the internal HTTP server for Tauri `invoke()`).
 
 ---
 
@@ -79,15 +84,16 @@ Remove axum entirely from the Tauri app. Keep `ck-serve` as a dev/debug binary (
 ### Sync (Sprint 2)
 
 ```
-App (local SQLite, dirty tracking via updated_at)
+App (local SQLite, per-record `dirty` flag set on every write)
   │
-  │  POST /sync  every 5 min + on open + on close
-  ▼
+  │  POST /sync  on startup + every 5 min  (unsynced writes persist as dirty,
+  ▼               so anything missed flushes on next launch)
 chronicle-keeper-sync-server (VPS, AGPL v3)
-  └── SQLite (WAL mode)
+  └── SQLite (WAL mode), monotonic server_seq, server-authoritative merge
 ```
 
-One endpoint. Offline-first. See `docs/SYNC_PROTOCOL.md` for the full spec.
+One endpoint. Offline-first. Conflict cursor is the server's `server_seq` (clock-skew
+immune). See `docs/SYNC_PROTOCOL.md` for the full spec.
 
 ---
 
@@ -102,43 +108,55 @@ Full offline flow: upload Craig ZIP → label speakers → transcribe → summar
 ### ✅ Sprint 1.5 — Frontend sync-up
 Fixed settings screen 400 on save. Removed dead ONNX/MLX/WhisperX UI. README + CLAUDE.md updated for native Rust core.
 
-### 🔲 Sprint 2 — Multi-device sync
+### ✅ Sprint 2 — Multi-device sync (core complete)
 
-**Goal:** second device sees synced data; server rejects unauthenticated requests.
+**Goal (met):** a second device sees synced data; the server rejects unauthenticated requests.
+Verified end-to-end — the Rust client and the live Python server round-trip campaigns,
+sessions, artifacts, and deletions over HTTP.
 
 **Conflict model (decided 2026-05-27):** server-authoritative. The server stamps every
-accepted record with a monotonic `server_seq` (its own clock); **last push received wins**.
-Client `updated_at` is informational, never used for conflicts — immune to client clock skew.
-Auth stays a single shared `CK_SYNC_TOKEN` for v1 (one token = one data scope); per-user
-Stripe-scoped tokens are a later upgrade. See `docs/SYNC_PROTOCOL.md`.
-
-**Core sync is functionally complete and verified end-to-end** (Rust client ↔ live Python
-server over HTTP: campaigns, sessions, artifacts, and deletions all round-trip). Remaining
-Sprint 2 work is the paid-tier plumbing (Stripe + VPS) and release infra.
+accepted record with a monotonic `server_seq`; **last push received wins**. Client `updated_at`
+is informational, never used for conflicts — immune to client clock skew. Auth is a single
+shared `CK_SYNC_TOKEN` for v1 (one token = one data scope); per-user Stripe-scoped tokens are a
+later upgrade. See `docs/SYNC_PROTOCOL.md`.
 
 **Sync server** (`chronicle-keeper-sync-server`, AGPL v3):
 - [x] Rebuilt around `POST /sync` — replaced the CRUD endpoints (+ `GET /health`)
 - [x] Schema: monotonic `server_seq` on campaigns/sessions/artifacts; `artifact_id` (client UUID) PK on artifacts; `deleted_artifacts` tombstones; `updated_at`/`deleted` columns
 - [x] Merge logic: last push received wins (overwrite + bump `server_seq`); artifacts push-once (`INSERT OR IGNORE`); deletions tombstoned; null JSON coerced. 6 tests
-- [ ] Stripe webhook for subscription validation
-- [ ] VPS provision + Caddy (TLS) + deploy
 
 **Rust core** (`crates/ck-core`):
-- [x] Migrate local artifacts from `file_path` to inline `content` in SQLite (match sync server schema + core principle #1)
+- [x] Migrate local artifacts from `file_path` to inline `content` in SQLite (core principle #1)
 - [x] Schema groundwork: `updated_at` + `deleted` + `dirty` on campaigns/sessions; `artifact_id` (UUID, unique) + `content` + `dirty` on artifacts; idempotent migration + backfill (`db.rs`)
-- [x] `sync` module (`sync.rs`): `dirty` flag set on every campaign/session/artifact write, `last_sync_at` cursor + `ck_client_id` in config, wire DTOs, `collect_dirty`/`apply_pull`/`clear_dirty`, `SyncClient` + `sync_once` (reqwest `POST /sync`); round-trip unit-tested
-- [x] Push-side deletions: `deleted_artifacts` tombstones for hard-deleted artifacts; sessions soft-deleted (`deleted=1`) + UI list filtering
+- [x] `sync` module (`sync.rs`): `dirty` flag on every write, `last_sync_at` cursor + `ck_client_id` in config, wire DTOs, `collect_dirty`/`apply_pull`/`clear_dirty`, `SyncClient` + `sync_once`; round-trip unit-tested
+- [x] Push-side deletions: `deleted_artifacts` tombstones for artifacts; sessions soft-deleted (`deleted=1`) + UI list filtering
 - [x] Background `tokio::time::interval` sync task in the Tauri shell (startup flush + every 5 min)
-- [x] Shutdown durability: dirty flags persist in SQLite, so unsynced writes flush on next launch (no explicit shutdown hook needed)
+- [x] Shutdown durability: dirty flags persist in SQLite → unsynced writes flush next launch
 
 **Frontend:**
-- [x] Sync settings UI (server URL + write-only token field)
-- [x] Sync status indicator (off / token-missing / on)
+- [x] Sync settings UI (server URL + write-only token field) + status indicator (off / token-missing / on)
 
-**Infra:**
-- [x] Add MIT `LICENSE` file to app repo
-- [x] Add AGPL v3 `LICENSE` to sync server repo
-- [ ] GitHub Actions: build + release on tag (macOS DMG; Windows on hosted runner)
+**Repo hygiene & licensing:**
+- [x] MIT `LICENSE` (app) / AGPL-3.0 `LICENSE` (server); README rewritten brief + human
+- [x] Removed Python/sidecar/Vite-era junk (`spike/`, `dev.sh`, `scripts/`, `tasks/`, `REWRITE_PLAN.md`); untracked `.claude/`
+
+**Still open (verification, not blocking the design):**
+- [ ] Click-test sync in the *running app* (only unit- + wire-tested so far — needs the webview + two app instances)
+
+### 🔲 Sprint 2.5 — Paid tier & release engineering
+
+The hosted sync subscription and getting installable builds into users' hands.
+
+**Paid tier (hosted sync):**
+- [ ] Stripe subscription + webhook for subscription validation on the server
+- [ ] Per-user auth: replace the shared `CK_SYNC_TOKEN` with per-subscriber tokens scoped to a Stripe customer id (server data partitioned per user)
+- [ ] VPS provision + Caddy (TLS) + deploy the Docker image; back up `/data`
+
+**Release engineering:**
+- [ ] GitHub Actions: build + release on tag (macOS DMG; Windows on a hosted runner)
+- [ ] Windows installer (cross-compile can't do WebView2/MSVC — needs a Windows host/CI)
+- [ ] Code signing + notarization (macOS Gatekeeper, Windows SmartScreen)
+- [ ] Make the app repo **public** (MIT, free-forever — currently private)
 
 ### 🔲 Sprint 3 — Drop internal HTTP server
 
@@ -158,13 +176,12 @@ Why now and not earlier: the original justification (shared HTTP contract with s
 
 ### 🔲 Later
 
-- Windows installer (needs Windows CI runner or cross-compile investigation)
-- Code signing + notarization (macOS Gatekeeper, Windows SmartScreen)
-- Hardware-accelerated transcription opt-in (CoreML on macOS, CUDA/DirectML on Windows) — plumbed but unverified
-- Per-user auth on sync server (replace shared token with accounts — Stripe user IDs)
-- Postgres on sync server (when SQLite write contention becomes real)
-- Cohere LLM provider
+- Verify the hardware-accel path actually engages (CoreML on macOS, CUDA/DirectML on Windows) — plumbed with CPU fallback, but never confirmed to use the accelerator
+- More transcription engines (e.g. Whisper Turbo) — audio is kept on device specifically so users can re-transcribe with a different model
+- Postgres on sync server (when SQLite write contention becomes real; storage is behind an interface)
+- Cohere LLM provider (deferred from the LLM port)
 - Export targets beyond Obsidian (Notion API, Logseq)
+- Optional shutdown-flush hook in the Tauri shell (today's startup + interval is sufficient; dirty flags persist)
 
 ---
 
@@ -172,8 +189,11 @@ Why now and not earlier: the original justification (shared HTTP contract with s
 
 | Risk | Status |
 |---|---|
-| Windows build unverified | ⚠️ Open — needs Windows host or CI |
-| CoreML EP for Parakeet int8 unverified | ⚠️ Open — plumbed, not tested |
-| Artifacts stored as file_path locally | ✅ Fixed — inline `content` in SQLite (Sprint 2 groundwork) |
+| Windows build unverified | ⚠️ Open — needs Windows host or CI (Sprint 2.5) |
+| CoreML EP for Parakeet int8 unverified | ⚠️ Open — plumbed with CPU fallback, not tested |
+| Sync not click-tested in the running app | ⚠️ Open — unit- + wire-tested only; needs webview + two instances |
+| Hosted sync is single-tenant (shared token) | ⚠️ Expected for v1 — per-user auth is Sprint 2.5, before any public paid launch |
+| Artifacts stored as file_path locally | ✅ Fixed — inline `content` in SQLite |
+| Audio tracks never deleted | ✅ Intentional — kept for re-transcription (principle #5) |
 | Internal HTTP port exposure | ⚠️ Technical debt — fixed in Sprint 3 |
 | Rust learning curve (solo dev) | 🟡 Manageable — keep surface small, lean on examples |
