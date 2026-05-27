@@ -79,7 +79,13 @@ pub async fn transcribe(
         .collect();
 
     // Download model if needed, then run the CPU-heavy transcription off-thread.
-    let model_dir = model::ensure(&state.paths).await.map_err(AppError::Internal)?;
+    let model_dir = match model::ensure(&state.paths, &state.model_progress).await {
+        Ok(dir) => dir,
+        Err(e) => {
+            crate::state::ModelProgress::set_error(&state.model_progress, e.to_string());
+            return Err(AppError::Internal(e));
+        }
+    };
     let segments = tokio::task::spawn_blocking(move || transcribe_tracks(&model_dir, &tracks))
         .await
         .map_err(|e| AppError::Internal(anyhow::anyhow!("transcription task: {e}")))?

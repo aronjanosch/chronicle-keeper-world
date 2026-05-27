@@ -2,8 +2,49 @@ use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
 use rusqlite::Connection;
+use serde::Serialize;
 
 use crate::paths::Paths;
+
+/// Progress of the one-time transcription-model download, polled by the frontend
+/// via `GET /model-status` while a `/transcribe` request is in flight.
+///
+/// Lives here (not in the feature-gated `transcription` module) so the status
+/// endpoint compiles in the transcription-disabled server build too — there it
+/// simply stays `Idle`.
+#[derive(Clone, Debug, Serialize)]
+pub struct ModelProgress {
+    /// "idle" | "downloading" | "extracting" | "ready" | "error"
+    pub phase: String,
+    /// Bytes downloaded so far (downloading phase).
+    pub downloaded: u64,
+    /// Total bytes if the server sent Content-Length, else 0 (unknown).
+    pub total: u64,
+    /// Human-readable note, set on error.
+    pub message: Option<String>,
+}
+
+impl Default for ModelProgress {
+    fn default() -> Self {
+        Self { phase: "idle".into(), downloaded: 0, total: 0, message: None }
+    }
+}
+
+impl ModelProgress {
+    pub fn set(handle: &Arc<Mutex<Self>>, phase: &str, downloaded: u64, total: u64) {
+        let mut p = handle.lock().expect("model_progress mutex poisoned");
+        p.phase = phase.into();
+        p.downloaded = downloaded;
+        p.total = total;
+        p.message = None;
+    }
+
+    pub fn set_error(handle: &Arc<Mutex<Self>>, message: String) {
+        let mut p = handle.lock().expect("model_progress mutex poisoned");
+        p.phase = "error".into();
+        p.message = Some(message);
+    }
+}
 
 /// Shared application state handed to every axum handler.
 ///
@@ -18,6 +59,8 @@ pub struct AppState {
     /// matching `x-ck-token` header. The Tauri shell sets a per-launch token;
     /// the standalone dev server leaves it `None`. Also the Sprint-2 auth seam.
     pub auth_token: Option<String>,
+    /// Shared progress of the one-time model download (see [`ModelProgress`]).
+    pub model_progress: Arc<Mutex<ModelProgress>>,
 }
 
 impl AppState {
@@ -27,6 +70,7 @@ impl AppState {
             db: Arc::new(Mutex::new(conn)),
             paths,
             auth_token: None,
+            model_progress: Arc::new(Mutex::new(ModelProgress::default())),
         })
     }
 

@@ -63,6 +63,49 @@ function setSessionOpStatus(message, state = "") {
   }
 }
 
+const MB = 1024 * 1024;
+
+// Render a short unicode progress bar, e.g. "███████░░░░░░░".
+function progressBar(fraction, width = 14) {
+  const filled = Math.max(0, Math.min(width, Math.round(fraction * width)));
+  return "█".repeat(filled) + "░".repeat(width - filled);
+}
+
+// Poll GET /model-status and reflect download/extract progress in the status
+// line. Returns a stop() that cancels the poll. No-op once the model is present
+// (status stays "idle"/"ready", so the line keeps showing "Transcribing…").
+function pollModelStatus() {
+  let stopped = false;
+  const tick = async () => {
+    if (stopped) return;
+    try {
+      const p = await apiFetch("/model-status");
+      if (stopped) return;
+      if (p.phase === "downloading") {
+        if (p.total > 0) {
+          const pct = Math.round((p.downloaded / p.total) * 100);
+          setSessionOpStatus(
+            `Downloading model ${progressBar(p.downloaded / p.total)} ${pct}% ` +
+              `(${(p.downloaded / MB).toFixed(0)} / ${(p.total / MB).toFixed(0)} MB)`
+          );
+        } else {
+          setSessionOpStatus(`Downloading model… ${(p.downloaded / MB).toFixed(0)} MB`);
+        }
+      } else if (p.phase === "extracting") {
+        setSessionOpStatus("Extracting model…");
+      }
+      // idle/ready/error: leave the surrounding "Transcribing…"/error message as-is.
+    } catch {
+      // Ignore poll errors; the transcribe call itself surfaces real failures.
+    }
+    if (!stopped) setTimeout(tick, 500);
+  };
+  tick();
+  return () => {
+    stopped = true;
+  };
+}
+
 function apiUrl(path) {
   return `${state.apiBase}${path}`;
 }
@@ -1123,10 +1166,12 @@ async function loadConfig() {
   const config = await refreshConfigFromApi();
   qs("setting-api-base").value = state.apiBase;
   qs("setting-output-root").value = config.output_root || "";
-  qs("setting-transcription-provider").value =
-    config.transcription_provider && config.transcription_provider !== ""
-      ? config.transcription_provider
-      : "auto";
+  const providerSel = qs("setting-transcription-provider");
+  const storedProvider = config.transcription_provider || "auto";
+  // Old configs may hold the retired onnx-asr/mlx-audio values; fall back to auto.
+  providerSel.value = [...providerSel.options].some((o) => o.value === storedProvider)
+    ? storedProvider
+    : "auto";
   qs("setting-default-language").value = config.default_language || "";
   qs("setting-whisperx-model").value = config.whisperx_model || "";
 
@@ -1325,7 +1370,7 @@ document.addEventListener("DOMContentLoaded", () => {
       const wantProvider =
         explicit && explicit !== "auto"
           ? explicit
-          : cfg.transcription_provider_effective || explicit || "onnx-asr";
+          : cfg.transcription_provider_effective || explicit || "sherpa";
       if ([...providerSelect.options].some((o) => o.value === wantProvider)) {
         providerSelect.value = wantProvider;
       }
@@ -1399,6 +1444,9 @@ document.addEventListener("DOMContentLoaded", () => {
     };
     closeModal("transcribe-modal");
     setSessionOpStatus("Transcribing…");
+    // Poll model-download progress while the (blocking) transcribe runs. The
+    // first transcribe on a fresh install downloads the ~465 MB model once.
+    const stopPolling = pollModelStatus();
     try {
       await apiFetch("/transcribe", {
         method: "POST",
@@ -1410,6 +1458,8 @@ document.addEventListener("DOMContentLoaded", () => {
       setSessionOpStatus("Transcription complete", "done");
     } catch (error) {
       setSessionOpStatus(error.message, "err");
+    } finally {
+      stopPolling();
     }
   });
 

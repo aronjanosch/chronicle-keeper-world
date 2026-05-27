@@ -1,9 +1,11 @@
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result};
 use futures_util::StreamExt;
 
 use crate::paths::Paths;
+use crate::state::ModelProgress;
 
 pub const MODEL_DIR_NAME: &str = "sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8";
 const MODEL_URL: &str = "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8.tar.bz2";
@@ -23,10 +25,12 @@ pub fn is_present(dir: &Path) -> bool {
 }
 
 /// Ensure the Parakeet model is available, downloading + extracting it once if
-/// missing. Returns the model directory.
-pub async fn ensure(paths: &Paths) -> Result<PathBuf> {
+/// missing. Returns the model directory. Reports download/extract progress into
+/// `progress` so the frontend can render a bar via `GET /model-status`.
+pub async fn ensure(paths: &Paths, progress: &Arc<Mutex<ModelProgress>>) -> Result<PathBuf> {
     let dir = model_dir(paths);
     if is_present(&dir) {
+        ModelProgress::set(progress, "ready", 0, 0);
         return Ok(dir);
     }
     let models_root = paths.models_dir();
@@ -34,9 +38,10 @@ pub async fn ensure(paths: &Paths) -> Result<PathBuf> {
 
     tracing::info!("downloading Parakeet model (~465MB, one time)…");
     let archive = models_root.join("parakeet-v3.tar.bz2");
-    download(MODEL_URL, &archive).await.context("download model")?;
+    download(MODEL_URL, &archive, progress).await.context("download model")?;
 
     tracing::info!("extracting model archive…");
+    ModelProgress::set(progress, "extracting", 0, 0);
     extract_tar_bz2(&archive, &models_root).context("extract model")?;
     let _ = std::fs::remove_file(&archive);
 
@@ -44,17 +49,23 @@ pub async fn ensure(paths: &Paths) -> Result<PathBuf> {
         anyhow::bail!("model archive extracted but expected files missing in {}", dir.display());
     }
     tracing::info!("model ready at {}", dir.display());
+    ModelProgress::set(progress, "ready", 0, 0);
     Ok(dir)
 }
 
-async fn download(url: &str, dest: &Path) -> Result<()> {
+async fn download(url: &str, dest: &Path, progress: &Arc<Mutex<ModelProgress>>) -> Result<()> {
     let resp = reqwest::get(url).await?.error_for_status()?;
+    let total = resp.content_length().unwrap_or(0);
     let mut stream = resp.bytes_stream();
     let mut file = std::fs::File::create(dest)?;
     use std::io::Write;
+    let mut downloaded: u64 = 0;
+    ModelProgress::set(progress, "downloading", 0, total);
     while let Some(chunk) = stream.next().await {
         let chunk = chunk?;
         file.write_all(&chunk)?;
+        downloaded += chunk.len() as u64;
+        ModelProgress::set(progress, "downloading", downloaded, total);
     }
     file.flush()?;
     Ok(())

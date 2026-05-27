@@ -269,13 +269,12 @@
                 <div class="field">
                   <label for="setting-transcription-provider">Transcription engine</label>
                   <select id="setting-transcription-provider">
-                    <option value="auto">Auto (recommended for this computer)</option>
-                    <option value="onnx-asr">ONNX ASR (Linux / Windows / NVIDIA GPU)</option>
-                    <option value="mlx-audio">MLX Audio (Apple Silicon only)</option>
+                    <option value="auto">Auto (recommended)</option>
+                    <option value="sherpa">Parakeet (native, on-device)</option>
                   </select>
                   <p class="field-hint">
-                    Auto picks ONNX on most PCs and MLX on Apple&nbsp;Silicon Macs. Choose explicitly if you run the API
-                    elsewhere or want to compare engines.
+                    Transcription runs on-device via the built-in Parakeet engine (sherpa-onnx). Auto and Parakeet are
+                    equivalent today; the explicit option is there for future engines.
                   </p>
                 </div>
                 <div class="field">
@@ -295,11 +294,9 @@
                     spellcheck="false"
                   />
                   <p class="field-hint">
-                    Used when you transcribe without choosing a model in the session dialog. Must match an ID for your
-                    platform’s provider (Linux/Windows: ONNX, e.g.
-                    <code class="inline-code">nemo-parakeet-tdt-0.6b-v3</code>; Apple Silicon MLX:
-                    <code class="inline-code">mlx-community/parakeet-tdt-0.6b-v3</code>). If it does not match, the
-                    API falls back to that provider’s built-in default (Parakeet v3).
+                    Used when you transcribe without choosing a model in the session dialog. Defaults to
+                    <code class="inline-code">nemo-parakeet-tdt-0.6b-v3</code>. If it does not match a known model, the
+                    engine falls back to its built-in default (Parakeet v3).
                   </p>
                 </div>
               </div>

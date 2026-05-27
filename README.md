@@ -1,174 +1,128 @@
 # Chronicle Keeper
 
-A cross-platform desktop application that generates structured D&D session notes from Discord audio files (Craig Bot recordings).
+A local-first, cross-platform desktop app that generates structured D&D session notes
+from Discord audio files (Craig Bot recordings). Everything runs on your machine and
+works offline — you bring your own LLM (local Ollama or any cloud key).
 
 ## Features
 
-- **Craig Bot ZIP Processing**: Extract and process multi-track audio files
-- **Speaker Mapping**: Assign speaker names to audio tracks  
-- **WhisperX Transcription**: High-quality, timestamped transcription with speaker diarization
-- **Dual LLM Support**: Local processing with Ollama or cloud processing with Google Gemini
+- **Craig Bot ZIP Processing**: Extract and process multi-track audio (one track per speaker)
+- **Speaker Mapping**: Assign player/character names to audio tracks
+- **On-device Transcription**: Native Parakeet TDT v3 (int8) via sherpa-onnx — 25 European
+  languages including German, several× realtime on CPU. No cloud, no model-cache weirdness;
+  the model downloads once into app-data.
+- **Bring-your-own LLM**: Local Ollama or any OpenAI-compatible cloud provider (keys stay client-side)
 - **Customizable Prompts**: User-defined system prompts for session summarization
-- **Export Functionality**: Save session notes as Markdown files
+- **Export**: Save notes as Markdown with Obsidian frontmatter
 
 ## Architecture
 
-- **Frontend**: Tauri desktop application (TypeScript/HTML/CSS)
-- **Backend**: Python FastAPI server with audio processing and LLM integration
-- **Local LLM**: Ollama with llama3.2 model
-- **Cloud LLM**: Google Gemini API (gemini-2.5-flash)
+One Rust core, embedded in a Tauri shell — **no Python, no sidecar process**.
+
+- **Tauri shell** (`src-tauri`): native window + webview. Serves the static frontend and
+  hosts the core as an in-process tokio task (axum HTTP on `127.0.0.1:<ephemeral>`).
+  Injects the base URL + a per-launch bearer token into the webview; the frontend sends
+  `X-CK-Token` on every request.
+- **Rust core** (`crates/ck-core`): the whole backend — SQLite storage, Craig ZIP extraction,
+  transcription (sherpa-onnx + Parakeet v3), LLM summarization over HTTP, markdown/Obsidian export.
+  Exposes ~25 HTTP endpoints. Also builds a standalone dev binary, `ck-serve`.
+- **Frontend** (`frontend`): vanilla HTML/CSS/JS, no build step. Talks to the core over HTTP at
+  the injected base URL (falls back to `http://127.0.0.1:8000` for standalone dev).
+
+The same core binary will later run in server mode on a VPS for the optional paid multi-device
+sync tier (transcription always stays client-side). See `docs/REWRITE_PLAN.md`.
+
+> The Python app under `backend/` is retained only as the **port specification** for the Rust
+> core's behavior — it is not built or shipped.
 
 ## Prerequisites
 
-1. **Python 3.11+** and **uv** package manager
-2. **Node.js** and **npm** for frontend development
-3. **Rust** and **Cargo** for Tauri
-4. **Ollama** (for local LLM processing) - Download from [ollama.ai](https://ollama.ai)
-5. **Google Gemini API Key** (for cloud LLM processing) - Get from [Google AI Studio](https://makersuite.google.com/app/apikey)
+1. **Rust** and **Cargo** (stable)
+2. **Tauri** system deps for your OS — see <https://tauri.app/start/prerequisites/>
+3. **Ollama** for local LLM (optional) — <https://ollama.ai>, or a cloud LLM API key
 
-## Installation
-
-### Backend Setup
-
-```bash
-# Navigate to backend directory
-cd backend
-
-# Install dependencies (uv handles virtual environment automatically)
-uv install
-
-# Test the setup
-uv run python test_setup.py
-```
-
-### Frontend Setup
-
-```bash
-# Navigate to frontend directory
-cd frontend
-
-# Install dependencies
-npm install
-
-# Build frontend
-npm run build
-```
-
-### LLM Setup
-
-#### Local LLM (Ollama)
-```bash
-# Install and start Ollama
-ollama serve
-
-# Pull a model (recommended: llama3.2)
-ollama pull llama3.2
-```
-
-#### Cloud LLM (Gemini)
-1. Get API key from [Google AI Studio](https://makersuite.google.com/app/apikey)
-2. Set via the Settings panel in the application
-
-## Usage
-
-### Running the Application
-
-1. **Start the backend server:**
-   ```bash
-   cd backend
-   uv run python run.py
-   ```
-   The API will be available at `http://127.0.0.1:8000`
-
-2. **Start the frontend application:**
-   ```bash
-   cd frontend
-   npm run tauri dev
-   ```
-
-### 4-Step Workflow
-
-1. **Upload**: Import Craig Bot ZIP file containing multi-track audio
-2. **Label Speakers**: Assign speaker names to each audio track
-3. **Generate Notes**: Choose LLM engine (Local/Cloud) and process the session
-4. **Export**: Save the generated notes as a Markdown file
-
-### Settings Configuration
-
-Access the Settings panel to configure:
-- **Gemini API Key**: For cloud LLM processing
-- **System Prompt**: Customize the LLM prompt for session summarization
-- **LLM Preference**: Choose between Local (Ollama) or Cloud (Gemini)
+No Python, Node, or GPU required.
 
 ## Development
 
-### Backend Development
+### Run the full desktop app
 
 ```bash
-cd backend
-
-# Start development server with auto-reload
-uv run python run.py
-
-# API documentation available at: http://127.0.0.1:8000/docs
+# From the repo root
+cargo tauri dev
 ```
 
-### Frontend Development
+This builds the Rust core + shell and opens the app with the static `frontend/` served
+directly (no Vite/npm step).
+
+### Run the core standalone (HTTP only, no window)
+
+Useful for hitting the API directly or developing the frontend in a browser.
 
 ```bash
-cd frontend
+# Starts the axum server on 127.0.0.1:8000 (override with CK_PORT)
+cargo run -p ck-core --bin ck-serve
 
-# Development mode with hot reload
-npm run tauri dev
-
-# Build for production
-npm run tauri build
+# Then open frontend/index.html (or serve the folder) — it defaults to
+# http://127.0.0.1:8000 and uses localStorage `ck_api_base` to override.
 ```
 
-### Project Structure
+Set `RUST_LOG=debug` for verbose logs.
+
+### Build installers
+
+```bash
+cargo tauri build
+```
+
+Produces per-OS installers. First build downloads the sherpa-onnx prebuilt library for
+your platform. (Linux verified; macOS/Windows packaging in progress — see the rewrite plan.)
+
+### LLM setup (optional, local)
+
+```bash
+ollama serve
+ollama pull llama3.2
+```
+
+Cloud providers: add your API key in the app's Settings panel (stored locally, never sent
+to any Chronicle Keeper server).
+
+## Workflow
+
+1. **Upload**: Import a Craig Bot ZIP (multi-track audio)
+2. **Label Speakers**: Assign player/character names per track
+3. **Transcribe**: On-device Parakeet transcription
+4. **Summarize**: Pick your LLM (local Ollama / cloud) and generate notes
+5. **Export**: Save as Markdown with Obsidian frontmatter
+
+## Project structure
 
 ```
 chronicle-keeper/
-├── backend/                 # Python FastAPI backend
-│   ├── src/
-│   │   ├── main.py         # FastAPI application
-│   │   ├── audio/          # Audio processing modules
-│   │   ├── llm/            # LLM client modules
-│   │   └── storage/        # Configuration management
-│   ├── run.py              # Application entry point
-│   └── pyproject.toml      # Python dependencies
-├── frontend/               # Tauri desktop application
-│   ├── src/
-│   │   ├── main.ts         # TypeScript application logic
-│   │   └── styles.css      # UI styling
-│   ├── src-tauri/          # Rust backend for Tauri
-│   └── index.html          # Main HTML template
-└── README.md
+├── crates/ck-core/         # Rust core: HTTP API, transcription, storage, LLM, export
+│   └── src/bin/ck_serve.rs # standalone dev server binary
+├── src-tauri/              # Tauri shell (hosts the core in-process)
+├── frontend/               # vanilla HTML/CSS/JS UI (no build step)
+├── backend/                # legacy Python app — port spec only, not shipped
+├── spike/transcribe-spike/ # Sprint 0 transcription proof-of-concept
+├── docs/REWRITE_PLAN.md    # the native-Rust rewrite plan + status
+└── Cargo.toml              # workspace
 ```
 
 ## Configuration
 
-Settings are stored in platform-specific locations:
-- **Linux/Mac**: `~/.config/chronicle-keeper/settings.json`
-- **Windows**: `%APPDATA%\\ChronicleKeeper\\settings.json`
+Settings + sessions live in a platform-appropriate app-data directory (SQLite). The
+transcription model downloads once into app-data and is reused on every launch.
 
 ## Troubleshooting
 
-### Common Issues
-
-1. **WhisperX GPU Issues**: Ensure CUDA/PyTorch compatibility
-2. **Ollama Connection**: Verify `ollama serve` is running
-3. **Gemini API**: Check API key validity and quota
-4. **File Permissions**: Ensure write access for export directory
-
-### Backend Logs
-
-Check console output for detailed error messages and processing status.
-
-### Frontend Development
-
-Use browser developer tools when running in development mode.
+- **Linux blank/garbled webview**: a WebKitGTK reliability fix (`GDK_BACKEND=x11` + DMABUF
+  disable) is applied automatically on Linux when those env vars are unset.
+- **Ollama connection**: verify `ollama serve` is running and the model is pulled.
+- **Cloud LLM**: check API key validity and quota in Settings.
+- **Logs**: run with `RUST_LOG=debug` for detailed output.
 
 ## License
 
-Built for Chronicle Keeper - D&D Session Note Generator
+Built for Chronicle Keeper — D&D Session Note Generator.

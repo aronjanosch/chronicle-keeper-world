@@ -49,6 +49,7 @@ pub fn router(state: AppState) -> Router {
         // transcription
         .route("/providers", get(transcribe::providers))
         .route("/transcribe", post(transcribe::transcribe))
+        .route("/model-status", get(model_status))
         // summarization + export + llm providers
         .route("/prompts", get(llm::list_prompts))
         .route("/summarize", post(llm::summarize))
@@ -91,6 +92,14 @@ async fn require_token(
 
 async fn health() -> Json<Value> {
     Json(json!({ "status": "ok" }))
+}
+
+/// Current state of the one-time model download. The frontend polls this while a
+/// `/transcribe` request is in flight to render a progress bar. Returns `idle`
+/// when no download is happening (e.g. model already present).
+async fn model_status(State(state): State<AppState>) -> Json<crate::state::ModelProgress> {
+    let p = state.model_progress.lock().expect("model_progress mutex poisoned").clone();
+    Json(p)
 }
 
 async fn read_config(State(state): State<AppState>) -> AppResult<Json<ConfigResponse>> {
