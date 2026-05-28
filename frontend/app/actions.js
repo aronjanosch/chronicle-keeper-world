@@ -22,8 +22,16 @@ export async function openCampaign(id) {
   setState({ loading: true, error: null });
   try {
     const campaign = decorateCampaign(await apiFetch(`/campaigns/${id}`));
-    const sessions = await apiFetch(`/campaigns/${id}/sessions`).catch(() => []);
-    setState({ campaign, campaignSessions: sessions || [], loading: false });
+    const [sessions, codexEntries] = await Promise.all([
+      apiFetch(`/campaigns/${id}/sessions`).catch(() => []),
+      apiFetch(`/campaigns/${id}/codex/entries`).catch(() => []),
+    ]);
+    setState({
+      campaign,
+      campaignSessions: sessions || [],
+      codexEntries: codexEntries || [],
+      loading: false,
+    });
     navigate('campaign', { id });
   } catch (e) { setState({ error: e.message, loading: false }); }
 }
@@ -61,6 +69,33 @@ export async function updateCampaign(patch) {
   const updated = decorateCampaign(await apiJson(`/campaigns/${id}`, 'PUT', patch));
   setState({ campaign: updated });
   await loadCampaigns();
+}
+
+// ── Codex entries ─────────────────────────────────────────────────
+export async function loadCodexEntries(campaignId) {
+  const id = campaignId || store.campaign?.campaign_id;
+  if (!id) return [];
+  const entries = await apiFetch(`/campaigns/${id}/codex/entries`).catch(() => []);
+  setState({ codexEntries: entries || [] });
+  return entries || [];
+}
+
+export async function createCodexEntry({ name, kind, body }) {
+  const id = store.campaign.campaign_id;
+  await apiJson(`/campaigns/${id}/codex/entries`, 'POST', { name, kind, body: body || '' });
+  await loadCodexEntries(id);
+}
+
+export async function updateCodexEntry(entryId, patch) {
+  const id = store.campaign.campaign_id;
+  await apiJson(`/campaigns/${id}/codex/entries/${entryId}`, 'PUT', patch);
+  await loadCodexEntries(id);
+}
+
+export async function deleteCodexEntry(entryId) {
+  const id = store.campaign.campaign_id;
+  await apiFetch(`/campaigns/${id}/codex/entries/${entryId}`, { method: 'DELETE' });
+  await loadCodexEntries(id);
 }
 
 // ── Sessions ──────────────────────────────────────────────────────
@@ -186,6 +221,9 @@ export async function runSummarize({ transcriptId, provider, model, title, conte
     });
     await loadSession(sid);
     await refreshCampaignSessions();
+    // Auto-extract may have grown the codex; refresh so a later codex visit
+    // shows the new entries without a manual reload.
+    await loadCodexEntries(store.campaign?.campaign_id);
     setOp('Summary complete', 'done');
   } catch (e) { setOp(e.message, 'err'); }
 }

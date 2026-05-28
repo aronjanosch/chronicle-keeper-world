@@ -1,5 +1,6 @@
 pub mod artifacts;
 pub mod campaigns;
+pub mod codex;
 pub mod sessions;
 
 use chrono::Utc;

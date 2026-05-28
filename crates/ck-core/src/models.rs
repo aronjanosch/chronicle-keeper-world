@@ -19,6 +19,7 @@ pub struct CampaignDetail {
     pub default_language: String,
     pub players: Value,
     pub extra_info: String,
+    pub codex: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -198,6 +199,7 @@ pub struct CampaignUpdateRequest {
     pub default_language: Option<String>,
     pub players: Option<Value>,
     pub extra_info: Option<String>,
+    pub codex: Option<String>,
     pub next_session_number: Option<i64>,
 }
 
@@ -217,4 +219,32 @@ pub struct SessionMetadataRequest {
     pub date: Option<String>,
     pub metadata: Option<Value>,
     pub notes: Option<String>,
+}
+
+// --- Codex entries (Phase 2) ---
+
+#[derive(Debug, Serialize, Clone)]
+pub struct CodexEntry {
+    pub entry_id: String,
+    pub campaign_id: String,
+    pub name: String,
+    pub kind: String,
+    pub body: String,
+    pub source: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CodexEntryCreate {
+    pub name: String,
+    pub kind: String,
+    #[serde(default)]
+    pub body: String,
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub struct CodexEntryUpdate {
+    pub name: Option<String>,
+    pub kind: Option<String>,
+    pub body: Option<String>,
 }

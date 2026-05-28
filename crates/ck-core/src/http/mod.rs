@@ -1,5 +1,6 @@
 mod artifacts;
 mod campaigns;
+mod codex;
 mod llm;
 mod sessions;
 mod transcribe;
@@ -37,6 +38,15 @@ pub fn router(state: AppState) -> Router {
             get(campaigns::list_sessions).post(campaigns::create_session),
         )
         .route("/next-session-number", get(campaigns::next_session_number))
+        // codex entries (Phase 2)
+        .route(
+            "/campaigns/:id/codex/entries",
+            get(codex::list).post(codex::create),
+        )
+        .route(
+            "/campaigns/:id/codex/entries/:eid",
+            axum::routing::put(codex::update).delete(codex::delete),
+        )
         // sessions
         .route("/sessions", get(sessions::list))
         .route("/session/:id", get(sessions::detail))

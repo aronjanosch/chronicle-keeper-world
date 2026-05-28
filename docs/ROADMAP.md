@@ -3,10 +3,15 @@
 > Last updated: 2026-05-27  
 > Branch: `main` (the native-Rust rewrite is merged; `native-rust-core` retired)
 >
-> **Status in one line:** standalone app works offline end-to-end; multi-device sync is
-> functionally complete and verified client↔server. Repo cleaned + licensed (app MIT, server
-> AGPL-3.0). What's left is the **paid tier** (Stripe + VPS), **release engineering** (CI,
-> Windows, signing), and **Sprint 3** (drop the internal HTTP server for Tauri `invoke()`).
+> **Status in one line:** standalone app works offline end-to-end with a redesigned
+> "scriptorium" UI (Preact + htm, no build step); multi-device sync is functionally complete
+> and verified client↔server. Repo licensed (app MIT, server AGPL-3.0).
+>
+> **Next milestone: the first public OSS release — `v0.5`, a Reddit launch of the free
+> standalone app.** Everything reorders around one question: *can a Windows / macOS / Linux
+> D&D player download it, run it, and get a session summary in ~10 minutes without it feeling
+> broken or sketchy?* Sync (paid tier), Stripe/VPS, and the `invoke()` refactor are all
+> **explicitly post-launch** — see Sprint R.
 
 ---
 
@@ -143,22 +148,109 @@ later upgrade. See `docs/SYNC_PROTOCOL.md`.
 **Still open (verification, not blocking the design):**
 - [ ] Click-test sync in the *running app* (only unit- + wire-tested so far — needs the webview + two app instances)
 
-### 🔲 Sprint 2.5 — Paid tier & release engineering
+### ✅ Sprint 2.1 — UI redesign ("the scriptorium")
 
-The hosted sync subscription and getting installable builds into users' hands.
+Replaced the generic dark-dashboard frontend with the warm-parchment redesign from the
+Claude Design handoff (`docs/` design bundle). **Stack decision:** Preact + htm, vendored as a
+single self-contained ESM bundle (`frontend/vendor/htm-preact-standalone.mjs`, ~13 KB) — keeps
+the **no-build-step / offline** principle while giving a real component model (vanilla was too
+verbose for 8 screens of reused cards; Svelte would have added a Node build pipeline).
 
-**Paid tier (hosted sync):**
+- [x] Design system (`tokens.css`) + global layout/prose (`app.css`); atoms, shell, modals
+- [x] Six screens wired to the existing HTTP contract: Library, Campaign overview, Session
+      detail (pipeline strip), New Session (upload→label→details, replaces the wizard),
+      Summarize (full page, replaces the modal), Settings (grouped cards)
+- [x] API layer ported 1:1 from the legacy `app.js` (same endpoints/payloads); legacy removed
+- [x] Boot-race fix: data loads moved into a mount effect so the store listener is registered
+      before the near-instant local-server responses resolve
+- **Deferred (placeholder screens):** Codex + Sources — need a backend file indexer and a
+  product decision. Per the design handoff, the codex is a *read-only inspector of what the
+  summarizer remembers*, not an in-app wiki. Teased, not built.
+
+### 🔲 Sprint R — Public launch (`v0.5`)  ← **NEXT**
+
+**Goal:** the first public OSS release. A Windows / macOS / Linux D&D player downloads it, runs
+it, and gets a session summary in ~10 min — without it feeling broken or unsigned. Free
+standalone; sync stays behind for the paid follow-up (Sprint P).
+
+**Decisions (2026-05-27):** ship **all three platforms**; **sign + notarize** (signing infra
+already in hand from another release); **full onboarding** (sample data + readiness detection).
+
+**Distribution (Win + Mac + Linux):**
+- [ ] **Windows build spike** — de-risk sherpa-onnx + WebView2 + MSVC (the open Sprint 0 unknown);
+      confirm transcription actually runs on Windows *before* promising it
+- [ ] GH Actions matrix (macOS arm64 + x64, Windows, Ubuntu) → build + release on tag `v*`
+      (tauri-action); first build fetches the sherpa-onnx prebuilt lib per-OS
+- [ ] macOS sign + notarize (Developer ID; secrets in CI); Windows code-sign; Linux AppImage
+      (WebKitGTK x11/DMABUF fix already baked in)
+- [ ] Make the app repo **public** (MIT)
+
+**Onboarding / first-run (full):**
+- [ ] **Sample chronicle** — a bundled read-only demo session (transcript + a pre-made summary)
+      so a fresh user sees real output with *zero* setup, no LLM, no recording. Doubles as
+      screenshot/GIF material. Surfaced as "View a sample" on the empty Library.
+- [ ] **Readiness detection** — real Ollama health check (ping `/api/tags`); make the sidebar
+      "Ollama ready" status truthful; the Summarize screen guides when no provider is ready
+      ("Ollama not running → install" / "add a key in Settings")
+- [ ] **First-run model fetch** — a friendly "downloading transcription engine (~465 MB, once)"
+      panel reusing `/model-status` (today it's only a progress toast on first transcribe)
+- [ ] "How to record with Craig Bot" — in-app help link + README section
+
+**Robustness / polish:**
+- [ ] Session delete in the UI (backend `DELETE /sessions/:id` exists; no UI yet) + confirm
+- [ ] Error-state audit — Ollama down, malformed ZIP, missing key, transcription failure all
+      surface a clear, non-technical message
+- [ ] Cross-platform path handling for the data folder + export (Windows separators, spaces)
+
+**Summary context / Codex (decision 2026-05-27 → ship "A: glossary"):**
+
+The real summary-quality lever for launch. The prompt builder (`prompts.rs::build_session_context`)
+*already* feeds the LLM: campaign name/system/**setting**/GM/**extra_info**, the full speaker
+roster (player → character + pronouns), and a per-summary free-text `context` field. So PC names
+are handled. **The gap is non-PC named entities** — NPCs, places, factions, items, lore — which
+the ASR mangles (hears "never winter") and the LLM can't recognize without a glossary.
+
+Key insight: **this is a prompt-context problem, not a transcription one.** Told the names, the
+LLM auto-corrects "never winter" → "Neverwinter" in the summary — no ASR hotword biasing needed.
+
+Reframed (2026-05-27) as **one context channel filled three ways** — a per-campaign glossary,
+injected into every summary, lightly editable. *Not* a structured entity store the GM must
+maintain in our schema (that's the workspace trap). The LLM is the parser; names+lore pass
+verbatim. Three phases, cheap-first:
+
+- [x] **Phase 1 — Manual glossary (shipped, launch):** `codex` TEXT column on `campaigns`; a
+      textarea in campaign-edit ("Known names & lore — NPCs, places, factions; spell them
+      right"); injected as a labelled block in `build_session_context`, applied to every
+      summary; read-only **Codex screen** renders it; syncs via the `Campaign` wire DTO.
+      Sync server mirrors the column (schema + idempotent ALTER migration + `/sync` merge).
+      Verified end-to-end: HTTP round-trip, prompt-injection unit tests, and a sync round-trip
+      test (client → server → second device).
+- [x] **Phase 2 — structured entries + auto-extract + edit (shipped):** `codex_entries` table
+      (name + kind + body + `source` manual/auto), case-insensitive dedup per campaign;
+      auto-populate from the `{characters, locations, items}` lists `summarize.rs` already
+      extracts (never overwrites a user-edited row); editable Codex screen grouped by kind,
+      inline edit/delete, `source` badge; sidebar count = entry count; sync wiring (client +
+      server, soft-delete propagates). Closes the self-improving loop.
+- **Phase 3 — folder/export import** (Obsidian / Notion / LegendKeeper export → LLM *distills*
+  to glossary entries; user-chosen provider/model; manual snapshot; desktop-only fs guard):
+  deferred (see "Later"). Supersedes the old "C — Sources indexer" with an LLM-distill take.
+
+**Docs / marketing:**
+- [ ] README: screenshots of the new scriptorium UI + a short demo GIF of the pipeline
+- [ ] Privacy statement (on-device transcription, BYO key, no telemetry, open source)
+- [ ] Reddit launch post draft + target subs (r/DMAcademy, r/rpg, r/DnD, r/selfhosted, r/macapps)
+
+### 🔲 Sprint P — Hosted sync (paid tier)  · post-launch
+
+The subscription that finances the VPS. **Deliberately after the free launch** — sync is the
+adoption hook, not a launch blocker, and per-user auth must land before any paid signups.
 - [ ] Stripe subscription + webhook for subscription validation on the server
-- [ ] Per-user auth: replace the shared `CK_SYNC_TOKEN` with per-subscriber tokens scoped to a Stripe customer id (server data partitioned per user)
+- [ ] Per-user auth: replace the shared `CK_SYNC_TOKEN` with per-subscriber tokens scoped to a
+      Stripe customer id (server data partitioned per user)
 - [ ] VPS provision + Caddy (TLS) + deploy the Docker image; back up `/data`
+- [ ] Click-test sync in the running app with two instances (carried over from Sprint 2)
 
-**Release engineering:**
-- [ ] GitHub Actions: build + release on tag (macOS DMG; Windows on a hosted runner)
-- [ ] Windows installer (cross-compile can't do WebView2/MSVC — needs a Windows host/CI)
-- [ ] Code signing + notarization (macOS Gatekeeper, Windows SmartScreen)
-- [ ] Make the app repo **public** (MIT, free-forever — currently private)
-
-### 🔲 Sprint 3 — Drop internal HTTP server
+### 🔲 Sprint 3 — Drop internal HTTP server  · post-launch (internal)
 
 **Goal:** remove axum from the Tauri app entirely. Replace with Tauri `invoke()` commands.
 
@@ -174,12 +266,46 @@ Why now and not earlier: the original justification (shared HTTP contract with s
 
 `ck-serve` (dev binary) keeps axum — useful for testing the core without a window.
 
+### 🔲 Codex Phase 3 (post-launch, detailed)
+
+Phases 1 (manual glossary) and 2 (structured entries + auto-extract) shipped. Phase 3 extends
+the **same** model: one editable glossary store + one injection point
+(`prompts.rs::build_session_context`), filled by more sources. **Guiding principle holds:** the
+codex is *the summarizer's memory* — derived, lossy, lightly editable — **not** a wiki the GM
+lives in. No maps, no AI prep-chat, no full CRUD workspace.
+
+#### Phase 3 — folder / export import (LLM distillation)
+
+Point at a directory (Obsidian vault, Notion/LegendKeeper export); an LLM **distills** it to
+glossary entries (not schema parsing — tolerates any export shape). Lands on Phase 2's
+`codex_entries` store.
+
+- **`http/codex.rs`** (extend) — `POST /campaigns/:id/codex/import`, body `{ dir_path, provider, model,
+  base_url }` (mirror `SummarizeRequest`; resolve provider/model/key exactly like
+  `summarize.rs` via `llm::get`/`llm::get_key`).
+- Walk `dir_path` with `std::fs` recursion (no new dep); collect `.md`/`.markdown`/`.txt`; skip
+  large/binary. Per file: relative path (parent folder = `kind` hint) + frontmatter + prose.
+- Batch by a token budget; per batch call `llm::chat(json_mode=true)` with a **distill** prompt
+  → `[{name, kind, body}]` (one-line `body`). Reuse the tolerant fenced-JSON parse from
+  `summarize.rs::parse_metadata`. Upsert as `source='import'` (dedup as Phase 2).
+- **Guard** — reads the local filesystem → desktop-only; reject in server mode (gate on
+  `state.auth_token`/server flag) so the sync VPS never exposes arbitrary fs.
+- **Frontend** — import panel on the Codex screen: directory path input (v1 text field; Tauri
+  dialog plugin optional), provider+model select chosen **before** running (mirror
+  `screens/summarize.js`), and a **privacy line** under the button: *"Your notes will be sent
+  to {provider} to build the glossary. Ollama keeps this fully local."* After import, distilled
+  entries flow into the editable Phase 2 table so the GM corrects anything wrong.
+- **Snapshot semantics** — one-time, manual; re-run to refresh. No folder-watching.
+- **Verify** — import an Obsidian vault with Ollama → entries populate, editable; run a summary
+  → imported names land in context and aren't re-mangled by ASR.
+
 ### 🔲 Later
 
 - Verify the hardware-accel path actually engages (CoreML on macOS, CUDA/DirectML on Windows) — plumbed with CPU fallback, but never confirmed to use the accelerator
 - More transcription engines (e.g. Whisper Turbo) — audio is kept on device specifically so users can re-transcribe with a different model
 - Postgres on sync server (when SQLite write contention becomes real; storage is behind an interface)
 - Cohere LLM provider (deferred from the LLM port)
+- Codex **Phase 3** — folder/export import (LLM distill). Detailed spec below ("Codex Phase 3").
 - Export targets beyond Obsidian (Notion API, Logseq)
 - Optional shutdown-flush hook in the Tauri shell (today's startup + interval is sufficient; dirty flags persist)
 
@@ -189,11 +315,13 @@ Why now and not earlier: the original justification (shared HTTP contract with s
 
 | Risk | Status |
 |---|---|
-| Windows build unverified | ⚠️ Open — needs Windows host or CI (Sprint 2.5) |
+| **Windows build unverified** | 🔴 **Launch-critical** — the #1 Sprint R item; spike before promising Windows |
+| First-run onboarding cliffs (model download, no Ollama/key) | 🟠 Open — addressed by Sprint R (sample data + readiness detection + model-fetch panel) |
 | CoreML EP for Parakeet int8 unverified | ⚠️ Open — plumbed with CPU fallback, not tested |
-| Sync not click-tested in the running app | ⚠️ Open — unit- + wire-tested only; needs webview + two instances |
-| Hosted sync is single-tenant (shared token) | ⚠️ Expected for v1 — per-user auth is Sprint 2.5, before any public paid launch |
+| Sync not click-tested in the running app | ⚠️ Open — unit- + wire-tested only; needs webview + two instances (Sprint P) |
+| Hosted sync is single-tenant (shared token) | ⚠️ Expected for v1 — per-user auth is Sprint P, before any paid signups |
+| Code signing / notarization | 🟢 Resolved — signing infra in hand; mac notarize + Windows sign in CI (Sprint R) |
 | Artifacts stored as file_path locally | ✅ Fixed — inline `content` in SQLite |
 | Audio tracks never deleted | ✅ Intentional — kept for re-transcription (principle #5) |
-| Internal HTTP port exposure | ⚠️ Technical debt — fixed in Sprint 3 |
+| Internal HTTP port exposure | ⚠️ Technical debt — token-gated, acceptable for launch; removed in Sprint 3 (post-launch) |
 | Rust learning curve (solo dev) | 🟡 Manageable — keep surface small, lean on examples |

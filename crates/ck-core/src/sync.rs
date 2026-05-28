@@ -34,6 +34,8 @@ pub struct Campaign {
     #[serde(default)]
     pub players: Value,
     pub extra_info: String,
+    #[serde(default)]
+    pub codex: String,
     pub updated_at: String,
     #[serde(default)]
     pub deleted: bool,
@@ -68,6 +70,21 @@ pub struct Artifact {
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
+pub struct CodexEntry {
+    pub entry_id: String,
+    pub campaign_id: String,
+    pub name: String,
+    pub kind: String,
+    #[serde(default)]
+    pub body: String,
+    #[serde(default)]
+    pub source: String,
+    pub updated_at: String,
+    #[serde(default)]
+    pub deleted: bool,
+}
+
+#[derive(Debug, Default, Serialize, Deserialize)]
 pub struct SyncPayload {
     #[serde(default)]
     pub campaigns: Vec<Campaign>,
@@ -77,6 +94,8 @@ pub struct SyncPayload {
     pub artifacts: Vec<Artifact>,
     #[serde(default)]
     pub deleted_artifact_ids: Vec<String>,
+    #[serde(default)]
+    pub codex_entries: Vec<CodexEntry>,
 }
 
 #[derive(Debug, Serialize)]
@@ -100,7 +119,7 @@ pub fn collect_dirty(conn: &Connection) -> AppResult<SyncPayload> {
 
     let mut stmt = conn.prepare(
         "SELECT campaign_id, name, next_session_number, system, gm, setting, \
-         default_language, players_json, extra_info, updated_at, deleted \
+         default_language, players_json, extra_info, codex, updated_at, deleted \
          FROM campaigns WHERE dirty = 1",
     )?;
     let rows = stmt.query_map([], |r| {
@@ -115,6 +134,7 @@ pub fn collect_dirty(conn: &Connection) -> AppResult<SyncPayload> {
             default_language: r.get::<_, Option<String>>("default_language")?.unwrap_or_default(),
             players: serde_json::from_str(&players_json).unwrap_or_else(|_| json!([])),
             extra_info: r.get::<_, Option<String>>("extra_info")?.unwrap_or_default(),
+            codex: r.get::<_, Option<String>>("codex")?.unwrap_or_default(),
             updated_at: r.get("updated_at")?,
             deleted: r.get::<_, i64>("deleted")? != 0,
         })
@@ -171,6 +191,27 @@ pub fn collect_dirty(conn: &Connection) -> AppResult<SyncPayload> {
 
     payload.deleted_artifact_ids = crate::store::artifacts::collect_deleted_dirty(conn)?;
 
+    let mut stmt = conn.prepare(
+        "SELECT entry_id, campaign_id, name, kind, body, source, updated_at, deleted \
+         FROM codex_entries WHERE dirty = 1",
+    )?;
+    let rows = stmt.query_map([], |r| {
+        Ok(CodexEntry {
+            entry_id: r.get("entry_id")?,
+            campaign_id: r.get("campaign_id")?,
+            name: r.get("name")?,
+            kind: r.get("kind")?,
+            body: r.get::<_, Option<String>>("body")?.unwrap_or_default(),
+            source: r.get::<_, Option<String>>("source")?.unwrap_or_else(|| "manual".into()),
+            updated_at: r.get::<_, Option<String>>("updated_at")?.unwrap_or_default(),
+            deleted: r.get::<_, i64>("deleted")? != 0,
+        })
+    })?;
+    for r in rows {
+        payload.codex_entries.push(r?);
+    }
+    drop(stmt);
+
     Ok(payload)
 }
 
@@ -189,6 +230,9 @@ fn clear_dirty(conn: &Connection, payload: &SyncPayload) -> AppResult<()> {
     for a in &payload.artifacts {
         conn.execute("UPDATE artifacts SET dirty = 0 WHERE artifact_id = ?1", params![a.artifact_id])?;
     }
+    for e in &payload.codex_entries {
+        conn.execute("UPDATE codex_entries SET dirty = 0 WHERE entry_id = ?1", params![e.entry_id])?;
+    }
     crate::store::artifacts::clear_deleted_dirty(conn, &payload.deleted_artifact_ids)?;
     Ok(())
 }
@@ -203,17 +247,17 @@ pub fn apply_pull(conn: &Connection, pull: &SyncPayload) -> AppResult<()> {
         conn.execute(
             "INSERT INTO campaigns \
              (campaign_id, name, next_session_number, system, gm, setting, default_language, \
-              players_json, extra_info, updated_at, deleted, dirty) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 0) \
+              players_json, extra_info, codex, updated_at, deleted, dirty) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, 0) \
              ON CONFLICT(campaign_id) DO UPDATE SET \
               name = excluded.name, next_session_number = excluded.next_session_number, \
               system = excluded.system, gm = excluded.gm, setting = excluded.setting, \
               default_language = excluded.default_language, players_json = excluded.players_json, \
-              extra_info = excluded.extra_info, updated_at = excluded.updated_at, \
+              extra_info = excluded.extra_info, codex = excluded.codex, updated_at = excluded.updated_at, \
               deleted = excluded.deleted, dirty = 0",
             params![
                 c.campaign_id, c.name, c.next_session_number, c.system, c.gm, c.setting,
-                c.default_language, players.to_string(), c.extra_info, c.updated_at, c.deleted as i64,
+                c.default_language, players.to_string(), c.extra_info, c.codex, c.updated_at, c.deleted as i64,
             ],
         )?;
     }
@@ -253,6 +297,23 @@ pub fn apply_pull(conn: &Connection, pull: &SyncPayload) -> AppResult<()> {
     for aid in &pull.deleted_artifact_ids {
         // Remote-initiated: delete without tombstoning (must not echo back).
         crate::store::artifacts::apply_remote_deletion(conn, aid)?;
+    }
+
+    for e in &pull.codex_entries {
+        conn.execute(
+            "INSERT INTO codex_entries \
+             (entry_id, campaign_id, name, kind, body, source, updated_at, deleted, dirty) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 0) \
+             ON CONFLICT(entry_id) DO UPDATE SET \
+              campaign_id = excluded.campaign_id, name = excluded.name, kind = excluded.kind, \
+              body = excluded.body, source = excluded.source, \
+              updated_at = excluded.updated_at, deleted = excluded.deleted, dirty = 0",
+            params![
+                e.entry_id, e.campaign_id, e.name, e.kind, e.body,
+                if e.source.is_empty() { "manual" } else { &e.source },
+                e.updated_at, e.deleted as i64,
+            ],
+        )?;
     }
 
     Ok(())
@@ -394,6 +455,66 @@ mod tests {
         clear_dirty(&conn, &push).unwrap();
         let again = collect_dirty(&conn).unwrap();
         assert!(again.deleted_artifact_ids.is_empty());
+    }
+
+    #[test]
+    fn codex_entries_round_trip() {
+        use crate::models::CodexEntryCreate;
+        use crate::store::codex as codex_store;
+
+        let conn = crate::db::open_in_memory().unwrap();
+        campaigns::create_campaign(&conn, "c1", "Camp", 1).unwrap();
+        let e = codex_store::create_entry(
+            &conn,
+            "c1",
+            &CodexEntryCreate { name: "Aragorn".into(), kind: "npc".into(), body: "Ranger".into() },
+        )
+        .unwrap();
+
+        // Push picks up the new entry.
+        let push = collect_dirty(&conn).unwrap();
+        let pushed = push.codex_entries.iter().find(|x| x.entry_id == e.entry_id).expect("entry pushed");
+        assert_eq!(pushed.name, "Aragorn");
+        assert!(!pushed.deleted);
+        clear_dirty(&conn, &push).unwrap();
+        assert!(collect_dirty(&conn).unwrap().codex_entries.is_empty());
+
+        // Pull from another device with an updated body — should overwrite.
+        let pull = SyncPayload {
+            codex_entries: vec![CodexEntry {
+                entry_id: e.entry_id.clone(),
+                campaign_id: "c1".into(),
+                name: "Aragorn".into(),
+                kind: "npc".into(),
+                body: "Heir of Isildur".into(),
+                source: "manual".into(),
+                updated_at: "2026-05-28T00:00:00Z".into(),
+                deleted: false,
+            }],
+            ..Default::default()
+        };
+        apply_pull(&conn, &pull).unwrap();
+        let entries = codex_store::list_entries(&conn, "c1").unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].body, "Heir of Isildur");
+        // Pulled record clean.
+        assert!(collect_dirty(&conn).unwrap().codex_entries.is_empty());
+
+        // Soft-delete arriving from another device hides the entry.
+        let pull_del = SyncPayload {
+            codex_entries: vec![CodexEntry {
+                entry_id: e.entry_id.clone(),
+                campaign_id: "c1".into(),
+                name: "Aragorn".into(),
+                kind: "npc".into(),
+                deleted: true,
+                updated_at: "2026-05-28T01:00:00Z".into(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        apply_pull(&conn, &pull_del).unwrap();
+        assert!(codex_store::list_entries(&conn, "c1").unwrap().is_empty());
     }
 
     #[test]

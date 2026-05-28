@@ -99,7 +99,73 @@ pub fn build_session_context(ctx: Option<&Value>, language: &str) -> String {
         }
     }
 
+    // Codex: per-campaign glossary of known names & lore, passed verbatim so the
+    // LLM can recognize and correctly spell NPCs/places/factions/items the ASR mangled.
+    // Two sources: the freeform `codex` paste box (Phase 1) and the structured
+    // `codex_entries` list (Phase 2). Both are emitted under the same header so
+    // the LLM treats them as one glossary.
+    let codex_text = ctx.get("codex").and_then(Value::as_str).map(str::trim).unwrap_or("");
+    let entries = ctx.get("codex_entries").and_then(Value::as_array);
+    let has_entries = entries.map(|a| !a.is_empty()).unwrap_or(false);
+    if !codex_text.is_empty() || has_entries {
+        let header = if de { "Bekannte Namen & Lore:" } else { "Known names & lore:" };
+        block.push('\n');
+        block.push_str(header);
+        block.push('\n');
+        if !codex_text.is_empty() {
+            block.push_str(codex_text);
+            block.push('\n');
+        }
+        if let Some(arr) = entries {
+            block.push_str(&render_codex_entries(arr, de));
+        }
+    }
+
     block
+}
+
+fn kind_label(kind: &str, de: bool) -> &'static str {
+    match (kind, de) {
+        ("npc", true) => "NPCs",
+        ("npc", false) => "NPCs",
+        ("place", true) => "Orte",
+        ("place", false) => "Places",
+        ("faction", true) => "Fraktionen",
+        ("faction", false) => "Factions",
+        ("item", true) => "Gegenstände",
+        ("item", false) => "Items",
+        ("lore", true) => "Lore",
+        ("lore", false) => "Lore",
+        _ => "Other",
+    }
+}
+
+fn render_codex_entries(entries: &[Value], de: bool) -> String {
+    use std::collections::BTreeMap;
+    let mut by_kind: BTreeMap<&str, Vec<(&str, &str)>> = BTreeMap::new();
+    for e in entries {
+        let name = e.get("name").and_then(Value::as_str).unwrap_or("").trim();
+        if name.is_empty() { continue; }
+        let kind = e.get("kind").and_then(Value::as_str).unwrap_or("lore");
+        let body = e.get("body").and_then(Value::as_str).unwrap_or("").trim();
+        by_kind.entry(kind).or_default().push((name, body));
+    }
+    let mut out = String::new();
+    // Stable order: npc, place, faction, item, lore.
+    for kind in ["npc", "place", "faction", "item", "lore"] {
+        let Some(list) = by_kind.get(kind) else { continue };
+        if list.is_empty() { continue; }
+        out.push_str(kind_label(kind, de));
+        out.push_str(":\n");
+        for (name, body) in list {
+            if body.is_empty() {
+                out.push_str(&format!("- {name}\n"));
+            } else {
+                out.push_str(&format!("- {name} — {body}\n"));
+            }
+        }
+    }
+    out
 }
 
 fn value_to_plain(v: &Value) -> String {
@@ -130,6 +196,57 @@ pub fn build_summary_prompt(
     format!(
         "{header}\n\n{title_line}{context_line}{session_block}\n{transcript_label}\n{transcript}\n\nReturn only the summary in markdown."
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn codex_is_injected_verbatim_when_present() {
+        let ctx = json!({ "campaign_name": "The Iron Crown", "codex": "Neverwinter — frozen trade city." });
+        let block = build_session_context(Some(&ctx), "en");
+        assert!(block.contains("Known names & lore:"), "labelled header present");
+        assert!(block.contains("Neverwinter — frozen trade city."), "codex passed verbatim");
+    }
+
+    #[test]
+    fn codex_block_omitted_when_empty() {
+        let ctx = json!({ "campaign_name": "The Iron Crown", "codex": "  " });
+        let block = build_session_context(Some(&ctx), "en");
+        assert!(!block.contains("Known names & lore"), "no header for blank codex");
+    }
+
+    #[test]
+    fn codex_entries_render_grouped_under_same_header() {
+        let ctx = json!({
+            "codex": "Freeform notes.",
+            "codex_entries": [
+                { "name": "Aragorn", "kind": "npc", "body": "Heir of Isildur" },
+                { "name": "Bree", "kind": "place", "body": "" },
+                { "name": "Gandalf", "kind": "npc", "body": "" },
+            ],
+        });
+        let block = build_session_context(Some(&ctx), "en");
+        assert!(block.contains("Known names & lore:"));
+        assert!(block.contains("Freeform notes."));
+        assert!(block.contains("NPCs:"));
+        assert!(block.contains("- Aragorn — Heir of Isildur"));
+        assert!(block.contains("- Gandalf"));
+        assert!(block.contains("Places:"));
+        assert!(block.contains("- Bree"));
+    }
+
+    #[test]
+    fn codex_entries_alone_still_render() {
+        let ctx = json!({
+            "codex_entries": [{ "name": "Bree", "kind": "place", "body": "" }],
+        });
+        let block = build_session_context(Some(&ctx), "en");
+        assert!(block.contains("Known names & lore:"));
+        assert!(block.contains("Places:"));
+    }
 }
 
 pub fn build_metadata_prompt(summary: &str, language: &str) -> String {

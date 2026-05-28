@@ -5,7 +5,7 @@ use crate::llm::{self, Transport};
 use crate::models::{SummarizeRequest, SummarizeResponse};
 use crate::prompts::{build_metadata_prompt, build_summary_prompt};
 use crate::state::AppState;
-use crate::store::{artifacts, sessions};
+use crate::store::{artifacts, campaigns, codex, sessions};
 
 struct Resolved {
     provider: String,
@@ -75,7 +75,25 @@ pub async fn summarize_session(state: &AppState, req: &SummarizeRequest) -> AppR
         };
 
         let language = cfg.get("default_language").cloned().unwrap_or_else(|| "en".into());
-        Ok((session, transcript_text, language, Resolved {
+        // Campaign codex glossary: Phase 1 freeform paste + Phase 2 structured entries.
+        // Both pass into the prompt verbatim so the LLM can recognize and correctly
+        // spell NPCs/places/items the ASR mangled.
+        let campaign_id = session
+            .get("campaign")
+            .and_then(|c| c.get("campaign_id"))
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let codex_text = campaign_id
+            .as_deref()
+            .and_then(|cid| campaigns::get_campaign(conn, cid).ok().flatten())
+            .map(|c| c.codex)
+            .unwrap_or_default();
+        let codex_entries = campaign_id
+            .as_deref()
+            .map(|cid| codex::list_entries(conn, cid))
+            .transpose()?
+            .unwrap_or_default();
+        Ok((session, transcript_text, language, codex_text, codex_entries, Resolved {
             provider,
             transport: p.transport,
             api_base,
@@ -85,10 +103,10 @@ pub async fn summarize_session(state: &AppState, req: &SummarizeRequest) -> AppR
             needs_key: p.needs_key,
         }))
     })?;
-    let (session, transcript_text, language, resolved) = prep;
+    let (session, transcript_text, language, codex_text, codex_entries, resolved) = prep;
     let _ = resolved.needs_key;
 
-    let session_context = build_context(&session, req.title.as_deref());
+    let session_context = build_context(&session, req.title.as_deref(), &codex_text, &codex_entries);
     let summary_prompt = build_summary_prompt(
         &transcript_text,
         req.title.as_deref(),
@@ -151,7 +169,12 @@ pub async fn summarize_session(state: &AppState, req: &SummarizeRequest) -> AppR
 }
 
 /// Build the prompt's session-context object from the session + campaign.
-fn build_context(session: &Value, title_override: Option<&str>) -> Value {
+fn build_context(
+    session: &Value,
+    title_override: Option<&str>,
+    codex: &str,
+    codex_entries: &[crate::models::CodexEntry],
+) -> Value {
     let campaign = session.get("campaign").cloned().unwrap_or_else(|| json!({}));
     json!({
         "campaign_name": campaign.get("campaign_name"),
@@ -159,6 +182,12 @@ fn build_context(session: &Value, title_override: Option<&str>) -> Value {
         "title": title_override.map(Value::from).or_else(|| campaign.get("title").cloned()),
         "date": campaign.get("date"),
         "speakers": session.get("speakers").cloned().unwrap_or_else(|| json!([])),
+        "codex": codex,
+        "codex_entries": codex_entries.iter().map(|e| json!({
+            "name": e.name,
+            "kind": e.kind,
+            "body": e.body,
+        })).collect::<Vec<_>>(),
     })
 }
 
@@ -171,13 +200,18 @@ fn parse_metadata(text: &str) -> Option<Value> {
 }
 
 /// Merge LLM-extracted lists into the session's metadata without overwriting
-/// existing (user-edited) values.
+/// existing (user-edited) values, then materialize the names/locations/items as
+/// auto-extracted codex entries on the parent campaign.
 fn merge_metadata(conn: &rusqlite::Connection, session_id: &str, metadata: &Value) -> AppResult<()> {
     use rusqlite::{params, OptionalExtension};
-    let existing_json: Option<String> = conn
-        .query_row("SELECT metadata_json FROM sessions WHERE session_id = ?1", params![session_id], |r| r.get(0))
+    let row: Option<(String, Option<String>)> = conn
+        .query_row(
+            "SELECT metadata_json, campaign_id FROM sessions WHERE session_id = ?1",
+            params![session_id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
         .optional()?;
-    let Some(existing_json) = existing_json else { return Ok(()) };
+    let Some((existing_json, campaign_id)) = row else { return Ok(()) };
     let mut existing: Map<String, Value> =
         serde_json::from_str(&existing_json).unwrap_or_default();
 
@@ -198,5 +232,100 @@ fn merge_metadata(conn: &rusqlite::Connection, session_id: &str, metadata: &Valu
         "UPDATE sessions SET metadata_json = ?1 WHERE session_id = ?2",
         params![Value::Object(existing).to_string(), session_id],
     )?;
+
+    // Promote extracted names into the campaign codex (auto-extract; never
+    // overwrites a row the user already touched — `upsert_auto` is a no-op when
+    // the natural key exists).
+    if let Some(cid) = campaign_id.as_deref().filter(|s| !s.is_empty()) {
+        if let Value::Object(map) = metadata {
+            for (key, kind) in [("characters", "npc"), ("locations", "place"), ("items", "item")] {
+                let Some(list) = map.get(key).and_then(Value::as_array) else { continue };
+                for v in list {
+                    if let Some(name) = extract_name(v) {
+                        let _ = codex::upsert_auto(conn, cid, &name, kind);
+                    }
+                }
+            }
+        }
+    }
     Ok(())
+}
+
+/// Metadata list items are usually strings, but a model may emit
+/// `{name, description}` objects. Accept both; trim whitespace.
+fn extract_name(v: &Value) -> Option<String> {
+    let raw = match v {
+        Value::String(s) => s.as_str(),
+        Value::Object(map) => map
+            .get("name")
+            .and_then(Value::as_str)
+            .or_else(|| map.get("character_name").and_then(Value::as_str))?,
+        _ => return None,
+    };
+    let trimmed = raw.trim();
+    if trimmed.is_empty() { None } else { Some(trimmed.to_string()) }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::store::campaigns;
+
+    #[test]
+    fn merge_metadata_extracts_codex_entries() {
+        let conn = crate::db::open_in_memory().unwrap();
+        campaigns::create_campaign(&conn, "c1", "Camp", 1).unwrap();
+        conn.execute(
+            "INSERT INTO sessions (session_id, campaign_id) VALUES ('s1', 'c1')",
+            [],
+        )
+        .unwrap();
+        let metadata = json!({
+            "characters": ["Aragorn", { "name": "Gandalf" }],
+            "locations": ["Bree"],
+            "items": ["Andúril"],
+            "events": ["Battle"],   // ignored: not a codex kind
+            "tags": ["combat"],     // ignored
+        });
+        merge_metadata(&conn, "s1", &metadata).unwrap();
+        let entries = codex::list_entries(&conn, "c1").unwrap();
+        let names: std::collections::BTreeSet<String> = entries.iter().map(|e| e.name.clone()).collect();
+        assert!(names.contains("Aragorn"));
+        assert!(names.contains("Gandalf"));
+        assert!(names.contains("Bree"));
+        assert!(names.contains("Andúril"));
+        assert_eq!(entries.iter().filter(|e| e.kind == "npc").count(), 2);
+        assert_eq!(entries.iter().filter(|e| e.kind == "place").count(), 1);
+        assert_eq!(entries.iter().filter(|e| e.kind == "item").count(), 1);
+        assert!(entries.iter().all(|e| e.source == "auto"));
+    }
+
+    #[test]
+    fn merge_metadata_skips_user_edited_entry() {
+        let conn = crate::db::open_in_memory().unwrap();
+        campaigns::create_campaign(&conn, "c1", "Camp", 1).unwrap();
+        conn.execute(
+            "INSERT INTO sessions (session_id, campaign_id) VALUES ('s1', 'c1')",
+            [],
+        )
+        .unwrap();
+        // Pre-existing user entry with a corrected spelling and a body.
+        codex::create_entry(
+            &conn,
+            "c1",
+            &crate::models::CodexEntryCreate {
+                name: "Aragorn".into(),
+                kind: "npc".into(),
+                body: "Heir of Isildur".into(),
+            },
+        )
+        .unwrap();
+        // LLM emits a different casing — must be treated as the same row, not overwritten.
+        merge_metadata(&conn, "s1", &json!({ "characters": ["aragorn"] })).unwrap();
+        let entries = codex::list_entries(&conn, "c1").unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].name, "Aragorn");
+        assert_eq!(entries[0].body, "Heir of Isildur");
+        assert_eq!(entries[0].source, "manual");
+    }
 }

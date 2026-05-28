@@ -29,6 +29,7 @@ fn row_to_detail(row: &rusqlite::Row, fallback_lang: &str) -> rusqlite::Result<C
         default_language: lang.filter(|s| !s.is_empty()).unwrap_or_else(|| fallback_lang.to_string()),
         players: normalize_players(&players),
         extra_info: row.get::<_, Option<String>>("extra_info")?.unwrap_or_default(),
+        codex: row.get::<_, Option<String>>("codex")?.unwrap_or_default(),
     })
 }
 
@@ -110,6 +111,7 @@ pub fn update_campaign(
     push_str!("setting", req.setting);
     push_str!("default_language", req.default_language);
     push_str!("extra_info", req.extra_info);
+    push_str!("codex", req.codex);
     if let Some(n) = req.next_session_number {
         sets.push("next_session_number = ?".into());
         vals.push(Box::new(n));

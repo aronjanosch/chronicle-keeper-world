@@ -21,6 +21,14 @@ function NavItem({ icon, label, count, active, indent, onClick }) {
     ${count != null && html`<span style=${{ fontFamily: 'var(--font-mono)', fontSize: 11, color: active ? 'var(--burgundy)' : 'var(--ink-faint)' }}>${count}</span>`}
   </div>`;
 }
+function codexCount(_campaign) {
+  // Live from the store so the sidebar reflects post-summarize auto-extract.
+  const count = (store.codexEntries || []).length;
+  const hasFreeform = !!(_campaign?.codex || '').trim();
+  if (count > 0) return count;
+  return hasFreeform ? '●' : null;
+}
+
 function NavHead({ children }) {
   return html`<div style=${{ padding: '14px 8px 4px', fontSize: 10.5, fontWeight: 600, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--ink-faint)' }}>${children}</div>`;
 }
@@ -58,7 +66,7 @@ export function Sidebar({ variant = 'library', active, campaign }) {
         </div>
       </div>
       <${NavItem} icon="compass" label="Overview" active=${active === 'overview'} onClick=${() => navigate('campaign', { id: campaign?.campaign_id })} />
-      <${NavItem} icon="book" label="Codex" count=${campaign?.codex?.trim() ? '●' : null} active=${active === 'codex'} onClick=${() => navigate('codex', { id: campaign?.campaign_id })} />
+      <${NavItem} icon="book" label="Codex" count=${codexCount(campaign)} active=${active === 'codex'} onClick=${() => navigate('codex', { id: campaign?.campaign_id })} />
       <${NavHead}>Workshop</${NavHead}>
       <${NavItem} icon="folder" label="Sources" active=${active === 'sources'} onClick=${() => navigate('sources')} />
       <${NavItem} icon="cog" label="Settings" active=${active === 'settings'} onClick=${() => navigate('settings')} />

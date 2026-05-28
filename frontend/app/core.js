@@ -17,6 +17,7 @@ export const store = {
   campaigns: [],          // [{campaign_id, name, ...detail}]
   campaign: null,         // current campaign detail
   campaignSessions: [],   // sessions of current campaign
+  codexEntries: [],       // structured codex entries for current campaign
   session: null,          // current session detail (campaign{}, tracks[], speakers[], metadata{})
   transcripts: [],
   summaries: [],

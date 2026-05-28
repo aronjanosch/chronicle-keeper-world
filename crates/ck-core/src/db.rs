@@ -57,6 +57,22 @@ CREATE TABLE IF NOT EXISTS provider_keys (
     default_model TEXT NOT NULL DEFAULT '',
     updated_at    TEXT NOT NULL DEFAULT ''
 );
+
+CREATE TABLE IF NOT EXISTS codex_entries (
+    entry_id    TEXT PRIMARY KEY,
+    campaign_id TEXT NOT NULL,
+    name        TEXT NOT NULL,
+    kind        TEXT NOT NULL,
+    body        TEXT NOT NULL DEFAULT '',
+    source      TEXT NOT NULL DEFAULT 'manual',
+    updated_at  TEXT NOT NULL DEFAULT '',
+    deleted     INTEGER NOT NULL DEFAULT 0,
+    dirty       INTEGER NOT NULL DEFAULT 1,
+    FOREIGN KEY (campaign_id) REFERENCES campaigns(campaign_id)
+);
+CREATE INDEX IF NOT EXISTS idx_codex_entries_campaign ON codex_entries(campaign_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_codex_entries_dedup
+    ON codex_entries(campaign_id, lower(name), kind) WHERE deleted = 0;
 ";
 
 /// Open the database and ensure the schema exists.
@@ -101,6 +117,9 @@ fn migrate(conn: &Connection) -> Result<()> {
         "ALTER TABLE artifacts ADD COLUMN artifact_id TEXT NOT NULL DEFAULT ''",
         "ALTER TABLE artifacts ADD COLUMN content TEXT NOT NULL DEFAULT ''",
         "ALTER TABLE artifacts ADD COLUMN dirty INTEGER NOT NULL DEFAULT 1",
+        // Codex (Phase 1): a per-campaign freeform glossary of known names & lore,
+        // injected verbatim into every summary's prompt context.
+        "ALTER TABLE campaigns ADD COLUMN codex TEXT NOT NULL DEFAULT ''",
     ];
     for sql in add_columns {
         if let Err(e) = conn.execute(sql, []) {
@@ -154,6 +173,34 @@ fn migrate(conn: &Connection) -> Result<()> {
             artifact_id TEXT PRIMARY KEY,
             dirty       INTEGER NOT NULL DEFAULT 1
         )",
+        [],
+    )?;
+
+    // Codex (Phase 2): structured per-campaign glossary of NPCs/places/factions/items/lore.
+    // Idempotent — `CREATE TABLE IF NOT EXISTS` covers fresh installs via SCHEMA; this
+    // re-run is a no-op there and creates the table for older DBs.
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS codex_entries (
+            entry_id    TEXT PRIMARY KEY,
+            campaign_id TEXT NOT NULL,
+            name        TEXT NOT NULL,
+            kind        TEXT NOT NULL,
+            body        TEXT NOT NULL DEFAULT '',
+            source      TEXT NOT NULL DEFAULT 'manual',
+            updated_at  TEXT NOT NULL DEFAULT '',
+            deleted     INTEGER NOT NULL DEFAULT 0,
+            dirty       INTEGER NOT NULL DEFAULT 1,
+            FOREIGN KEY (campaign_id) REFERENCES campaigns(campaign_id)
+        )",
+        [],
+    )?;
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_codex_entries_campaign ON codex_entries(campaign_id)",
+        [],
+    )?;
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_codex_entries_dedup \
+         ON codex_entries(campaign_id, lower(name), kind) WHERE deleted = 0",
         [],
     )?;
 
