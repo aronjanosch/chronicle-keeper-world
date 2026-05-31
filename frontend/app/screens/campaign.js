@@ -181,7 +181,6 @@ export function CampaignScreen({ store }) {
         <${Btn} kind="primary" icon="mic" onClick=${() => navigate('newSession', { id: c.campaign_id })}>New session</${Btn}>
       </div>`} />`}
   >
-    <!-- Hero -->
     <div style=${{ background: 'var(--surface)', border: '1px solid var(--rule)', borderRadius: 8, padding: '24px 28px', display: 'flex', alignItems: 'flex-start', gap: 24, marginBottom: 24, position: 'relative', overflow: 'hidden' }}>
       <div style=${{ position: 'absolute', top: 0, right: 0, width: 220, height: '100%', background: 'radial-gradient(circle at 100% 0%, rgba(122,46,31,.07), transparent 60%)' }} />
       <${Sigil} ch=${c.sigil} tone=${c.tone} size="xl" />
@@ -214,10 +213,8 @@ export function CampaignScreen({ store }) {
       </div>`}
     </div>
 
-    <!-- Story so far -->
     <${StorySoFar} campaign=${c} sessions=${sessions} codexEntries=${codexEntries} />
 
-    <!-- Party + Codex teaser -->
     <div style=${{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 24 }}>
       <div style=${{ background: 'var(--surface)', border: '1px solid var(--rule)', borderRadius: 8, overflow: 'hidden' }}>
         <div style=${{ padding: '14px 18px 10px', display: 'flex', alignItems: 'baseline', gap: 10, borderBottom: '1px solid var(--rule-soft)' }}>
@@ -236,7 +233,6 @@ export function CampaignScreen({ store }) {
       <${CodexTeaser} campaign=${c} entries=${codexEntries} />
     </div>
 
-    <!-- Sessions -->
     <div style=${{ background: 'var(--surface)', border: '1px solid var(--rule)', borderRadius: 8, overflow: 'hidden' }}>
       <div style=${{ padding: '14px 18px 10px', display: 'flex', alignItems: 'baseline', gap: 10, borderBottom: '1px solid var(--rule-soft)' }}>
         <h3 style=${{ fontFamily: 'var(--font-display)', fontSize: 17, fontWeight: 500, color: 'var(--ink)' }}>Sessions</h3>

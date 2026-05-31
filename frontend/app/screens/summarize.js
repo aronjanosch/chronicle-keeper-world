@@ -76,7 +76,6 @@ export function SummarizeScreen({ store }) {
     bodyStyle=${{ padding: 0 }}
   >
     <div style=${{ display: 'grid', gridTemplateColumns: '420px 1fr', height: '100%' }}>
-      <!-- Left: configure -->
       <div style=${{ borderRight: '1px solid var(--rule-soft)', overflow: 'auto', padding: '22px 24px' }}>
         <div style=${{ fontSize: 10.5, fontWeight: 600, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--ink-faint)', marginBottom: 4 }}>Session ${cam.session_number || ''} · summarize</div>
         <h1 style=${{ fontFamily: 'var(--font-display)', fontSize: 24, fontWeight: 500, letterSpacing: '-0.015em', color: 'var(--ink)', lineHeight: 1.15 }}>${cam.title || 'Untitled session'}</h1>
@@ -84,7 +83,6 @@ export function SummarizeScreen({ store }) {
 
         ${!store.transcripts.length && html`<div style=${{ marginTop: 16, padding: '10px 12px', background: 'var(--ochre-50)', border: '1px solid rgba(168,115,40,.22)', borderRadius: 6, fontSize: 12.5, color: 'var(--ochre)' }}>No transcript yet — transcribe the recording first.</div>`}
 
-        <!-- Transcript -->
         ${store.transcripts.length > 1 && html`<div style=${{ marginTop: 22 }}>
           <${Label}>Transcript</${Label}>
           <select value=${transcriptId} onChange=${(e) => setTranscriptId(Number(e.target.value))} style=${{ width: '100%', padding: '8px 10px', background: 'var(--surface)', border: '1px solid var(--rule)', borderRadius: 6, fontSize: 13, cursor: 'pointer' }}>
@@ -92,7 +90,6 @@ export function SummarizeScreen({ store }) {
           </select>
         </div>`}
 
-        <!-- Model -->
         <div style=${{ marginTop: 22 }}>
           <${Label}>Model</${Label}>
           <div style=${{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -105,7 +102,6 @@ export function SummarizeScreen({ store }) {
           </div>
         </div>
 
-        <!-- Voice & style -->
         <div style=${{ marginTop: 22 }}>
           <${Label}>Voice & style</${Label}>
           <div style=${{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -116,7 +112,6 @@ export function SummarizeScreen({ store }) {
             style=${{ marginTop: 8, width: '100%', padding: '8px 10px', background: 'var(--surface-raised)', border: '1px solid var(--rule)', borderRadius: 4, fontSize: 13, lineHeight: 1.4, resize: 'vertical', fontFamily: 'inherit', color: 'var(--ink)' }}></textarea>`}
         </div>
 
-        <!-- Title + context -->
         <div style=${{ marginTop: 22 }}>
           <${Label}>Title & extra context</${Label}>
           <div style=${{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -137,7 +132,6 @@ export function SummarizeScreen({ store }) {
         </div>
       </div>
 
-      <!-- Right: preview -->
       <div style=${{ overflow: 'auto', padding: '24px 36px', background: 'var(--paper)' }}>
         <div style=${{ maxWidth: 720, margin: '0 auto' }}>
           <div style=${{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>

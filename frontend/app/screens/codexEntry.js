@@ -87,7 +87,6 @@ export function CodexEntryScreen() {
         ${editing
           ? html`<${EntryForm} initial=${entry} onSubmit=${onSave} onCancel=${() => setEditing(false)} withDetail=${true} />`
           : html`
-            <!-- Source bar -->
             <div style=${{
               display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px',
               background: 'var(--surface)', border: '1px solid var(--rule-soft)',
@@ -98,7 +97,6 @@ export function CodexEntryScreen() {
               ${entry.updated_at && html`<span style=${{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--ink-faint)' }}>updated ${fmtDateTime(entry.updated_at)}</span>`}
             </div>
 
-            <!-- Eyebrow + title + one-liner -->
             <div style=${{ fontSize: 10.5, fontWeight: 600, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--burgundy)', display: 'flex', alignItems: 'center', gap: 6 }}>
               <${Icon} name=${iconForKind(entry.kind)} size=${12} /> ${kindLabel(entry.kind)}
             </div>
@@ -111,14 +109,12 @@ export function CodexEntryScreen() {
 
             <div style=${{ height: 1, background: 'var(--rule)', margin: '28px 0' }} />
 
-            <!-- Distilled detail prose -->
             ${entry.detail && entry.detail.trim()
               ? html`<${Markdown} text=${entry.detail} />`
               : html`<div style=${{ fontSize: 13, color: 'var(--ink-faint)', fontStyle: 'italic', fontFamily: 'var(--font-display)' }}>
                   No detail yet. The one-liner above is all the summarizer is told — add a fuller write-up with Edit.
                 </div>`}
 
-            <!-- Honest note on how this is used -->
             <div style=${{
               marginTop: 28, padding: '14px 16px', background: 'var(--surface)',
               border: '1px solid var(--rule-soft)', borderRadius: 6, fontSize: 13,
@@ -131,7 +127,6 @@ export function CodexEntryScreen() {
               </div>
             </div>
 
-            <!-- Mentioned in -->
             <div style=${{ height: 1, background: 'var(--rule)', margin: '32px 0 20px' }} />
             <div style=${{ fontSize: 10.5, fontWeight: 600, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--ink-faint)', marginBottom: 8 }}>
               ${mentions.length ? `Mentioned in ${mentions.length} ${mentions.length === 1 ? 'session' : 'sessions'}` : 'Mentioned in'}

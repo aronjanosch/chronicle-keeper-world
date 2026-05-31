@@ -307,7 +307,10 @@ function linkifyCodex(htmlStr, codex) {
   return tokens.join('');
 }
 function escapeHtml(s) {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  // Escape quotes too: inline() drops escaped text into href="…" attributes, so
+  // an unescaped " in a markdown link URL would break out of the attribute.
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 function inline(s) {
   return escapeHtml(s)

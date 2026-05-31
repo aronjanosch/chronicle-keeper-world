@@ -52,7 +52,6 @@ export function useStore() {
 // ── Navigation ────────────────────────────────────────────────────
 export function navigate(name, params = {}) {
   setState({ route: { name, params } });
-  // scroll body slot to top on route change (handled by Shell via key)
 }
 
 // ── Op banner (transcribe/summarize/export progress + result) ─────

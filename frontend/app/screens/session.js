@@ -99,7 +99,6 @@ export function SessionScreen({ store }) {
         ${primary}
       </div>`} />`}
   >
-    <!-- Masthead -->
     <div style=${{ display: 'flex', alignItems: 'flex-start', gap: 20, marginBottom: 22 }}>
       <div style=${{ width: 64, height: 64, flex: '0 0 auto', background: 'var(--burgundy-50)', color: 'var(--burgundy-700)', borderRadius: 8, border: '1px solid rgba(122,46,31,.18)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'var(--font-display)' }}>
         <div style=${{ textAlign: 'center', lineHeight: 1 }}>
@@ -122,9 +121,7 @@ export function SessionScreen({ store }) {
 
     <${Pipeline} stages=${stages} />
 
-    <!-- Body -->
     <div style=${{ display: 'grid', gridTemplateColumns: '1fr 360px', gap: 16, marginTop: 22 }}>
-      <!-- Summary -->
       <div style=${{ background: 'var(--surface)', border: '1px solid var(--rule)', borderRadius: 8, overflow: 'hidden' }}>
         <div style=${{ padding: '12px 18px', borderBottom: '1px solid var(--rule-soft)', display: 'flex', alignItems: 'center', gap: 10 }}>
           <${Icon} name="feather" size=${14} className="ck-ink-muted" />
@@ -141,7 +138,6 @@ export function SessionScreen({ store }) {
         </div>
       </div>
 
-      <!-- Sidebar -->
       <div style=${{ display: 'flex', flexDirection: 'column', gap: 16 }}>
         <div style=${{ background: 'var(--surface)', border: '1px solid var(--rule)', borderRadius: 8, overflow: 'hidden' }}>
           <div style=${{ padding: '12px 16px', borderBottom: '1px solid var(--rule-soft)', display: 'flex', alignItems: 'center', gap: 8 }}>

@@ -201,7 +201,6 @@ export function NewSessionScreen({ store }) {
           </div>`}
       </div>
 
-      <!-- Right rail: details -->
       <div style=${{ display: 'flex', flexDirection: 'column', gap: 14 }}>
         <div style=${{ background: 'var(--surface)', border: '1px solid var(--rule)', borderRadius: 8, overflow: 'hidden' }}>
           <div style=${{ padding: '12px 14px', borderBottom: '1px solid var(--rule-soft)', display: 'flex', alignItems: 'center', gap: 8 }}>

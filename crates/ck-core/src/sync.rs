@@ -6,9 +6,11 @@
 //! clears the `dirty` flags it pushed. The server is authoritative — pulled
 //! records overwrite local copies and are marked clean. See `docs/SYNC_PROTOCOL.md`.
 //!
-//! Not yet implemented (follow-ups): pushing deletions (needs a tombstone for
-//! hard-deleted artifacts and UI filtering of soft-deleted campaigns/sessions),
-//! and the background interval task that calls [`sync_once`].
+//! Covers campaigns, sessions, artifacts (transcripts + summaries), and codex
+//! entries. Deletions propagate too: campaigns/sessions/codex soft-delete via a
+//! `deleted` flag; hard-deleted artifacts push a tombstone (see
+//! `store::artifacts`). Audio is never synced — `tracks_json`/`session_path` are
+//! device-local. The Tauri shell drives [`sync_once`] on a background interval.
 
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
@@ -448,7 +450,7 @@ pub async fn sync_once(state: &AppState) -> AppResult<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::store::{artifacts, campaigns, sessions};
+    use crate::store::{artifacts, campaigns};
 
     #[test]
     fn collect_dirty_picks_up_local_writes() {
