@@ -1,7 +1,7 @@
 // Screen 04 — Session Detail. Pipeline strip, summary prose, speakers, metadata.
 import { html } from '../../vendor/htm-preact-standalone.mjs';
 import { navigate, openModal, fmtDate, fmtDateTime, toneFor } from '../core.js';
-import { deleteArtifact, artifactContent } from '../actions.js';
+import { deleteArtifact, artifactContent, deleteSession, openCampaign } from '../actions.js';
 import { Shell, Sidebar, Topbar } from '../shell.js';
 import { Icon, Sigil, Btn, Pipeline, Markdown, Empty } from '../ui.js';
 
@@ -48,7 +48,11 @@ function ArtifactList({ kind, items }) {
         <${Btn} kind="ghost" size="sm" icon="eye" onClick=${async () => {
           try { openModal('viewer', { title: `${a.provider} / ${a.model}`, text: await artifactContent(kind, a.id) }); } catch (e) { openModal('viewer', { title: 'Error', text: e.message }); }
         }}>View</${Btn}>
-        <${Btn} kind="danger" size="sm" icon="trash" onClick=${() => { if (confirm(`Delete this ${kind === 'transcripts' ? 'transcript' : 'summary'}?`)) deleteArtifact(kind, a.id); }} />
+        <${Btn} kind="danger" size="sm" icon="trash" onClick=${() => openModal('confirm', {
+          title: `Delete ${kind === 'transcripts' ? 'transcript' : 'summary'}`,
+          message: `Delete this ${kind === 'transcripts' ? 'transcript' : 'summary'}? This cannot be undone.`,
+          onConfirm: () => deleteArtifact(kind, a.id),
+        })} />
       </div>`)}
     </div>
   </div>`;
@@ -72,15 +76,26 @@ export function SessionScreen({ store }) {
     { key: 'e', label: 'Exported', current: hasS, detail: hasS ? 'Ready for Obsidian' : 'Pending', meta: '' },
   ];
 
-  const primary = !hasT
-    ? html`<${Btn} kind="primary" icon="mic" onClick=${() => openModal('transcribe', {})}>Transcribe</${Btn}>`
-    : html`<${Btn} kind="primary" icon="sparkle" onClick=${() => navigate('summarize', { id: sess.session_id })}>${hasS ? 'Re-summarize' : 'Summarize'}</${Btn}>`;
+  const primary = !tracks.length
+    ? html`<${Btn} kind="primary" icon="upload" onClick=${() => navigate('newSession', { id: cam.campaign_id, attach: sess.session_id })}>Upload recording</${Btn}>`
+    : !hasT
+      ? html`<${Btn} kind="primary" icon="mic" onClick=${() => openModal('transcribe', {})}>Transcribe</${Btn}>`
+      : html`<${Btn} kind="primary" icon="sparkle" onClick=${() => navigate('summarize', { id: sess.session_id })}>${hasS ? 'Re-summarize' : 'Summarize'}</${Btn}>`;
 
   return html`<${Shell}
     sidebar=${html`<${Sidebar} variant="campaign" active="sessions" campaign=${c} />`}
-    topbar=${html`<${Topbar} crumbs=${['Campaigns', c?.name, `Session ${cam.session_number || '?'}`]} right=${html`
+    topbar=${html`<${Topbar} crumbs=${[
+      { label: 'Campaigns', onClick: () => navigate('library') },
+      c && { label: c.name, onClick: () => openCampaign(c.campaign_id) },
+      `Session ${cam.session_number || '?'}`,
+    ]} right=${html`
       <div style=${{ display: 'flex', gap: 8, alignItems: 'center' }}>
         <${Btn} kind="ghost" icon="edit" onClick=${() => openModal('session', { session: sess })}>Edit</${Btn}>
+        <${Btn} kind="danger" icon="trash" title="Delete session" onClick=${() => openModal('confirm', {
+          title: 'Delete session',
+          message: 'Delete this session? This removes its transcripts and summaries permanently.',
+          onConfirm: () => deleteSession(sess.session_id),
+        })} />
         <${Btn} kind="secondary" icon="export" disabled=${!hasS} onClick=${() => openModal('export', {})}>Export</${Btn}>
         ${primary}
       </div>`} />`}

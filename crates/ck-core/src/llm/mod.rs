@@ -44,6 +44,17 @@ pub static REGISTRY: &[Provider] = &[
         transport: Transport::Ollama,
     },
     Provider {
+        id: "ollama-cloud",
+        name: "Ollama Cloud",
+        needs_key: true,
+        default_api_base: Some("https://ollama.com"),
+        // No baked-in suggestions: the cloud catalogue changes often, so the
+        // model is a free-text field (type the exact id from ollama.com).
+        models: &[],
+        default_model: "",
+        transport: Transport::Ollama,
+    },
+    Provider {
         id: "openai",
         name: "OpenAI",
         needs_key: true,
@@ -212,7 +223,13 @@ pub async fn chat(
                 body["format"] = json!("json");
             }
             let url = format!("{}/api/chat", api_base.trim_end_matches('/'));
-            let resp = client.post(url).json(&body).send().await.map_err(|e| LlmError(e.to_string()))?;
+            // Local Ollama needs no auth (empty key → no header); Ollama Cloud
+            // (ollama.com) authenticates with a Bearer key.
+            let mut req = client.post(url).json(&body);
+            if !api_key.is_empty() {
+                req = req.bearer_auth(api_key);
+            }
+            let resp = req.send().await.map_err(|e| LlmError(e.to_string()))?;
             let resp = error_for_status(resp).await?;
             let v: Value = resp.json().await.map_err(|e| LlmError(e.to_string()))?;
             Ok(v.get("message").and_then(|m| m.get("content")).and_then(Value::as_str).unwrap_or("").trim().to_string())
@@ -267,6 +284,28 @@ pub async fn chat(
             "This provider's native client is not yet available in this build.".into(),
         )),
     }
+}
+
+/// Cheap reachability probe. For Ollama we hit `/api/tags` (instant, no model
+/// load or generation). Other transports have no keyless probe, so we report
+/// reachable and lean on the saved-key check instead.
+pub async fn ping(transport: Transport, api_base: &str, api_key: &str, timeout_secs: u64) -> Result<(), LlmError> {
+    if transport != Transport::Ollama {
+        return Ok(());
+    }
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(timeout_secs))
+        .build()
+        .map_err(|e| LlmError(e.to_string()))?;
+    let base = if api_base.is_empty() { "http://localhost:11434" } else { api_base };
+    let url = format!("{}/api/tags", base.trim_end_matches('/'));
+    let mut req = client.get(url);
+    if !api_key.is_empty() {
+        req = req.bearer_auth(api_key);
+    }
+    let resp = req.send().await.map_err(|e| LlmError(e.to_string()))?;
+    error_for_status(resp).await?;
+    Ok(())
 }
 
 async fn error_for_status(resp: reqwest::Response) -> Result<reqwest::Response, LlmError> {

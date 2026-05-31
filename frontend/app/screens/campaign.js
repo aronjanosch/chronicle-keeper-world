@@ -1,7 +1,7 @@
 // Screen 02 — Campaign Overview. Hero + party + codex teaser + sessions list.
 import { html } from '../../vendor/htm-preact-standalone.mjs';
 import { navigate, openModal, fmtDate, toneFor } from '../core.js';
-import { loadSession } from '../actions.js';
+import { loadSession, deleteCampaign } from '../actions.js';
 import { Shell, Sidebar, Topbar } from '../shell.js';
 import { Icon, Sigil, Btn, StagePill, Empty } from '../ui.js';
 
@@ -17,11 +17,15 @@ function PartyMember({ player, onClick }) {
 }
 
 function SessionRow({ s, onClick }) {
+  // `complete` marks a finished stage (green); `current` marks the single next
+  // incomplete stage (burgundy). They must be mutually exclusive — StagePill
+  // renders `current` over `complete`, so setting both turned a done stage red.
+  const up = !!s.has_tracks, t = !!s.has_transcription, sm = !!s.has_summary;
   const stages = [
-    { stage: 'upload', complete: !!s.has_transcription, current: !s.has_transcription },
-    { stage: 'transcribe', complete: !!s.has_transcription, current: s.has_transcription && !s.has_summary },
-    { stage: 'summarize', complete: !!s.has_summary, current: s.has_summary },
-    { stage: 'export' },
+    { stage: 'upload', complete: up, current: !up },
+    { stage: 'transcribe', complete: t, current: up && !t },
+    { stage: 'summarize', complete: sm, current: t && !sm },
+    { stage: 'export', complete: false, current: sm },
   ];
   return html`<div onClick=${onClick} style=${{ display: 'flex', alignItems: 'center', gap: 16, padding: '14px 18px', borderBottom: '1px solid var(--rule-soft)', cursor: 'pointer' }}
     onMouseEnter=${(e) => { e.currentTarget.style.background = 'var(--paper)'; }}
@@ -60,9 +64,19 @@ export function CampaignScreen({ store }) {
 
   return html`<${Shell}
     sidebar=${html`<${Sidebar} variant="campaign" active="overview" campaign=${c} />`}
-    topbar=${html`<${Topbar} crumbs=${['Campaigns', c.name]} right=${html`
+    topbar=${html`<${Topbar} crumbs=${[{ label: 'Campaigns', onClick: () => navigate('library') }, c.name]} right=${html`
       <div style=${{ display: 'flex', gap: 8, alignItems: 'center' }}>
         <${Btn} kind="ghost" icon="edit" onClick=${() => openModal('campaign', { edit: c })}>Edit campaign</${Btn}>
+        <${Btn} kind="danger" icon="trash" title="Delete campaign" onClick=${() => {
+          const n = sessions.length;
+          const tail = n ? ` and its ${n} session${n === 1 ? '' : 's'} (transcripts and summaries included)` : '';
+          openModal('confirm', {
+            title: 'Delete campaign',
+            message: `Delete "${c.name}"${tail}? This cannot be undone.`,
+            confirmLabel: 'Delete campaign',
+            onConfirm: () => deleteCampaign(c.campaign_id),
+          });
+        }} />
         <${Btn} kind="primary" icon="mic" onClick=${() => navigate('newSession', { id: c.campaign_id })}>New session</${Btn}>
       </div>`} />`}
   >
@@ -92,9 +106,9 @@ export function CampaignScreen({ store }) {
         <div style=${{ fontSize: 12, color: 'var(--ink-muted)', marginTop: 6, fontFamily: 'var(--font-mono)' }}>#${latest.session_number} · ${fmtDate(latest.date) || '—'}</div>
         <div style=${{ height: 1, background: 'var(--rule-soft)', margin: '10px 0' }} />
         <div style=${{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-          <${StagePill} stage="upload" complete=${!!latest.has_transcription} />
-          <${StagePill} stage="transcribe" complete=${!!latest.has_transcription} />
-          <${StagePill} stage="summarize" complete=${!!latest.has_summary} />
+          <${StagePill} stage="upload" complete=${!!latest.has_tracks} current=${!latest.has_tracks} />
+          <${StagePill} stage="transcribe" complete=${!!latest.has_transcription} current=${!!latest.has_tracks && !latest.has_transcription} />
+          <${StagePill} stage="summarize" complete=${!!latest.has_summary} current=${!!latest.has_transcription && !latest.has_summary} />
           <${StagePill} stage="export" current=${!!latest.has_summary} />
         </div>
       </div>`}

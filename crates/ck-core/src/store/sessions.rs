@@ -107,6 +107,7 @@ pub fn create_campaign_session(
         title: title.map(str::to_string),
         date: date.map(str::to_string),
         metadata,
+        has_tracks: false,
         has_transcription: false,
         has_summary: false,
     })
@@ -233,13 +234,22 @@ pub fn get_campaign_metadata(conn: &Connection, session_id: &str) -> AppResult<V
     Ok(out)
 }
 
+/// True when the stored `tracks_json` holds at least one track.
+fn tracks_present(tracks_json: &str) -> bool {
+    serde_json::from_str::<Value>(tracks_json)
+        .ok()
+        .and_then(|v| v.as_array().map(|a| !a.is_empty()))
+        .unwrap_or(false)
+}
+
 pub fn list_sessions(conn: &Connection) -> AppResult<Vec<SessionInfo>> {
-    let mut stmt = conn.prepare("SELECT session_id, session_path FROM sessions WHERE deleted = 0 ORDER BY session_id DESC")?;
-    let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+    let mut stmt = conn.prepare("SELECT session_id, session_path, tracks_json FROM sessions WHERE deleted = 0 ORDER BY session_id DESC")?;
+    let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?)))?;
     let mut out = Vec::new();
     for r in rows {
-        let (sid, path) = r?;
+        let (sid, path, tracks_json) = r?;
         out.push(SessionInfo {
+            has_tracks: tracks_present(&tracks_json),
             has_transcription: artifacts::has_kind(conn, &sid, "transcript")?,
             has_summary: artifacts::has_kind(conn, &sid, "summary")?,
             // Artifacts live inline in SQLite now; no file paths to surface.
@@ -254,7 +264,7 @@ pub fn list_sessions(conn: &Connection) -> AppResult<Vec<SessionInfo>> {
 
 pub fn list_campaign_sessions(conn: &Connection, campaign_id: &str) -> AppResult<Vec<CampaignSessionInfo>> {
     let mut stmt = conn.prepare(
-        "SELECT session_id, session_number, title, date, metadata_json FROM sessions \
+        "SELECT session_id, session_number, title, date, metadata_json, tracks_json FROM sessions \
          WHERE campaign_id = ?1 AND deleted = 0 ORDER BY session_number DESC",
     )?;
     let rows = stmt.query_map(params![campaign_id], |r| {
@@ -264,13 +274,15 @@ pub fn list_campaign_sessions(conn: &Connection, campaign_id: &str) -> AppResult
             r.get::<_, Option<String>>(2)?,
             r.get::<_, Option<String>>(3)?,
             r.get::<_, String>(4)?,
+            r.get::<_, String>(5)?,
         ))
     })?;
     let mut out = Vec::new();
     for r in rows {
-        let (sid, number, title, date, metadata_json) = r?;
+        let (sid, number, title, date, metadata_json, tracks_json) = r?;
         let metadata: Value = serde_json::from_str(&metadata_json).unwrap_or_else(|_| normalize_metadata(&Value::Null));
         out.push(CampaignSessionInfo {
+            has_tracks: tracks_present(&tracks_json),
             has_transcription: artifacts::has_kind(conn, &sid, "transcript")?,
             has_summary: artifacts::has_kind(conn, &sid, "summary")?,
             session_id: sid,

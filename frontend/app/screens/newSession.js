@@ -1,7 +1,9 @@
 // Screen 05 — New Session. Upload Craig ZIP, label voices, set details, transcribe.
 import { html, useState, useEffect, useRef } from '../../vendor/htm-preact-standalone.mjs';
 import { navigate, toneFor } from '../core.js';
-import { createSession, uploadZip, saveSpeakers, saveSessionMetadata, runTranscribe, loadSession } from '../actions.js';
+import { createSession, fetchSession, uploadZip, saveSpeakers, saveSessionMetadata, runTranscribe, loadSession, openCampaign } from '../actions.js';
+
+const EMPTY_META = { characters: [], locations: [], events: [], items: [], tags: [] };
 import { Shell, Sidebar, Topbar } from '../shell.js';
 import { Icon, Sigil, Btn, Spinner } from '../ui.js';
 
@@ -58,6 +60,9 @@ function TrackCard({ track, index, sp, roster, onChange }) {
 
 export function NewSessionScreen({ store }) {
   const c = store.campaign;
+  // When `attach` is set we're adding a recording to an existing session
+  // (upload-later flow) rather than creating a fresh draft.
+  const attachId = store.route?.params?.attach || null;
   const [sid, setSid] = useState(null);
   const [number, setNumber] = useState(c?.next_session_number || '');
   const [tracks, setTracks] = useState([]);
@@ -65,6 +70,7 @@ export function NewSessionScreen({ store }) {
   const [title, setTitle] = useState('');
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
   const [notes, setNotes] = useState('');
+  const [meta, setMeta] = useState(EMPTY_META); // preserved across save (edited on the session screen)
   const [uploading, setUploading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
@@ -73,11 +79,34 @@ export function NewSessionScreen({ store }) {
   useEffect(() => {
     let live = true;
     (async () => {
-      try { const s = await createSession(); if (live) { setSid(s.session_id); setNumber(s.session_number || ''); } }
-      catch (e) { if (live) setErr(e.message); }
+      try {
+        // Attach mode prefills from the already-loaded session; create mode
+        // makes a draft row then reads it back for a uniform shape.
+        let s;
+        if (attachId) {
+          s = (store.session && store.session.session_id === attachId) ? store.session : await fetchSession(attachId);
+        } else {
+          const created = await createSession();
+          s = await fetchSession(created.session_id);
+        }
+        if (!live) return;
+        const cam = s.campaign || {};
+        setSid(s.session_id);
+        setNumber(cam.session_number || c?.next_session_number || '');
+        setTitle(cam.title || '');
+        setDate(cam.date || new Date().toISOString().slice(0, 10));
+        setNotes(cam.notes || '');
+        setMeta(s.metadata || EMPTY_META);
+        const t = s.tracks || [];
+        setTracks(t);
+        const sp = {};
+        (s.speakers || []).forEach((x) => { sp[x.track_id] = { track_id: x.track_id, player_name: x.player_name || '', character_name: x.character_name || '', pronouns: x.pronouns || '' }; });
+        t.forEach((tr) => { if (!sp[tr.id]) sp[tr.id] = { track_id: tr.id, player_name: '', character_name: '', pronouns: '' }; });
+        setSpeakers(sp);
+      } catch (e) { if (live) setErr(e.message); }
     })();
     return () => { live = false; };
-  }, [c?.campaign_id]);
+  }, [c?.campaign_id, attachId]);
 
   const roster = c?.players || [];
   const assignedCount = Object.values(speakers).filter((s) => s.player_name || s.character_name).length;
@@ -99,14 +128,19 @@ export function NewSessionScreen({ store }) {
   function update(trackId, sp) { setSpeakers((m) => ({ ...m, [trackId]: { ...sp, track_id: trackId } })); }
 
   async function begin(transcribeNow) {
-    if (!sid || !tracks.length) { setErr('Upload a recording first.'); return; }
+    if (!sid) { setErr('Session not ready yet — one moment.'); return; }
+    if (transcribeNow && !tracks.length) { setErr('Upload a recording before transcribing.'); return; }
     setBusy(true); setErr(null);
     try {
-      await saveSpeakers(sid, tracks.map((t) => speakers[t.id] || { track_id: t.id, player_name: '', character_name: '', pronouns: '' }));
+      // Speakers only matter once a recording exists; metadata is preserved
+      // (it's authored on the session screen, not here).
+      if (tracks.length) {
+        await saveSpeakers(sid, tracks.map((t) => speakers[t.id] || { track_id: t.id, player_name: '', character_name: '', pronouns: '' }));
+      }
       await saveSessionMetadata({
         session_id: sid, campaign_id: c.campaign_id, session_number: Number(number) || null,
         title: title.trim() || null, date: date || null,
-        metadata: { characters: [], locations: [], events: [], items: [], tags: [] }, notes: notes.trim() || null,
+        metadata: meta || EMPTY_META, notes: notes.trim() || null,
       });
       await loadSession(sid);          // navigates to session screen
       if (transcribeNow) runTranscribe({});  // fire-and-forget; banner shows progress
@@ -115,10 +149,14 @@ export function NewSessionScreen({ store }) {
 
   return html`<${Shell}
     sidebar=${html`<${Sidebar} variant="campaign" active="sessions" campaign=${c} />`}
-    topbar=${html`<${Topbar} crumbs=${['Campaigns', c?.name, 'New session']} right=${html`
+    topbar=${html`<${Topbar} crumbs=${[
+      { label: 'Campaigns', onClick: () => navigate('library') },
+      c && { label: c.name, onClick: () => openCampaign(c.campaign_id) },
+      attachId ? 'Add recording' : 'New session',
+    ]} right=${html`
       <div style=${{ display: 'flex', gap: 8, alignItems: 'center' }}>
-        <${Btn} kind="ghost" onClick=${() => navigate('campaign', { id: c?.campaign_id })}>Cancel</${Btn}>
-        <${Btn} kind="secondary" disabled=${busy || !tracks.length} onClick=${() => begin(false)}>Save draft</${Btn}>
+        <${Btn} kind="ghost" onClick=${() => (attachId ? navigate('session', { id: attachId }) : navigate('campaign', { id: c?.campaign_id }))}>Cancel</${Btn}>
+        <${Btn} kind="secondary" disabled=${busy} onClick=${() => begin(false)}>${tracks.length ? 'Save draft' : 'Save without recording'}</${Btn}>
         <${Btn} kind="primary" iconRight="arrow-r" disabled=${busy || !tracks.length} onClick=${() => begin(true)}>
           ${busy ? 'Saving…' : 'Begin transcription'}
         </${Btn}>
@@ -127,7 +165,7 @@ export function NewSessionScreen({ store }) {
     <datalist id="ck-roster">${roster.map((p, i) => html`<option key=${i} value=${p.player_name} />`)}</datalist>
 
     <div style=${{ marginBottom: 18 }}>
-      <div style=${{ fontSize: 10.5, fontWeight: 600, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--ink-faint)' }}>New session · ${c?.name}</div>
+      <div style=${{ fontSize: 10.5, fontWeight: 600, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--ink-faint)' }}>${attachId ? 'Add recording' : 'New session'} · ${c?.name}</div>
       <h1 style=${{ fontFamily: 'var(--font-display)', fontSize: 28, fontWeight: 500, letterSpacing: '-0.015em', color: 'var(--ink)', lineHeight: 1.15, marginTop: 2 }}>
         Session <span style=${{ color: 'var(--ink-muted)', fontStyle: 'italic' }}>#${number || '…'}</span>
       </h1>

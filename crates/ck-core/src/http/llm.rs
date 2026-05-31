@@ -89,6 +89,28 @@ pub async fn test_provider(
     }))
 }
 
+/// Cheap reachability check used by the sidebar status badge. Unlike
+/// `test_provider` it does not generate (no model load) — for Ollama it just
+/// lists tags; for keyed providers it returns ok and relies on the key check.
+pub async fn ping_provider(
+    State(state): State<AppState>,
+    Path(provider_id): Path<String>,
+) -> AppResult<Json<ProviderTestResult>> {
+    let p = llm::get(&provider_id)
+        .ok_or_else(|| AppError::NotFound(format!("Unknown provider: {provider_id}")))?;
+    let saved = state.with_db(|conn| llm::get_key(conn, &provider_id))?.unwrap_or_default();
+    let api_base = if !saved.api_base.is_empty() {
+        saved.api_base.clone()
+    } else {
+        p.default_api_base.unwrap_or("").to_string()
+    };
+    let result = llm::ping(p.transport, &api_base, &saved.api_key, 4).await;
+    Ok(Json(match result {
+        Ok(()) => ProviderTestResult { ok: true, latency_ms: 0, error: None },
+        Err(e) => ProviderTestResult { ok: false, latency_ms: 0, error: Some(e.0) },
+    }))
+}
+
 pub async fn summarize(
     State(state): State<AppState>,
     Json(req): Json<SummarizeRequest>,

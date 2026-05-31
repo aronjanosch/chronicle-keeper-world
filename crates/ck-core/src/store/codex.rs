@@ -116,6 +116,39 @@ pub fn create_entry(
         .ok_or_else(|| AppError::Internal(anyhow::anyhow!("entry vanished after insert")))
 }
 
+/// Public existence check by natural key — used by import review to flag entries
+/// that already live in the codex (so the user knows a save will overwrite).
+pub fn exists(conn: &Connection, campaign_id: &str, name: &str, kind: &str) -> AppResult<bool> {
+    Ok(find_by_natural_key(conn, campaign_id, name.trim(), kind)?.is_some())
+}
+
+/// Manual upsert for import commit: create the entry, or if one already exists
+/// for (campaign, name, kind), overwrite its body (the user explicitly chose to
+/// replace it with a better write-up). Always `source='manual'`. Returns true
+/// iff a new row was created (false = an existing row was replaced).
+pub fn upsert_manual(
+    conn: &Connection,
+    campaign_id: &str,
+    req: &CodexEntryCreate,
+) -> AppResult<bool> {
+    let name = req.name.trim();
+    if name.is_empty() {
+        return Err(AppError::BadRequest("name is required".into()));
+    }
+    validate_kind(&req.kind)?;
+    if let Some(existing) = find_by_natural_key(conn, campaign_id, name, &req.kind)? {
+        conn.execute(
+            "UPDATE codex_entries SET body = ?1, source = 'manual', updated_at = ?2, dirty = 1 \
+             WHERE entry_id = ?3",
+            params![req.body.trim(), now(), existing.entry_id],
+        )?;
+        Ok(false)
+    } else {
+        create_entry(conn, campaign_id, req)?;
+        Ok(true)
+    }
+}
+
 /// Auto-extract upsert: insert a row with `source='auto'` only if no active
 /// entry exists for the same (campaign, name, kind). Never overwrites an
 /// existing row — so a user-corrected spelling or hand-written body sticks.
@@ -281,6 +314,26 @@ mod tests {
         .unwrap();
         assert_eq!(updated.body, "Town near the Shire");
         assert_eq!(updated.source, "manual", "edit promotes source");
+    }
+
+    #[test]
+    fn upsert_manual_creates_then_replaces_body() {
+        let conn = crate::db::open_in_memory().unwrap();
+        let cid = seed_campaign(&conn);
+        // First import (e.g. from NPC notes): thin body.
+        let created = upsert_manual(&conn, &cid, &CodexEntryCreate {
+            name: "Iron Hand".into(), kind: "faction".into(), body: "mentioned by Ulric".into(),
+        }).unwrap();
+        assert!(created);
+        assert!(exists(&conn, &cid, "iron hand", "faction").unwrap());
+        // Second import (the faction file): better body replaces it, no dup error.
+        let created2 = upsert_manual(&conn, &cid, &CodexEntryCreate {
+            name: "Iron Hand".into(), kind: "faction".into(), body: "Thieves' guild controlling the docks".into(),
+        }).unwrap();
+        assert!(!created2, "second upsert replaces, does not create");
+        let list = list_entries(&conn, &cid).unwrap();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].body, "Thieves' guild controlling the docks");
     }
 
     #[test]

@@ -1,7 +1,7 @@
 // Entry: boot, router, global op banner + modal host.
 import { html, render, useEffect } from '../vendor/htm-preact-standalone.mjs';
 import { useStore, loadApiBase, setOp } from './core.js';
-import { loadCampaigns, loadConfig } from './actions.js';
+import { loadCampaigns, loadConfig, refreshProviderStatus } from './actions.js';
 import { Icon, Spinner } from './ui.js';
 import { ModalHost } from './modals.js';
 import { LibraryScreen } from './screens/library.js';
@@ -31,7 +31,7 @@ function App() {
   // Kick off boot loads here (not at module scope): guarantees the store
   // listener is registered before the local server's near-instant responses
   // resolve, so the first paint after data lands actually repaints.
-  useEffect(() => { loadCampaigns(); loadConfig().catch(() => {}); }, []);
+  useEffect(() => { loadCampaigns(); loadConfig().then(() => refreshProviderStatus()).catch(() => {}); }, []);
   const r = store.route.name;
   let screen;
   switch (r) {

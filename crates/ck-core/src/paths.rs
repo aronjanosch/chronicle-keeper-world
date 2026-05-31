@@ -38,14 +38,16 @@ impl Paths {
     }
 }
 
-/// Default `output_root` (where session data + exports live), matching the
-/// Python backend: `~/Documents/chronicle-keeper`.
+/// Default `output_root` — a plain, findable folder in the user's Documents:
+/// `~/Documents/Chronicle Keeper`. Each campaign gets a subfolder, each session
+/// a numbered folder inside it, so the recordings are browsable like any docs.
 pub fn default_output_root() -> PathBuf {
+    const FOLDER: &str = "Chronicle Keeper";
     if let Some(dirs) = UserDirs::new() {
         if let Some(docs) = dirs.document_dir() {
-            return docs.join("chronicle-keeper");
+            return docs.join(FOLDER);
         }
-        return dirs.home_dir().join("Documents").join("chronicle-keeper");
+        return dirs.home_dir().join("Documents").join(FOLDER);
     }
-    PathBuf::from("chronicle-keeper")
+    PathBuf::from(FOLDER)
 }

@@ -35,6 +35,7 @@ pub struct CampaignSessionInfo {
     pub title: Option<String>,
     pub date: Option<String>,
     pub metadata: Value,
+    pub has_tracks: bool,
     pub has_transcription: bool,
     pub has_summary: bool,
 }
@@ -43,6 +44,7 @@ pub struct CampaignSessionInfo {
 pub struct SessionInfo {
     pub session_id: String,
     pub session_path: String,
+    pub has_tracks: bool,
     pub has_transcription: bool,
     pub has_summary: bool,
     pub transcript_path: Option<String>,
@@ -143,6 +145,8 @@ pub struct ExportRequest {
 pub struct ExportResponse {
     pub content: String,
     pub filename: String,
+    /// Absolute path the note was written to (in the session's data folder).
+    pub path: Option<String>,
     pub use_obsidian_format: bool,
 }
 
@@ -234,7 +238,7 @@ pub struct CodexEntry {
     pub updated_at: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CodexEntryCreate {
     pub name: String,
     pub kind: String,
@@ -247,4 +251,16 @@ pub struct CodexEntryUpdate {
     pub name: Option<String>,
     pub kind: Option<String>,
     pub body: Option<String>,
+}
+
+/// Paste-and-distill import: raw notes in, proposed entries out (reviewed before save).
+#[derive(Debug, Deserialize)]
+pub struct CodexImportRequest {
+    pub text: String,
+}
+
+/// Commit the reviewed entries from an import.
+#[derive(Debug, Deserialize)]
+pub struct CodexCommitRequest {
+    pub entries: Vec<CodexEntryCreate>,
 }

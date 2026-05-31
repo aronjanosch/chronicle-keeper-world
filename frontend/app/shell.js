@@ -34,7 +34,7 @@ function NavHead({ children }) {
 }
 
 export function Sidebar({ variant = 'library', active, campaign }) {
-  const ollamaReady = (store.llmProviders || []).some((p) => p.id === 'ollama');
+  const warn = store.providerStatus && store.providerStatus.ok === false ? store.providerStatus : null;
   return html`<aside style=${{
     background: 'var(--paper-deep)', borderRight: '1px solid var(--rule)',
     padding: '14px 12px', display: 'flex', flexDirection: 'column', gap: 2,
@@ -73,13 +73,14 @@ export function Sidebar({ variant = 'library', active, campaign }) {
     `}
 
     <div style=${{ flex: 1 }} />
-    <div style=${{ margin: '8px 4px 0', padding: '10px 12px', background: 'var(--surface)', border: '1px solid var(--rule-soft)', borderRadius: 6, display: 'flex', alignItems: 'center', gap: 10, fontSize: 12, color: 'var(--ink-muted)' }}>
-      <span style=${{ width: 8, height: 8, borderRadius: '50%', background: 'var(--moss)', boxShadow: '0 0 0 2px var(--moss-50)', flex: '0 0 auto' }} />
+    ${warn && html`<div onClick=${() => navigate('settings')} title="Open Settings"
+      style=${{ margin: '8px 4px 0', padding: '10px 12px', background: 'var(--ochre-50)', border: '1px solid rgba(168,115,40,.28)', borderRadius: 6, display: 'flex', alignItems: 'center', gap: 10, fontSize: 12, color: 'var(--ink-soft)', cursor: 'pointer' }}>
+      <span style=${{ width: 8, height: 8, borderRadius: '50%', background: 'var(--ochre)', flex: '0 0 auto' }} />
       <div style=${{ lineHeight: 1.3 }}>
-        <div style=${{ color: 'var(--ink-soft)', fontWeight: 500 }}>Local · on-device</div>
-        <div>Parakeet ready${ollamaReady ? ' · Ollama' : ''}</div>
+        <div style=${{ color: 'var(--ochre)', fontWeight: 600 }}>Needs attention</div>
+        <div>${warn.reason}</div>
       </div>
-    </div>
+    </div>`}
   </aside>`;
 }
 
@@ -90,10 +91,18 @@ export function Topbar({ crumbs = [], right }) {
     flex: '0 0 auto', height: 52,
   }}>
     <div style=${{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: 'var(--ink-muted)' }}>
-      ${crumbs.map((c, i) => html`
-        ${i > 0 && html`<span style=${{ color: 'var(--ink-faint)' }}>›</span>`}
-        <span style=${{ color: i === crumbs.length - 1 ? 'var(--ink)' : 'var(--ink-muted)', fontWeight: i === crumbs.length - 1 ? 500 : 400 }}>${c}</span>
-      `)}
+      ${crumbs.filter(Boolean).map((c, i, arr) => {
+        const label = typeof c === 'string' ? c : c?.label;
+        const onClick = typeof c === 'object' ? c?.onClick : null;
+        const last = i === arr.length - 1;
+        return html`
+          ${i > 0 && html`<span style=${{ color: 'var(--ink-faint)' }}>›</span>`}
+          <span onClick=${onClick || undefined}
+            style=${{ color: last ? 'var(--ink)' : 'var(--ink-muted)', fontWeight: last ? 500 : 400, cursor: onClick ? 'pointer' : 'default' }}
+            onMouseEnter=${onClick ? (e) => { e.currentTarget.style.color = 'var(--burgundy)'; } : undefined}
+            onMouseLeave=${onClick ? (e) => { e.currentTarget.style.color = 'var(--ink-muted)'; } : undefined}>${label}</span>
+        `;
+      })}
     </div>
     <div style=${{ flex: 1 }} />
     ${right}

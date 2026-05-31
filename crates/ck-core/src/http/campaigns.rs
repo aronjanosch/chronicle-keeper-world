@@ -53,6 +53,16 @@ pub async fn update(
     })
 }
 
+pub async fn delete(
+    State(state): State<AppState>,
+    Path(campaign_id): Path<String>,
+) -> AppResult<Json<Value>> {
+    state.with_db(|conn| {
+        campaigns::delete_campaign(conn, &campaign_id)?;
+        Ok(Json(json!({ "status": "deleted", "campaign_id": campaign_id })))
+    })
+}
+
 pub async fn list_sessions(
     State(state): State<AppState>,
     Path(campaign_id): Path<String>,

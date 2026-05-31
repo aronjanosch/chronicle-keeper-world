@@ -46,11 +46,25 @@ pub fn export_session(state: &AppState, req: &ExportRequest) -> AppResult<Export
         },
     };
 
-    // Export content is returned to the caller for download; no loose file is
-    // written to disk (core principle #1: SQLite is the only store).
+    // Write the note into the session's own folder (next to its audio), so it
+    // lands in the user-visible data folder ready for Obsidian. SQLite stays the
+    // source of truth; this is just a convenience output the user asked to keep.
+    let session_path = session.get("session_path").and_then(Value::as_str).unwrap_or_default();
+    let mut path = None;
+    if !session_path.is_empty() {
+        let dir = std::path::Path::new(session_path);
+        std::fs::create_dir_all(dir)
+            .map_err(|e| AppError::Internal(anyhow::anyhow!("create export dir: {e}")))?;
+        let full = dir.join(&filename);
+        std::fs::write(&full, content.as_bytes())
+            .map_err(|e| AppError::Internal(anyhow::anyhow!("write export: {e}")))?;
+        path = Some(full.to_string_lossy().into_owned());
+    }
+
     Ok(ExportResponse {
         content,
         filename,
+        path,
         use_obsidian_format: req.use_obsidian_format,
     })
 }

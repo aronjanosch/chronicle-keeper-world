@@ -5,7 +5,7 @@ import { html, useState, useEffect } from '../../vendor/htm-preact-standalone.mj
 import { navigate, openModal, useStore } from '../core.js';
 import { Shell, Sidebar, Topbar } from '../shell.js';
 import { Btn, Empty, Icon, Markdown, Input, Textarea, Select } from '../ui.js';
-import { loadCodexEntries, createCodexEntry, updateCodexEntry, deleteCodexEntry } from '../actions.js';
+import { loadCodexEntries, createCodexEntry, updateCodexEntry, deleteCodexEntry, openCampaign, updateCampaign } from '../actions.js';
 
 const KINDS = [
   { value: 'npc',     label: 'NPC',     plural: 'NPCs' },
@@ -81,6 +81,9 @@ export function CodexScreen() {
   const c = store.campaign;
   const [editId, setEditId] = useState(null);
   const [adding, setAdding] = useState(false);
+  const [editFree, setEditFree] = useState(false);
+  const [freeDraft, setFreeDraft] = useState('');
+  const [savingFree, setSavingFree] = useState(false);
 
   useEffect(() => {
     if (c?.campaign_id) loadCodexEntries(c.campaign_id);
@@ -94,8 +97,15 @@ export function CodexScreen() {
   const freeform = (c.codex || '').trim();
 
   const sidebar = html`<${Sidebar} variant="campaign" active="codex" campaign=${c} />`;
-  const topbar = html`<${Topbar} crumbs=${['Campaigns', c.name, 'Codex']}
-    right=${html`<${Btn} kind="primary" size="sm" icon="plus" onClick=${() => { setAdding(true); setEditId(null); }}>Add entry</${Btn}>`} />`;
+  const topbar = html`<${Topbar} crumbs=${[
+    { label: 'Campaigns', onClick: () => navigate('library') },
+    { label: c.name, onClick: () => openCampaign(c.campaign_id) },
+    'Codex',
+  ]}
+    right=${html`<div style=${{ display: 'flex', gap: 6 }}>
+      <${Btn} kind="ghost" size="sm" icon="sparkle" onClick=${() => openModal('codexImport')}>Import</${Btn}>
+      <${Btn} kind="primary" size="sm" icon="plus" onClick=${() => { setAdding(true); setEditId(null); }}>Add entry</${Btn}>
+    </div>`} />`;
 
   async function onCreate(payload) {
     await createCodexEntry(payload);
@@ -105,9 +115,12 @@ export function CodexScreen() {
     await updateCodexEntry(entryId, payload);
     setEditId(null);
   }
-  async function onDelete(entryId, name) {
-    if (!window.confirm(`Delete "${name}" from the codex?`)) return;
-    await deleteCodexEntry(entryId);
+  function onDelete(entryId, name) {
+    openModal('confirm', {
+      title: 'Delete codex entry',
+      message: `Delete "${name}" from the codex? This cannot be undone.`,
+      onConfirm: () => deleteCodexEntry(entryId),
+    });
   }
 
   return html`<${Shell} sidebar=${sidebar} topbar=${topbar}>
@@ -118,21 +131,34 @@ export function CodexScreen() {
         and it's marked manual so future runs won't overwrite it.
       </p>
 
-      <!-- Freeform paste box (Phase 1) -->
+      <!-- Freeform paste box (Phase 1) — campaign-wide note, always injected -->
       <div style=${{ marginBottom: 22 }}>
         <div style=${{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 8 }}>
           <h3 style=${{ fontFamily: 'var(--font-display)', fontSize: 15, fontWeight: 500, margin: 0 }}>Freeform notes</h3>
           <span style=${{ fontSize: 11.5, color: 'var(--ink-faint)' }}>passed verbatim into every summary</span>
           <span style=${{ flex: 1 }} />
-          <${Btn} kind="ghost" size="sm" icon="edit" onClick=${() => openModal('campaign', { edit: c })}>Edit</${Btn}>
+          ${!editFree && html`<${Btn} kind="ghost" size="sm" icon="edit" onClick=${() => { setFreeDraft(freeform); setEditFree(true); }}>Edit</${Btn}>`}
         </div>
-        ${freeform
-          ? html`<div class="ck-prose" style=${{ background: 'var(--surface-raised)', border: '1px solid var(--rule)', borderRadius: 8, padding: '14px 18px' }}>
-              <${Markdown} text=${freeform} />
+        ${editFree
+          ? html`<div style=${{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <${Textarea} value=${freeDraft} onInput=${setFreeDraft} rows=${8}
+                placeholder="A brief setting, tone, or anything the model should know for every summary." />
+              <div style=${{ display: 'flex', justifyContent: 'flex-end', gap: 6 }}>
+                <${Btn} kind="ghost" size="sm" disabled=${savingFree} onClick=${() => setEditFree(false)}>Cancel</${Btn}>
+                <${Btn} kind="primary" size="sm" icon="check" disabled=${savingFree} onClick=${async () => {
+                  setSavingFree(true);
+                  try { await updateCampaign({ codex: freeDraft.trim() }); setEditFree(false); }
+                  finally { setSavingFree(false); }
+                }}>Save</${Btn}>
+              </div>
             </div>`
-          : html`<div style=${{ fontSize: 12.5, color: 'var(--ink-faint)', fontStyle: 'italic', padding: '8px 0' }}>
-              Empty — paste a brief setting or anything the model should know about this campaign.
-            </div>`}
+          : freeform
+            ? html`<div class="ck-prose" style=${{ background: 'var(--surface-raised)', border: '1px solid var(--rule)', borderRadius: 8, padding: '14px 18px' }}>
+                <${Markdown} text=${freeform} />
+              </div>`
+            : html`<div style=${{ fontSize: 12.5, color: 'var(--ink-faint)', fontStyle: 'italic', padding: '8px 0' }}>
+                Empty — paste a brief setting or anything the model should know about this campaign.
+              </div>`}
       </div>
 
       <!-- Structured entries (Phase 2) -->

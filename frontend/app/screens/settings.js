@@ -31,7 +31,7 @@ const inp = (extra = {}) => ({ width: '100%', padding: '7px 10px', background: '
 function ProviderCard({ p }) {
   const status = !p.needs_key ? 'ok' : (p.has_key ? 'ok' : 'missing');
   const model = p.saved_model || p.default_model;
-  const badge = { ollama: { ch: '◉', bg: '#1F1813' }, anthropic: { ch: 'A', bg: '#C96442' }, openai: { ch: 'O', bg: '#0F8C66' }, groq: { ch: 'G', bg: '#F55036' }, mistral: { ch: 'M', bg: '#FF7000' } }[p.id] || { ch: p.name[0], bg: 'var(--ink-muted)' };
+  const badge = { ollama: { ch: '◉', bg: '#1F1813' }, 'ollama-cloud': { ch: '☁', bg: '#0B6E99' }, anthropic: { ch: 'A', bg: '#C96442' }, openai: { ch: 'O', bg: '#0F8C66' }, groq: { ch: 'G', bg: '#F55036' }, mistral: { ch: 'M', bg: '#FF7000' } }[p.id] || { ch: p.name[0], bg: 'var(--ink-muted)' };
   const isDefault = (store.config?.summary_provider || 'ollama').toLowerCase() === p.id;
   return html`<div style=${{ display: 'flex', alignItems: 'center', gap: 12, padding: '11px 14px', background: isDefault ? 'var(--paper)' : 'var(--surface)', border: isDefault ? '1px solid var(--burgundy-300)' : '1px solid var(--rule-soft)', borderRadius: 6 }}>
     <div style=${{ width: 28, height: 28, borderRadius: 5, background: badge.bg, color: '#FBF6E9', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: 13 }}>${badge.ch}</div>

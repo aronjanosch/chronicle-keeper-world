@@ -71,6 +71,13 @@ export async function updateCampaign(patch) {
   await loadCampaigns();
 }
 
+export async function deleteCampaign(id) {
+  await apiFetch(`/campaigns/${id}`, { method: 'DELETE' });
+  setState({ campaign: null, campaignSessions: [], codexEntries: [] });
+  await loadCampaigns();
+  navigate('library');
+}
+
 // ── Codex entries ─────────────────────────────────────────────────
 export async function loadCodexEntries(campaignId) {
   const id = campaignId || store.campaign?.campaign_id;
@@ -98,6 +105,21 @@ export async function deleteCodexEntry(entryId) {
   await loadCodexEntries(id);
 }
 
+// Distill pasted notes into proposed entries (not saved yet — the user reviews).
+export async function importCodex(text) {
+  const id = store.campaign.campaign_id;
+  const r = await apiJson(`/campaigns/${id}/codex/import`, 'POST', { text });
+  return r.entries || [];
+}
+
+// Save the reviewed entries; returns { created, skipped }.
+export async function commitCodexImport(entries) {
+  const id = store.campaign.campaign_id;
+  const r = await apiJson(`/campaigns/${id}/codex/import/commit`, 'POST', { entries });
+  await loadCodexEntries(id);
+  return r;
+}
+
 // ── Sessions ──────────────────────────────────────────────────────
 export async function loadSession(id) {
   setState({ loading: true, error: null });
@@ -109,9 +131,12 @@ export async function loadSession(id) {
     if (campId && campaign?.campaign_id !== campId) {
       campaign = decorateCampaign(await apiFetch(`/campaigns/${campId}`));
     }
+    // Don't swallow artifact-load failures: an empty list from a real error
+    // would render a misleading red "not transcribed" badge. Surface it.
+    let loadErr = null;
     const [transcripts, summaries] = await Promise.all([
-      apiFetch(`/sessions/${id}/transcripts`).catch(() => []),
-      apiFetch(`/sessions/${id}/summaries`).catch(() => []),
+      apiFetch(`/sessions/${id}/transcripts`).catch((e) => { loadErr = e; return []; }),
+      apiFetch(`/sessions/${id}/summaries`).catch((e) => { loadErr = e; return []; }),
     ]);
     let summaryPreview = null;
     if ((summaries || []).length) {
@@ -119,6 +144,7 @@ export async function loadSession(id) {
       try { summaryPreview = { id: latest.id, text: await apiText(`/sessions/${id}/summaries/${latest.id}/content`) }; } catch (_) {}
     }
     setState({ session, campaign, transcripts: transcripts || [], summaries: summaries || [], summaryPreview, loading: false });
+    if (loadErr) setOp(`Couldn't load this session's artifacts: ${loadErr.message}`, 'err');
     navigate('session', { id });
   } catch (e) { setState({ error: e.message, loading: false }); }
 }
@@ -127,6 +153,20 @@ export async function createSession() {
   const id = store.campaign.campaign_id;
   const created = await apiJson(`/campaigns/${id}/sessions`, 'POST', {});
   return created; // { session_id, session_number }
+}
+
+// Fetch a full session object without touching the store/route (used to
+// prefill the upload screen when attaching a recording to an existing session).
+export function fetchSession(id) {
+  return apiFetch(`/session/${id}`);
+}
+
+export async function deleteSession(sessionId) {
+  const campId = store.session?.campaign?.campaign_id || store.campaign?.campaign_id;
+  await apiFetch(`/sessions/${sessionId}`, { method: 'DELETE' });
+  setState({ session: null, transcripts: [], summaries: [], summaryPreview: null });
+  if (campId) await openCampaign(campId);
+  else { await loadCampaigns(); navigate('library'); }
 }
 
 export async function uploadZip(sessionId, file) {
@@ -234,13 +274,7 @@ export async function runExport(summaryId) {
   if (!sid) return;
   try {
     const data = await apiJson('/export', 'POST', { session_id: sid, summary_id: summaryId, use_obsidian_format: true });
-    const blob = new Blob([data.content], { type: 'text/markdown' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = data.filename;
-    document.body.appendChild(a); a.click(); document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-    setOp('Exported markdown', 'done');
+    setOp(data.path ? `Exported to ${data.path}` : `Exported ${data.filename}`, 'done');
   } catch (e) { setOp(e.message, 'err'); }
 }
 
@@ -258,6 +292,7 @@ export async function saveConfig(payload, apiBaseValue) {
   if (apiBaseValue) { store.apiBase = apiBaseValue; localStorage.setItem('ck_api_base', apiBaseValue); }
   const updated = await apiJson('/config', 'PUT', payload);
   setState({ config: updated });
+  refreshProviderStatus();
   return updated;
 }
 
@@ -274,9 +309,35 @@ export async function saveLlmProvider(id, body) {
   const llmProviders = (store.llmProviders || []).map((x) =>
     x.id === id ? { ...x, has_key: result.has_key, has_custom_base: result.has_custom_base, saved_model: result.saved_model } : x);
   setState({ llmProviders });
+  refreshProviderStatus();
   return result;
 }
 
 export function testLlmProvider(id, model) {
   return apiJson(`/llm-providers/${id}/test`, 'POST', { model: model || null });
+}
+
+export function pingLlmProvider(id) {
+  return apiFetch(`/llm-providers/${id}/ping`);
+}
+
+// Status of the active summary provider for the sidebar badge. Only flags real
+// problems: nothing selected, a keyed provider with no key, or Ollama down.
+export async function refreshProviderStatus() {
+  const cfg = store.config;
+  if (!cfg) return;
+  const id = (cfg.summary_provider || 'ollama').toLowerCase();
+  const p = (store.llmProviders || []).find((x) => x.id === id);
+  let status = { ok: true };
+  if (!p) {
+    status = { ok: false, reason: 'No LLM provider selected' };
+  } else if (p.needs_key && !p.has_key) {
+    status = { ok: false, reason: `${p.name}: no API key set` };
+  } else if (id === 'ollama' || id === 'ollama-cloud') {
+    try {
+      const r = await pingLlmProvider(id);
+      if (!r.ok) status = { ok: false, reason: `${p.name} not reachable` };
+    } catch (_) { status = { ok: false, reason: `${p.name} not reachable` }; }
+  }
+  setState({ providerStatus: status });
 }

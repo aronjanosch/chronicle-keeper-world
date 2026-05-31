@@ -1,7 +1,7 @@
 // Screen 06 — Summarize workspace. Configure on the left, preview on the right.
 import { html, useState, useEffect } from '../../vendor/htm-preact-standalone.mjs';
 import { navigate, fmtDateTime } from '../core.js';
-import { loadLlmProviders, loadPromptPresets, runSummarize } from '../actions.js';
+import { loadLlmProviders, loadPromptPresets, runSummarize, openCampaign } from '../actions.js';
 import { Shell, Sidebar, Topbar } from '../shell.js';
 import { Icon, Btn, Markdown, Empty } from '../ui.js';
 
@@ -63,7 +63,12 @@ export function SummarizeScreen({ store }) {
 
   return html`<${Shell}
     sidebar=${html`<${Sidebar} variant="campaign" active="sessions" campaign=${c} />`}
-    topbar=${html`<${Topbar} crumbs=${['Campaigns', c?.name, `Session ${cam.session_number || '?'}`, 'Summarize']} right=${html`
+    topbar=${html`<${Topbar} crumbs=${[
+      { label: 'Campaigns', onClick: () => navigate('library') },
+      c && { label: c.name, onClick: () => openCampaign(c.campaign_id) },
+      { label: `Session ${cam.session_number || '?'}`, onClick: () => navigate('session', { id: sess.session_id }) },
+      'Summarize',
+    ]} right=${html`
       <div style=${{ display: 'flex', gap: 8, alignItems: 'center' }}>
         <${Btn} kind="ghost" onClick=${() => navigate('session', { id: sess.session_id })}>Cancel</${Btn}>
         <${Btn} kind="primary" icon="sparkle" disabled=${!store.transcripts.length} onClick=${generate}>Generate summary</${Btn}>

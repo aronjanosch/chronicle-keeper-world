@@ -32,7 +32,7 @@ pub fn router(state: AppState) -> Router {
         .route("/config", get(read_config).put(write_config))
         // campaigns
         .route("/campaigns", get(campaigns::list).post(campaigns::create))
-        .route("/campaigns/:id", get(campaigns::detail).put(campaigns::update))
+        .route("/campaigns/:id", get(campaigns::detail).put(campaigns::update).delete(campaigns::delete))
         .route(
             "/campaigns/:id/sessions",
             get(campaigns::list_sessions).post(campaigns::create_session),
@@ -47,6 +47,8 @@ pub fn router(state: AppState) -> Router {
             "/campaigns/:id/codex/entries/:eid",
             axum::routing::put(codex::update).delete(codex::delete),
         )
+        .route("/campaigns/:id/codex/import", post(codex::import))
+        .route("/campaigns/:id/codex/import/commit", post(codex::commit))
         // sessions
         .route("/sessions", get(sessions::list))
         .route("/session/:id", get(sessions::detail))
@@ -67,6 +69,7 @@ pub fn router(state: AppState) -> Router {
         .route("/llm-providers", get(llm::list_providers))
         .route("/llm-providers/:id", axum::routing::put(llm::put_provider))
         .route("/llm-providers/:id/test", post(llm::test_provider))
+        .route("/llm-providers/:id/ping", get(llm::ping_provider))
         // artifacts
         .route("/sessions/:id/transcripts", get(artifacts::list_transcripts))
         .route("/sessions/:id/transcripts/:aid/content", get(artifacts::transcript_content))

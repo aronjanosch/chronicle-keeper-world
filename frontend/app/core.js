@@ -24,6 +24,7 @@ export const store = {
   summaryPreview: null,   // { id, text } latest summary content for session screen
   providers: null,        // transcription engines
   llmProviders: null,     // LLM provider registry
+  providerStatus: null,   // { ok, reason } for the active summary provider (null = unknown)
   promptPresets: null,
 
   // transient UI

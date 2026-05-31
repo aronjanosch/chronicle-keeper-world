@@ -1,0 +1,235 @@
+//! LLM-powered codex import. The user pastes campaign notes in any shape — one
+//! file per NPC, one giant document, a Notion/Google-Doc export, loose bullets —
+//! and the configured summary LLM distills them into structured codex entries
+//! (`name + kind + one-line body`). We never parse note formats ourselves: the
+//! model is the parser. The proposed entries are returned for review and saved
+//! only on an explicit commit, because a bulk extract can over- or mis-extract.
+
+use serde_json::Value;
+
+use crate::error::{AppError, AppResult};
+use crate::llm::{self, Transport};
+use crate::models::CodexEntryCreate;
+use crate::state::AppState;
+use crate::store::codex::KINDS;
+
+struct Resolved {
+    transport: Transport,
+    api_base: String,
+    api_key: String,
+    model: String,
+    timeout: u64,
+    /// Language the one-line bodies should be written in (ISO code, e.g. `de`).
+    /// Prefers the campaign's own `default_language`, falls back to app config.
+    language: String,
+}
+
+/// Resolve the LLM exactly like the summarizer does, but from config alone
+/// (no per-request override): the codex inherits the campaign's summary
+/// provider/model so the import "voice" matches the summaries.
+fn resolve(conn: &rusqlite::Connection, campaign_id: &str) -> AppResult<Resolved> {
+    let cfg = crate::config::get_config_map(conn)?;
+    let provider = cfg
+        .get("summary_provider")
+        .cloned()
+        .unwrap_or_else(|| "ollama".into())
+        .to_lowercase();
+    let p = llm::get(&provider)
+        .ok_or_else(|| AppError::BadRequest(format!("Unknown provider: {provider}")))?;
+    let saved = llm::get_key(conn, &provider)?.unwrap_or_default();
+
+    let api_key = saved.api_key.clone();
+    if p.needs_key && api_key.is_empty() {
+        return Err(AppError::BadRequest(format!(
+            "No API key saved for {}. Add it in Settings → LLM providers.",
+            p.name
+        )));
+    }
+
+    let api_base = Some(saved.api_base.clone())
+        .filter(|s| !s.is_empty())
+        .or_else(|| {
+            if p.transport == Transport::Ollama {
+                cfg.get("ollama_base_url").cloned()
+            } else {
+                None
+            }
+        })
+        .or_else(|| p.default_api_base.map(str::to_string))
+        .unwrap_or_default();
+
+    let model = Some(saved.default_model.clone())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| p.default_model.to_string());
+
+    let timeout: u64 = if p.transport == Transport::Ollama {
+        cfg.get("ollama_timeout_seconds").and_then(|s| s.parse().ok()).unwrap_or(120)
+    } else {
+        cfg.get("litellm_timeout_seconds").and_then(|s| s.parse().ok()).unwrap_or(120)
+    };
+
+    // The campaign's own language wins (a German campaign in an English-default
+    // app), then the app default, then English.
+    let language = crate::store::campaigns::get_campaign(conn, campaign_id)
+        .ok()
+        .flatten()
+        .map(|c| c.default_language)
+        .filter(|s| !s.trim().is_empty())
+        .or_else(|| cfg.get("default_language").cloned())
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| "en".into());
+
+    Ok(Resolved { transport: p.transport, api_base, api_key, model, timeout, language })
+}
+
+/// Distill pasted notes into proposed codex entries. Does not touch the DB
+/// beyond reading config — the caller reviews and commits.
+pub async fn import(state: &AppState, campaign_id: &str, text: &str) -> AppResult<Vec<CodexEntryCreate>> {
+    let text = text.trim();
+    if text.is_empty() {
+        return Err(AppError::BadRequest("Nothing to import — paste some notes first.".into()));
+    }
+    let resolved = state.with_db(|conn| resolve(conn, campaign_id))?;
+    let prompt = build_prompt(text, &resolved.language);
+    let raw = llm::chat(
+        resolved.transport,
+        &resolved.api_base,
+        &resolved.api_key,
+        &resolved.model,
+        &prompt,
+        resolved.timeout,
+        /* json_mode */ true,
+    )
+    .await
+    .map_err(|e| AppError::Internal(anyhow::anyhow!("LLM import request failed: {}", e.0)))?;
+
+    Ok(parse_entries(&raw))
+}
+
+fn build_prompt(notes: &str, language: &str) -> String {
+    let lang_name = language_name(language);
+    format!(
+        "You are extracting a tabletop-RPG campaign glossary (\"codex\") from a Game \
+Master's raw notes. The notes may be in ANY shape: one file per entity, one big \
+document, a Notion or Google-Doc export, or loose bullet points. Ignore all \
+formatting, headings, frontmatter, and markup — read for meaning.\n\n\
+Return ONLY a JSON object of the form:\n\
+{{\"entries\": [{{\"name\": \"...\", \"kind\": \"...\", \"body\": \"...\"}}]}}\n\n\
+Rules:\n\
+- `kind` MUST be exactly one of these English keywords: npc, place, faction, item, lore. Do NOT translate the kind.\n\
+- `name` is the proper name of the thing, copied VERBATIM from the notes (keep the original spelling and language — do not translate names). Omit leading articles unless part of the name.\n\
+- `body` is ONE concise sentence (max ~25 words) capturing what the summarizer should \
+know about it. Write the body in {lang_name}. No markdown, no line breaks.\n\
+- Create one entry per distinct entity. Merge duplicates. Do not invent anything \
+that is not in the notes.\n\
+- Skip the player characters / the party themselves unless a note clearly describes \
+one as world lore.\n\
+- If the notes contain nothing glossary-worthy, return {{\"entries\": []}}.\n\n\
+Notes:\n\
+\"\"\"\n{notes}\n\"\"\""
+    )
+}
+
+/// Map an ISO-ish language code to a name the model reliably understands. Falls
+/// back to the raw code (LLMs handle bare codes fine) for anything unlisted.
+fn language_name(code: &str) -> String {
+    match code.trim().to_lowercase().split(['-', '_']).next().unwrap_or("") {
+        "de" => "German".into(),
+        "en" => "English".into(),
+        "fr" => "French".into(),
+        "es" => "Spanish".into(),
+        "it" => "Italian".into(),
+        "pt" => "Portuguese".into(),
+        "nl" => "Dutch".into(),
+        "pl" => "Polish".into(),
+        "ru" => "Russian".into(),
+        "" => "the same language as the notes".into(),
+        other => format!("the language with code \"{other}\""),
+    }
+}
+
+/// Tolerant parse of the model's JSON. Accepts `{\"entries\": [...]}` or a bare
+/// array, and entries that are strings or objects. Validates kind, trims, and
+/// dedupes within the batch (case-insensitive name+kind).
+fn parse_entries(raw: &str) -> Vec<CodexEntryCreate> {
+    let parsed: Value = serde_json::from_str(raw.trim())
+        .or_else(|_| {
+            // Some models wrap JSON in prose or fences — grab the first {...} or [...].
+            let start = raw.find(['{', '[']);
+            let end = raw.rfind(['}', ']']);
+            match (start, end) {
+                (Some(s), Some(e)) if e > s => serde_json::from_str(&raw[s..=e]),
+                _ => Ok(Value::Null),
+            }
+        })
+        .unwrap_or(Value::Null);
+
+    let arr = match &parsed {
+        Value::Object(map) => map.get("entries").and_then(Value::as_array).cloned(),
+        Value::Array(a) => Some(a.clone()),
+        _ => None,
+    }
+    .unwrap_or_default();
+
+    let mut out: Vec<CodexEntryCreate> = Vec::new();
+    let mut seen: std::collections::HashSet<(String, String)> = std::collections::HashSet::new();
+    for v in &arr {
+        let Some(obj) = v.as_object() else { continue };
+        let name = obj.get("name").and_then(Value::as_str).unwrap_or("").trim().to_string();
+        let kind = obj.get("kind").and_then(Value::as_str).unwrap_or("").trim().to_lowercase();
+        let body = obj.get("body").and_then(Value::as_str).unwrap_or("").trim().to_string();
+        if name.is_empty() || !KINDS.contains(&kind.as_str()) {
+            continue;
+        }
+        if seen.insert((name.to_lowercase(), kind.clone())) {
+            out.push(CodexEntryCreate { name, kind, body });
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_wrapped_object() {
+        let raw = r#"{"entries":[{"name":"Aragorn","kind":"npc","body":"Ranger heir of Isildur"}]}"#;
+        let e = parse_entries(raw);
+        assert_eq!(e.len(), 1);
+        assert_eq!(e[0].name, "Aragorn");
+        assert_eq!(e[0].kind, "npc");
+    }
+
+    #[test]
+    fn parses_bare_array_and_fenced_prose() {
+        let raw = "Here you go:\n```json\n[{\"name\":\"Bree\",\"kind\":\"place\",\"body\":\"Town\"}]\n```";
+        let e = parse_entries(raw);
+        assert_eq!(e.len(), 1);
+        assert_eq!(e[0].kind, "place");
+    }
+
+    #[test]
+    fn prompt_localizes_body_language() {
+        let de = build_prompt("notes", "de");
+        assert!(de.contains("Write the body in German"));
+        // Region tags collapse to the base language.
+        assert!(build_prompt("notes", "de-CH").contains("Write the body in German"));
+        // Unknown codes fall back without panicking.
+        assert!(build_prompt("notes", "xx").contains("code \"xx\""));
+        // The kind enum stays English regardless of language.
+        assert!(de.contains("npc, place, faction, item, lore"));
+    }
+
+    #[test]
+    fn drops_bad_kinds_and_dedupes() {
+        let raw = r#"{"entries":[
+            {"name":"X","kind":"weapon","body":""},
+            {"name":"Sauron","kind":"npc","body":"a"},
+            {"name":"sauron","kind":"npc","body":"dup"}
+        ]}"#;
+        let e = parse_entries(raw);
+        assert_eq!(e.len(), 1, "bad kind dropped, duplicate name+kind merged");
+        assert_eq!(e[0].name, "Sauron");
+    }
+}

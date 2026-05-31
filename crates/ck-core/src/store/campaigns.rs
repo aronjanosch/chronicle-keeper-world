@@ -35,7 +35,7 @@ fn row_to_detail(row: &rusqlite::Row, fallback_lang: &str) -> rusqlite::Result<C
 
 pub fn get_campaigns(conn: &Connection) -> AppResult<Vec<CampaignDetail>> {
     let lang = default_language(conn);
-    let mut stmt = conn.prepare("SELECT * FROM campaigns ORDER BY name")?;
+    let mut stmt = conn.prepare("SELECT * FROM campaigns WHERE deleted = 0 ORDER BY name")?;
     let rows = stmt.query_map([], |r| row_to_detail(r, &lang))?;
     let mut out = Vec::new();
     for r in rows {
@@ -48,7 +48,7 @@ pub fn get_campaign(conn: &Connection, campaign_id: &str) -> AppResult<Option<Ca
     let lang = default_language(conn);
     let c = conn
         .query_row(
-            "SELECT * FROM campaigns WHERE campaign_id = ?1",
+            "SELECT * FROM campaigns WHERE campaign_id = ?1 AND deleted = 0",
             params![campaign_id],
             |r| row_to_detail(r, &lang),
         )
@@ -129,6 +129,35 @@ pub fn update_campaign(
     let refs: Vec<&dyn rusqlite::ToSql> = vals.iter().map(|b| b.as_ref()).collect();
     conn.execute(&sql, refs.as_slice())?;
     get_campaign(conn, campaign_id)?.ok_or_else(|| AppError::NotFound(format!("Campaign not found: {campaign_id}")))
+}
+
+/// Delete a campaign and cascade to all its sessions. Mirrors session deletion:
+/// each session's artifacts are hard-deleted + tombstoned for sync, the session
+/// rows are soft-deleted, audio dirs reclaimed, and the campaign row itself is
+/// soft-deleted (deleted=1, dirty=1) so the tombstone propagates to other devices.
+pub fn delete_campaign(conn: &Connection, campaign_id: &str) -> AppResult<()> {
+    if get_campaign(conn, campaign_id)?.is_none() {
+        return Err(AppError::NotFound(format!("Campaign not found: {campaign_id}")));
+    }
+    // All sessions (incl. already soft-deleted) so their artifacts are cleaned too.
+    let mut stmt = conn.prepare("SELECT session_id FROM sessions WHERE campaign_id = ?1")?;
+    let session_ids: Vec<String> = stmt
+        .query_map(params![campaign_id], |r| r.get::<_, String>(0))?
+        .filter_map(|r| r.ok())
+        .collect();
+    drop(stmt);
+    for sid in &session_ids {
+        crate::store::sessions::delete_session(conn, sid)?;
+    }
+    conn.execute(
+        "UPDATE campaigns SET deleted = 1, dirty = 1, updated_at = ?1 WHERE campaign_id = ?2",
+        params![now(), campaign_id],
+    )?;
+    // Drop the dangling "current campaign" pointer if it named this one.
+    if current_campaign_id(conn)?.as_deref() == Some(campaign_id) {
+        set_current_campaign_id(conn, "")?;
+    }
+    Ok(())
 }
 
 pub fn next_session_number(conn: &Connection, campaign_id: Option<&str>) -> AppResult<i64> {
