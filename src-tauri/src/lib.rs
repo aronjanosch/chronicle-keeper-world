@@ -30,7 +30,9 @@ pub fn run() {
 
     let rt = tokio::runtime::Runtime::new().expect("create tokio runtime");
     let addr = SocketAddr::from(([127, 0, 0, 1], 0));
-    let (listener, mut state) = rt.block_on(ck_core::bind(addr, true)).expect("bind ck-core");
+    let (listener, mut state) = rt
+        .block_on(ck_core::bind(addr, true))
+        .expect("bind ck-core");
     let bound = listener.local_addr().expect("local addr");
 
     let token = random_token();
