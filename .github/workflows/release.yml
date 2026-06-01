@@ -18,6 +18,11 @@ on:
     tags: ["v*"]
   workflow_dispatch:
 
+# tauri-action creates/updates the GitHub Release on tag builds, which needs
+# write access to repo contents (default GITHUB_TOKEN is read-only).
+permissions:
+  contents: write
+
 jobs:
   build:
     strategy:
