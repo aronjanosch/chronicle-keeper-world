@@ -22,8 +22,10 @@ pub fn insert_artifact(
         .to_string();
     let artifact_id = Uuid::new_v4().to_string();
     conn.execute(
-        "INSERT INTO artifacts (artifact_id, session_id, kind, provider, model, content, created_at) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        // file_path is dead legacy (content is inline now) but is NOT NULL with no
+        // default on DBs created before the schema added one — write '' explicitly.
+        "INSERT INTO artifacts (artifact_id, session_id, kind, provider, model, file_path, content, created_at) \
+         VALUES (?1, ?2, ?3, ?4, ?5, '', ?6, ?7)",
         params![artifact_id, session_id, kind, provider, model, content, created_at],
     )?;
     let id = conn.last_insert_rowid();

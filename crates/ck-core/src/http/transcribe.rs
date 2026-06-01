@@ -127,6 +127,7 @@ pub async fn transcribe(
 
     let cancel = Arc::new(AtomicBool::new(false));
     let cancel_worker = cancel.clone();
+    let progress = state.model_progress.clone();
     let handle = tokio::task::spawn_blocking(move || {
         transcribe_tracks(
             &model_dir,
@@ -134,6 +135,7 @@ pub async fn transcribe(
             vad_model.as_deref(),
             &tracks,
             &cancel_worker,
+            &progress,
         )
     });
 

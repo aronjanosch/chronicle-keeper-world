@@ -247,6 +247,16 @@ function pollModelStatus() {
           setOp(`Downloading model ${bar(p.downloaded / p.total)} ${pct}% (${(p.downloaded / MB).toFixed(0)}/${(p.total / MB).toFixed(0)} MB)`);
         } else setOp(`Downloading model… ${(p.downloaded / MB).toFixed(0)} MB`);
       } else if (p.phase === 'extracting') setOp('Extracting model…');
+      else if (p.phase === 'transcribing') {
+        const tot = p.track_total || 0;
+        if (tot > 0) {
+          const done = p.track_done || 0;
+          const cur = Math.min(done + 1, tot);
+          const frac = done / tot;
+          const who = p.message ? ` — ${p.message}` : '';
+          setOp(`Transcribing track ${cur}/${tot}${who} ${bar(frac)} ${Math.round(frac * 100)}%`);
+        } else setOp('Transcribing…');
+      }
     } catch (_) {}
     if (!stopped) setTimeout(tick, 500);
   };

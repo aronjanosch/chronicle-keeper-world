@@ -6,6 +6,8 @@ pub mod model;
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 use anyhow::{Context, Result};
 use sherpa_onnx::{
@@ -14,6 +16,7 @@ use sherpa_onnx::{
 };
 
 use crate::models::Segment;
+use crate::state::ModelProgress;
 
 /// Sample rate the engine + VAD operate at. Audio is resampled here once; the
 /// recognizer no longer resamples internally because we feed it 16k directly.
@@ -59,7 +62,8 @@ fn create_recognizer(model_dir: &Path, provider: &str) -> Option<OfflineRecogniz
     config.model_config.tokens = p("tokens.txt");
     config.model_config.provider = Some(provider.to_string());
     config.model_config.num_threads = num_threads();
-    config.model_config.debug = false;
+    // Sherpa's own stderr logging follows RUST_LOG: off at info, on at debug.
+    config.model_config.debug = tracing::enabled!(tracing::Level::DEBUG);
     OfflineRecognizer::create(&config)
 }
 
@@ -196,26 +200,50 @@ pub fn transcribe_tracks(
     vad_model: Option<&Path>,
     tracks: &[(String, PathBuf, String)],
     cancel: &AtomicBool,
+    progress: &Arc<Mutex<ModelProgress>>,
 ) -> Result<Vec<Segment>> {
+    let started = Instant::now();
     let recognizer = build_recognizer(model_dir, accelerator)?;
+    tracing::info!(
+        "transcribing {} track(s) [provider={accelerator}, vad={}]",
+        tracks.len(),
+        vad_model.is_some()
+    );
+    let total = tracks.len() as u64;
     let mut all = Vec::new();
-    for (track_id, path, label) in tracks {
+    for (idx, (track_id, path, label)) in tracks.iter().enumerate() {
         if cancel.load(Ordering::Relaxed) {
             anyhow::bail!("Transcription cancelled (timed out).");
         }
+        ModelProgress::set_transcribe(progress, idx as u64, total, label);
         if !path.exists() {
             tracing::warn!("track file missing, skipping: {}", path.display());
             continue;
         }
+        let t0 = Instant::now();
         let (samples, sr) =
             decode::decode_to_mono(path).with_context(|| format!("decode {}", path.display()))?;
         let samples = to_target_sr(&samples, sr);
+        let secs = samples.len() as f64 / TARGET_SR as f64;
+        tracing::info!(
+            "track {}/{} '{label}' ({track_id}): {secs:.0}s audio, decoding…",
+            idx + 1,
+            total
+        );
 
         let segs = vad_model
             .and_then(|m| transcribe_vad(&recognizer, m, &samples, track_id, label, cancel))
             .unwrap_or_else(|| transcribe_fixed(&recognizer, &samples, track_id, label, cancel));
+        tracing::info!(
+            "track {}/{} '{label}': {} segment(s) in {:.1}s",
+            idx + 1,
+            total,
+            segs.len(),
+            t0.elapsed().as_secs_f64()
+        );
         all.extend(segs);
     }
+    ModelProgress::set_transcribe(progress, total, total, "");
     if cancel.load(Ordering::Relaxed) {
         anyhow::bail!("Transcription cancelled (timed out).");
     }
@@ -224,5 +252,10 @@ pub fn transcribe_tracks(
             .partial_cmp(&b.start)
             .unwrap_or(std::cmp::Ordering::Equal)
     });
+    tracing::info!(
+        "transcription done: {} segment(s) across {total} track(s) in {:.1}s",
+        all.len(),
+        started.elapsed().as_secs_f64()
+    );
     Ok(all)
 }

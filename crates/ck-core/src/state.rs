@@ -14,12 +14,14 @@ use crate::paths::Paths;
 /// simply stays `Idle`.
 #[derive(Clone, Debug, Serialize)]
 pub struct ModelProgress {
-    /// "idle" | "downloading" | "extracting" | "ready" | "error"
+    /// "idle" | "downloading" | "extracting" | "ready" | "transcribing" | "error"
     pub phase: String,
     pub downloaded: u64,
     /// Total bytes if the server sent Content-Length, else 0 (unknown).
     pub total: u64,
     pub message: Option<String>,
+    pub track_done: u64,
+    pub track_total: u64,
 }
 
 impl Default for ModelProgress {
@@ -29,6 +31,8 @@ impl Default for ModelProgress {
             downloaded: 0,
             total: 0,
             message: None,
+            track_done: 0,
+            track_total: 0,
         }
     }
 }
@@ -38,10 +42,25 @@ impl ModelProgress {
         // Recover the guard on poison rather than cascading a panic into a
         // process kill — a panicked writer leaves the progress struct usable.
         let mut p = handle.lock().unwrap_or_else(|e| e.into_inner());
-        p.phase = phase.into();
-        p.downloaded = downloaded;
-        p.total = total;
-        p.message = None;
+        *p = Self {
+            phase: phase.into(),
+            downloaded,
+            total,
+            ..Default::default()
+        };
+    }
+
+    /// Report transcription progress: `done` tracks finished of `total`, `label`
+    /// the track now being processed. Polled via `GET /model-status`.
+    pub fn set_transcribe(handle: &Arc<Mutex<Self>>, done: u64, total: u64, label: &str) {
+        let mut p = handle.lock().unwrap_or_else(|e| e.into_inner());
+        *p = Self {
+            phase: "transcribing".into(),
+            message: Some(label.to_string()),
+            track_done: done,
+            track_total: total,
+            ..Default::default()
+        };
     }
 
     pub fn set_error(handle: &Arc<Mutex<Self>>, message: String) {
