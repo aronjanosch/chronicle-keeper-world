@@ -1,7 +1,7 @@
 // Screen 02 — Campaign Overview. Hero + party + codex teaser + sessions list.
 import { html, useState } from '../../vendor/htm-preact-standalone.mjs';
 import { navigate, openModal, fmtDate, fmtDateTime, toneFor } from '../core.js';
-import { loadSession, deleteCampaign, generateRecap } from '../actions.js';
+import { deleteCampaign, generateRecap } from '../actions.js';
 import { Shell, Sidebar, Topbar } from '../shell.js';
 import { Icon, Sigil, Btn, StagePill, Empty, Markdown } from '../ui.js';
 import { KINDS, iconForKind } from './codex.js';
@@ -59,37 +59,6 @@ function PartyMember({ player, onClick }) {
       <div style=${{ fontFamily: 'var(--font-display)', fontSize: 15, fontWeight: 500, color: 'var(--ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>${ch}</div>
       <div style=${{ fontSize: 12, color: 'var(--ink-muted)', marginTop: 1 }}>${player.player_name || '—'}${player.pronouns ? ` · ${player.pronouns}` : ''}</div>
     </div>
-  </div>`;
-}
-
-function SessionRow({ s, onClick }) {
-  // `complete` marks a finished stage (green); `current` marks the single next
-  // incomplete stage (burgundy). They must be mutually exclusive — StagePill
-  // renders `current` over `complete`, so setting both turned a done stage red.
-  const up = !!s.has_tracks, t = !!s.has_transcription, sm = !!s.has_summary;
-  const stages = [
-    { stage: 'upload', complete: up, current: !up },
-    { stage: 'transcribe', complete: t, current: up && !t },
-    { stage: 'summarize', complete: sm, current: t && !sm },
-  ];
-  return html`<div onClick=${onClick} style=${{ display: 'flex', alignItems: 'center', gap: 16, padding: '14px 18px', borderBottom: '1px solid var(--rule-soft)', cursor: 'pointer' }}
-    onMouseEnter=${(e) => { e.currentTarget.style.background = 'var(--paper)'; }}
-    onMouseLeave=${(e) => { e.currentTarget.style.background = 'transparent'; }}>
-    <div style=${{ width: 38, textAlign: 'center', fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--ink-faint)' }}>
-      <div style=${{ fontSize: 16, color: 'var(--ink)', fontWeight: 500 }}>${String(s.session_number || 0).padStart(2, '0')}</div>
-      <div style=${{ marginTop: -2 }}>session</div>
-    </div>
-    <div style=${{ width: 1, height: 36, background: 'var(--rule-soft)' }} />
-    <div style=${{ flex: 1, minWidth: 0 }}>
-      <div style=${{ fontFamily: 'var(--font-display)', fontSize: 15, fontWeight: 500, color: 'var(--ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-        ${s.title || html`<span style=${{ fontStyle: 'italic', color: 'var(--ink-muted)' }}>Untitled session</span>`}
-      </div>
-      <div style=${{ display: 'flex', alignItems: 'center', gap: 12, fontSize: 12, color: 'var(--ink-muted)', marginTop: 2 }}>
-        <span style=${{ display: 'flex', alignItems: 'center', gap: 4 }}><${Icon} name="cal" size=${11} /> ${fmtDate(s.date) || 'no date'}</span>
-      </div>
-    </div>
-    <div style=${{ display: 'flex', gap: 5 }}>${stages.map((st, i) => html`<${StagePill} key=${i} ...${st} />`)}</div>
-    <${Icon} name="chev-r" size=${14} className="ck-ink-muted" />
   </div>`;
 }
 
@@ -165,16 +134,16 @@ export function CampaignScreen({ store }) {
 
   return html`<${Shell}
     sidebar=${html`<${Sidebar} variant="campaign" active="overview" campaign=${c} />`}
-    topbar=${html`<${Topbar} crumbs=${[{ label: 'Campaigns', onClick: () => navigate('library') }, c.name]} right=${html`
+    topbar=${html`<${Topbar} crumbs=${[{ label: 'Worlds', onClick: () => navigate('library') }, c.name]} right=${html`
       <div style=${{ display: 'flex', gap: 8, alignItems: 'center' }}>
-        <${Btn} kind="ghost" icon="edit" onClick=${() => openModal('campaign', { edit: c })}>Edit campaign</${Btn}>
-        <${Btn} kind="danger" icon="trash" title="Delete campaign" onClick=${() => {
+        <${Btn} kind="ghost" icon="edit" onClick=${() => openModal('campaign', { edit: c })}>Edit world</${Btn}>
+        <${Btn} kind="danger" icon="trash" title="Delete world" onClick=${() => {
           const n = sessions.length;
           const tail = n ? ` and its ${n} session${n === 1 ? '' : 's'} (transcripts and summaries included)` : '';
           openModal('confirm', {
-            title: 'Delete campaign',
+            title: 'Delete world',
             message: `Delete "${c.name}"${tail}? This cannot be undone.`,
-            confirmLabel: 'Delete campaign',
+            confirmLabel: 'Delete world',
             onConfirm: () => deleteCampaign(c.campaign_id),
           });
         }} />
@@ -233,14 +202,5 @@ export function CampaignScreen({ store }) {
       <${CodexTeaser} campaign=${c} entries=${codexEntries} />
     </div>
 
-    <div style=${{ background: 'var(--surface)', border: '1px solid var(--rule)', borderRadius: 8, overflow: 'hidden' }}>
-      <div style=${{ padding: '14px 18px 10px', display: 'flex', alignItems: 'baseline', gap: 10, borderBottom: '1px solid var(--rule-soft)' }}>
-        <h3 style=${{ fontFamily: 'var(--font-display)', fontSize: 17, fontWeight: 500, color: 'var(--ink)' }}>Sessions</h3>
-        <span style=${{ fontSize: 12, color: 'var(--ink-muted)' }}>· ${sessions.length} recorded</span>
-      </div>
-      ${sessions.length
-        ? sessions.map((s) => html`<${SessionRow} key=${s.session_id} s=${s} onClick=${() => loadSession(s.session_id)} />`)
-        : html`<${Empty} icon="scroll" title="No sessions yet">Upload a Craig recording to begin the first chronicle entry.</${Empty}>`}
-    </div>
   </${Shell}>`;
 }

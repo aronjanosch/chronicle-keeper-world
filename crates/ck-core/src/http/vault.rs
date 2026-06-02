@@ -54,6 +54,66 @@ pub async fn list_pages(
     Ok(Json(json!({ "pages": vault::list_pages(&root)? })))
 }
 
+pub async fn list_tree(
+    State(state): State<AppState>,
+    Path(campaign_id): Path<String>,
+) -> AppResult<Json<Value>> {
+    let root = vault_root(&state, &campaign_id)?;
+    Ok(Json(json!({
+        "folders": vault::list_folders(&root)?,
+        "pages": vault::list_pages(&root)?,
+    })))
+}
+
+#[derive(Deserialize)]
+pub struct FolderRequest {
+    pub path: String,
+}
+
+pub async fn create_folder(
+    State(state): State<AppState>,
+    Path(campaign_id): Path<String>,
+    Json(req): Json<FolderRequest>,
+) -> AppResult<Json<Value>> {
+    let root = vault_root(&state, &campaign_id)?;
+    vault::create_folder(&root, &req.path)?;
+    Ok(Json(json!({ "ok": true })))
+}
+
+#[derive(Deserialize)]
+pub struct MoveRequest {
+    pub from: String,
+    pub to: String,
+}
+
+pub async fn move_entry(
+    State(state): State<AppState>,
+    Path(campaign_id): Path<String>,
+    Json(req): Json<MoveRequest>,
+) -> AppResult<Json<Value>> {
+    let root = vault_root(&state, &campaign_id)?;
+    vault::move_entry(&root, &req.from, &req.to)?;
+    Ok(Json(json!({ "ok": true })))
+}
+
+pub async fn delete_page(
+    State(state): State<AppState>,
+    Path((campaign_id, page)): Path<(String, String)>,
+) -> AppResult<Json<Value>> {
+    let root = vault_root(&state, &campaign_id)?;
+    vault::delete_page(&root, &page)?;
+    Ok(Json(json!({ "ok": true })))
+}
+
+pub async fn delete_folder(
+    State(state): State<AppState>,
+    Path((campaign_id, folder)): Path<(String, String)>,
+) -> AppResult<Json<Value>> {
+    let root = vault_root(&state, &campaign_id)?;
+    vault::delete_folder(&root, &folder)?;
+    Ok(Json(json!({ "ok": true })))
+}
+
 pub async fn read_page(
     State(state): State<AppState>,
     Path((campaign_id, page)): Path<(String, String)>,
@@ -81,6 +141,8 @@ pub struct CreateRequest {
     pub title: String,
     #[serde(default = "default_kind")]
     pub kind: String,
+    #[serde(default)]
+    pub folder: Option<String>,
 }
 
 fn default_kind() -> String {
@@ -93,5 +155,10 @@ pub async fn create_page(
     Json(req): Json<CreateRequest>,
 ) -> AppResult<Json<vault::Page>> {
     let root = vault_root(&state, &campaign_id)?;
-    Ok(Json(vault::create_page(&root, &req.title, &req.kind)?))
+    Ok(Json(vault::create_page(
+        &root,
+        &req.title,
+        &req.kind,
+        req.folder.as_deref(),
+    )?))
 }

@@ -12,6 +12,7 @@ pub struct PageInfo {
     pub title: String,
     pub kind: Option<String>,
     pub summary: String,
+    pub modified: Option<u64>,
 }
 
 #[derive(Debug, Serialize)]
@@ -34,19 +35,34 @@ fn require_dir(vault: &Path) -> AppResult<()> {
     }
 }
 
-// Rejects `..`, absolute paths, and non-`.md` — result stays under `vault`.
-fn resolve(vault: &Path, rel: &str) -> AppResult<PathBuf> {
+// Rejects `..`, absolute paths, and empty/dotfile components — result stays
+// under `vault`. Used for folders and move targets (no extension requirement).
+fn resolve_rel(vault: &Path, rel: &str) -> AppResult<PathBuf> {
     let candidate = Path::new(rel);
+    let mut any = false;
     for comp in candidate.components() {
         match comp {
-            Component::Normal(_) => {}
-            _ => return Err(AppError::BadRequest("invalid page path".into())),
+            Component::Normal(s) => {
+                any = true;
+                if s.to_string_lossy().starts_with('.') {
+                    return Err(AppError::BadRequest("invalid path".into()));
+                }
+            }
+            _ => return Err(AppError::BadRequest("invalid path".into())),
         }
     }
-    if candidate.extension().and_then(|e| e.to_str()) != Some("md") {
-        return Err(AppError::BadRequest("page path must end in .md".into()));
+    if !any {
+        return Err(AppError::BadRequest("empty path".into()));
     }
     Ok(vault.join(candidate))
+}
+
+// As `resolve_rel`, but also requires a `.md` extension (page files).
+fn resolve(vault: &Path, rel: &str) -> AppResult<PathBuf> {
+    if Path::new(rel).extension().and_then(|e| e.to_str()) != Some("md") {
+        return Err(AppError::BadRequest("page path must end in .md".into()));
+    }
+    resolve_rel(vault, rel)
 }
 
 fn rel_of(vault: &Path, abs: &Path) -> String {
@@ -138,6 +154,92 @@ fn collect_md(dir: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
+fn mtime_secs(abs: &Path) -> Option<u64> {
+    abs.metadata()
+        .and_then(|m| m.modified())
+        .ok()?
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()
+        .map(|d| d.as_secs())
+}
+
+fn collect_dirs(base: &Path, dir: &Path, out: &mut Vec<String>) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        if entry.file_name().to_string_lossy().starts_with('.') {
+            continue;
+        }
+        out.push(rel_of(base, &path));
+        collect_dirs(base, &path, out);
+    }
+}
+
+// Every folder under the vault (incl. empty ones), as slash-joined relative
+// paths. Excludes `.ck` and other dotfiles. Sorted.
+pub fn list_folders(vault: &Path) -> AppResult<Vec<String>> {
+    require_dir(vault)?;
+    let mut dirs = Vec::new();
+    collect_dirs(vault, vault, &mut dirs);
+    dirs.sort();
+    Ok(dirs)
+}
+
+pub fn create_folder(vault: &Path, rel: &str) -> AppResult<()> {
+    require_dir(vault)?;
+    let abs = resolve_rel(vault, rel)?;
+    if abs.is_file() {
+        return Err(AppError::BadRequest("A file with that name exists".into()));
+    }
+    std::fs::create_dir_all(&abs)
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("create folder: {e}")))
+}
+
+// Rename or move a page or folder. `from` must exist; `to` must not.
+pub fn move_entry(vault: &Path, from: &str, to: &str) -> AppResult<()> {
+    require_dir(vault)?;
+    let src = resolve_rel(vault, from)?;
+    let dst = resolve_rel(vault, to)?;
+    if !src.exists() {
+        return Err(AppError::NotFound(format!("Not found: {from}")));
+    }
+    if dst.exists() {
+        return Err(AppError::BadRequest(format!("Already exists: {to}")));
+    }
+    if let Some(parent) = dst.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| AppError::Internal(anyhow::anyhow!("create dir: {e}")))?;
+    }
+    std::fs::rename(&src, &dst)
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("move: {e}")))
+}
+
+pub fn delete_page(vault: &Path, rel: &str) -> AppResult<()> {
+    let abs = resolve(vault, rel)?;
+    if !abs.is_file() {
+        return Err(AppError::NotFound(format!("Page not found: {rel}")));
+    }
+    std::fs::remove_file(&abs)
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("delete page: {e}")))
+}
+
+// Removes an empty folder. `remove_dir` fails on a non-empty dir, which is the
+// guard we want — deleting a folder full of pages is not a Part 2 action.
+pub fn delete_folder(vault: &Path, rel: &str) -> AppResult<()> {
+    let abs = resolve_rel(vault, rel)?;
+    if !abs.is_dir() {
+        return Err(AppError::NotFound(format!("Folder not found: {rel}")));
+    }
+    std::fs::remove_dir(&abs).map_err(|_| {
+        AppError::BadRequest("Folder isn't empty — move or delete its pages first".into())
+    })
+}
+
 pub fn ensure_ck_dir(vault: &Path) -> AppResult<()> {
     require_dir(vault)?;
     let ck = vault.join(".ck");
@@ -164,6 +266,7 @@ pub fn list_pages(vault: &Path) -> AppResult<Vec<PageInfo>> {
                 title: p.title,
                 kind: p.kind,
                 summary: p.summary,
+                modified: mtime_secs(abs),
             })
         })
         .collect();
@@ -189,7 +292,7 @@ pub fn write_page(vault: &Path, rel: &str, content: &str) -> AppResult<Page> {
     Ok(page_from(vault, &abs, content.to_string()))
 }
 
-pub fn create_page(vault: &Path, title: &str, kind: &str) -> AppResult<Page> {
+pub fn create_page(vault: &Path, title: &str, kind: &str, folder: Option<&str>) -> AppResult<Page> {
     require_dir(vault)?;
     let title = title.trim();
     if title.is_empty() {
@@ -198,11 +301,15 @@ pub fn create_page(vault: &Path, title: &str, kind: &str) -> AppResult<Page> {
     if title.contains(['/', '\\']) {
         return Err(AppError::BadRequest("title cannot contain slashes".into()));
     }
-    let rel = format!("{title}.md");
+    let folder = folder.map(str::trim).filter(|s| !s.is_empty());
+    let rel = match folder {
+        Some(f) => format!("{f}/{title}.md"),
+        None => format!("{title}.md"),
+    };
     let abs = resolve(vault, &rel)?;
     if abs.exists() {
         return Err(AppError::BadRequest(format!(
-            "A page named \"{title}\" already exists"
+            "A page named \"{title}\" already exists here"
         )));
     }
     write_page(vault, &rel, &page_file_content(title, kind, "", ""))
@@ -347,14 +454,68 @@ mod tests {
     fn page_roundtrip() {
         let dir = std::env::temp_dir().join(format!("ck-vault-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        let created = create_page(&dir, "Rivendell", "place").unwrap();
+        let created = create_page(&dir, "Rivendell", "place", None).unwrap();
         assert_eq!(created.path, "Rivendell.md");
         assert_eq!(created.kind.as_deref(), Some("place"));
-        assert!(create_page(&dir, "Rivendell", "place").is_err());
+        assert!(create_page(&dir, "Rivendell", "place", None).is_err());
         write_page(&dir, "Rivendell.md", "---\nkind: place\nsummary: Elf haven.\n---\n\nBody").unwrap();
         let read = read_page(&dir, "Rivendell.md").unwrap();
         assert_eq!(read.summary, "Elf haven.");
         assert_eq!(list_pages(&dir).unwrap().len(), 1);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    fn tmp_vault(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("ck-vault-{tag}-{}", std::process::id()));
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn folders_create_list_and_nested_page() {
+        let dir = tmp_vault("folders");
+        create_folder(&dir, "NPCs/Neverwinter").unwrap();
+        let folders = list_folders(&dir).unwrap();
+        assert!(folders.contains(&"NPCs".to_string()));
+        assert!(folders.contains(&"NPCs/Neverwinter".to_string()));
+
+        let page = create_page(&dir, "Lord Ulric", "npc", Some("NPCs/Neverwinter")).unwrap();
+        assert_eq!(page.path, "NPCs/Neverwinter/Lord Ulric.md");
+        assert_eq!(list_pages(&dir).unwrap().len(), 1);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn move_file_and_folder() {
+        let dir = tmp_vault("move");
+        create_page(&dir, "Aragorn", "npc", None).unwrap();
+        // rename a page
+        move_entry(&dir, "Aragorn.md", "Strider.md").unwrap();
+        assert!(read_page(&dir, "Aragorn.md").is_err());
+        assert!(read_page(&dir, "Strider.md").is_ok());
+        // moving onto an existing path fails
+        create_page(&dir, "Gandalf", "npc", None).unwrap();
+        assert!(move_entry(&dir, "Strider.md", "Gandalf.md").is_err());
+        // move a folder with children
+        create_folder(&dir, "Old").unwrap();
+        create_page(&dir, "Note", "lore", Some("Old")).unwrap();
+        move_entry(&dir, "Old", "New").unwrap();
+        assert!(read_page(&dir, "New/Note.md").is_ok());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn delete_and_traversal_guards() {
+        let dir = tmp_vault("delete");
+        create_page(&dir, "Doomed", "lore", None).unwrap();
+        delete_page(&dir, "Doomed.md").unwrap();
+        assert!(read_page(&dir, "Doomed.md").is_err());
+        assert!(delete_page(&dir, "Doomed.md").is_err());
+        // folder + move resolvers reject traversal / dotfiles
+        assert!(create_folder(&dir, "../escape").is_err());
+        assert!(create_folder(&dir, ".ck").is_err());
+        assert!(move_entry(&dir, "a.md", "../b.md").is_err());
         std::fs::remove_dir_all(&dir).ok();
     }
 }

@@ -348,14 +348,106 @@ function stripFrontmatter(text) {
 }
 
 function ckPostprocess(htmlStr) {
-  return htmlStr.replace(/<blockquote>\s*<p>\s*\[!([a-zA-Z]+)\]\s*/g,
-    (_, type) => `<blockquote data-callout="${type.toLowerCase()}"><p>`);
+  return htmlStr.replace(/<blockquote>\s*<p>\s*\[!([a-zA-Z]+)\]([^\n<]*)(<br\s*\/?>)?/g,
+    (_, type, title, br) => {
+      const t = title.trim();
+      const head = t ? `<span class="ck-callout-title">${escapeHtml(t)}</span>${br || ''}` : '';
+      return `<blockquote data-callout="${type.toLowerCase()}"><p>${head}`;
+    });
 }
 
-export function renderPageHtml(text) {
-  return ckPostprocess(marked.parse(stripFrontmatter(text), { gfm: true }));
+// Resolve [[Name]] / [[Name|Label]] against the vault page list. Resolved links
+// carry data-path (navigable); unresolved ones get data-name (offer to create).
+// Walks tokens so we never rewrite inside existing <a>/<code>.
+export function resolveWikilinks(htmlStr, pages) {
+  if (!htmlStr.includes('[[')) return htmlStr;
+  const byTitle = new Map();
+  (pages || []).forEach((p) => { if (p && p.title) byTitle.set(p.title.trim().toLowerCase(), p.path); });
+  const tokens = htmlStr.split(/(<[^>]+>)/);
+  let skip = 0;
+  for (let i = 0; i < tokens.length; i++) {
+    const t = tokens[i];
+    if (t.startsWith('<')) {
+      if (/^<(a|code|pre)[\s>]/i.test(t)) skip++;
+      else if (/^<\/(a|code|pre)>/i.test(t)) skip = Math.max(0, skip - 1);
+      continue;
+    }
+    if (skip > 0 || !t.includes('[[')) continue;
+    tokens[i] = t.replace(/\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g, (_, target, label) => {
+      const name = target.trim();
+      const text = escapeHtml((label || name).trim());
+      const path = byTitle.get(name.toLowerCase());
+      return path
+        ? `<a class="ck-wikilink" data-path="${escapeHtml(path)}">${text}</a>`
+        : `<a class="ck-wikilink ck-wikilink--broken" data-name="${escapeHtml(name)}">${text}</a>`;
+    });
+  }
+  return tokens.join('');
 }
 
-export function PageBody({ text }) {
-  return html`<div class="ck-prose" dangerouslySetInnerHTML=${{ __html: renderPageHtml(text) }} />`;
+export function renderPageHtml(text, pages) {
+  return resolveWikilinks(ckPostprocess(marked.parse(stripFrontmatter(text), { gfm: true })), pages);
+}
+
+// Render a single markdown block (no frontmatter); used by the live-preview editor.
+export function renderBlockHtml(text, pages) {
+  return resolveWikilinks(ckPostprocess(marked.parse(text || '', { gfm: true })), pages);
+}
+
+// Click handler shared by reading view + live preview: navigate resolved wikilinks,
+// hand unresolved ones to onBroken (e.g. create a page).
+export function wikilinkClick(onBroken) {
+  return (e) => {
+    const a = e.target && e.target.closest && e.target.closest('.ck-wikilink');
+    if (!a) return;
+    e.preventDefault();
+    if (a.dataset.path) navigate('page', { path: a.dataset.path });
+    else if (a.dataset.name && onBroken) onBroken(a.dataset.name);
+  };
+}
+
+export function PageBody({ text, pages, onBroken }) {
+  return html`<div class="ck-prose" onClick=${wikilinkClick(onBroken)}
+    dangerouslySetInnerHTML=${{ __html: renderPageHtml(text, pages) }} />`;
+}
+
+// ── Frontmatter helpers (client-side; the .md file body is the source of truth) ──
+const FM_RE = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/;
+
+// Split a full .md file into { fm } (inner YAML text, no fences) and { body }.
+export function splitDoc(content) {
+  const m = FM_RE.exec(content || '');
+  return m ? { fm: m[1], body: content.slice(m[0].length) } : { fm: '', body: content || '' };
+}
+
+export function joinDoc(fm, body) {
+  const f = (fm || '').trim();
+  const b = (body || '').replace(/^\n+/, '');
+  return f ? `---\n${f}\n---\n\n${b}` : b;
+}
+
+// Parse flat-YAML frontmatter into [{ key, list, values }] for the Properties strip.
+// Supports `k: v`, inline `k: [a, b]`, and block lists (`k:` then `- item` lines).
+export function parseProps(fm) {
+  const lines = (fm || '').replace(/\r\n/g, '\n').split('\n');
+  const props = [];
+  for (let i = 0; i < lines.length; i++) {
+    const m = lines[i].match(/^([A-Za-z0-9_-]+):\s*(.*)$/);
+    if (!m) continue;
+    const key = m[1];
+    let rest = m[2].trim();
+    if (rest.startsWith('[') && rest.endsWith(']')) {
+      const values = rest.slice(1, -1).split(',').map((s) => s.trim().replace(/^["']|["']$/g, '')).filter(Boolean);
+      props.push({ key, list: true, values });
+    } else if (!rest) {
+      const values = [];
+      while (i + 1 < lines.length && /^\s*-\s+/.test(lines[i + 1])) {
+        values.push(lines[++i].replace(/^\s*-\s+/, '').trim().replace(/^["']|["']$/g, ''));
+      }
+      props.push(values.length ? { key, list: true, values } : { key, list: false, values: [''] });
+    } else {
+      props.push({ key, list: false, values: [rest.replace(/^["']|["']$/g, '')] });
+    }
+  }
+  return props;
 }

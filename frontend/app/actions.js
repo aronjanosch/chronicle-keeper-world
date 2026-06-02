@@ -211,6 +211,42 @@ export async function loadVaultPages(campaignId) {
   return r.pages || [];
 }
 
+// Folders + pages in one shot — the Explorer's source of truth.
+export async function loadVaultTree(campaignId) {
+  const id = campaignId || store.campaign?.campaign_id;
+  if (!id) return { folders: [], pages: [] };
+  const r = await apiFetch(`/campaigns/${id}/vault/tree`).catch((e) => {
+    console.warn('loadVaultTree failed:', e);
+    return { folders: [], pages: [] };
+  });
+  setState({ vaultFolders: r.folders || [], vaultPages: r.pages || [] });
+  return r;
+}
+
+export async function createVaultFolder(path) {
+  const id = store.campaign.campaign_id;
+  await apiJson(`/campaigns/${id}/vault/folders`, 'POST', { path });
+  await loadVaultTree(id);
+}
+
+export async function moveVaultEntry(from, to) {
+  const id = store.campaign.campaign_id;
+  await apiJson(`/campaigns/${id}/vault/move`, 'POST', { from, to });
+  await loadVaultTree(id);
+}
+
+export async function deleteVaultPage(path) {
+  const id = store.campaign.campaign_id;
+  await apiFetch(`/campaigns/${id}/vault/pages/${encodeURI(path)}`, { method: 'DELETE' });
+  await loadVaultTree(id);
+}
+
+export async function deleteVaultFolder(path) {
+  const id = store.campaign.campaign_id;
+  await apiFetch(`/campaigns/${id}/vault/folders/${encodeURI(path)}`, { method: 'DELETE' });
+  await loadVaultTree(id);
+}
+
 export async function readVaultPage(path) {
   const id = store.campaign.campaign_id;
   const page = await apiFetch(`/campaigns/${id}/vault/pages/${encodeURI(path)}`);
@@ -229,10 +265,10 @@ export async function saveVaultPage(path, content) {
   return page;
 }
 
-export async function createVaultPage(title, kind) {
+export async function createVaultPage(title, kind, folder) {
   const id = store.campaign.campaign_id;
-  const page = await apiJson(`/campaigns/${id}/vault/pages`, 'POST', { title, kind });
-  await loadVaultPages(id);
+  const page = await apiJson(`/campaigns/${id}/vault/pages`, 'POST', { title, kind, folder: folder || null });
+  await loadVaultTree(id);
   return page;
 }
 

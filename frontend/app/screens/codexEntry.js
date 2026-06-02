@@ -48,7 +48,7 @@ export function CodexEntryScreen() {
 
   if (!entry) {
     const topbar = html`<${Topbar} crumbs=${[
-      { label: 'Campaigns', onClick: () => navigate('library') },
+      { label: 'Worlds', onClick: () => navigate('library') },
       { label: c.name, onClick: () => openCampaign(c.campaign_id) },
       { label: 'Codex', onClick: () => navigate('codex', { id: c.campaign_id }) },
     ]} />`;
@@ -62,7 +62,7 @@ export function CodexEntryScreen() {
   const mentions = mentionsOf(entry.name);
 
   const topbar = html`<${Topbar} crumbs=${[
-    { label: 'Campaigns', onClick: () => navigate('library') },
+    { label: 'Worlds', onClick: () => navigate('library') },
     { label: c.name, onClick: () => openCampaign(c.campaign_id) },
     { label: 'Codex', onClick: () => navigate('codex', { id: c.campaign_id }) },
     entry.name,

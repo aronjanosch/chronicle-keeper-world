@@ -8,7 +8,8 @@ import { Shell, Sidebar, Topbar } from '../shell.js';
 import { Btn, Empty, Icon, Markdown, Input, Textarea, Select } from '../ui.js';
 import { loadCodexEntries, createCodexEntry, openCampaign, updateCampaign,
   loadCampaignTags, renameCampaignTag, deleteCampaignTag,
-  loadVaultPages, createVaultPage, attachVault, pickVaultFolder } from '../actions.js';
+  loadVaultTree, createVaultPage, createVaultFolder, moveVaultEntry,
+  deleteVaultPage, deleteVaultFolder, attachVault, pickVaultFolder } from '../actions.js';
 
 export const KINDS = [
   { value: 'pc',      label: 'PC',      plural: 'PCs',      tone: 'gilt' },
@@ -154,7 +155,7 @@ function KindRail({ entries, selected, onSelect, notesCount, tagsCount }) {
     <${Row} value="all" icon="book" label="All entries" n=${counts.all} />
     ${KINDS.map((k) => html`<${Row} key=${k.value} value=${k.value} icon=${iconForKind(k.value)} label=${k.plural} n=${counts[k.value]} />`)}
     <div style=${{ height: 1, background: 'var(--rule-soft)', margin: '8px 8px' }} />
-    <div style=${{ padding: '0 8px 8px', fontSize: 10.5, fontWeight: 600, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--ink-faint)' }}>Campaign-wide</div>
+    <div style=${{ padding: '0 8px 8px', fontSize: 10.5, fontWeight: 600, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--ink-faint)' }}>World-wide</div>
     <${Row} value="notes" icon="feather" label="Freeform notes" n=${notesCount} />
     <${Row} value="tags" icon="tag" label="Tags" n=${tagsCount} />
   </aside>`;
@@ -173,7 +174,7 @@ function NoteEditor({ draft, onChange, onSave, onCancel, saving }) {
   return html`<div style=${{ display: 'flex', flexDirection: 'column', gap: 8, background: 'var(--surface-raised)', border: '1px solid var(--rule)', borderRadius: 8, padding: 12 }}>
     <${Input} value=${draft.title} onInput=${(v) => onChange({ ...draft, title: v })} placeholder="Title (optional) — e.g. Tone, House rules, Setting" />
     <${Textarea} value=${draft.body} onInput=${(v) => onChange({ ...draft, body: v })} rows=${6}
-      placeholder="Anything the model should know for every summary of this campaign." />
+      placeholder="Anything the model should know for every summary of this world." />
     <div style=${{ display: 'flex', justifyContent: 'flex-end', gap: 6 }}>
       <${Btn} kind="ghost" size="sm" disabled=${saving} onClick=${onCancel}>Cancel</${Btn}>
       <${Btn} kind="primary" size="sm" icon="check" disabled=${saving || !draft.body.trim()} onClick=${onSave}>Save</${Btn}>
@@ -199,7 +200,7 @@ function NotesSection({ campaign, standalone }) {
   const wrapStyle = standalone ? {} : { marginTop: 28, paddingTop: 20, borderTop: '1px solid var(--rule)' };
   return html`<div style=${wrapStyle}>
     ${standalone && html`<p style=${{ fontSize: 12.5, color: 'var(--ink-muted)', margin: '0 0 18px', lineHeight: 1.5, maxWidth: 640, fontFamily: 'var(--font-display)', fontStyle: 'italic' }}>
-      Campaign-wide context — tone, setting brief, house rules. Unlike entries, every note is passed verbatim
+      World-wide context — tone, setting brief, house rules. Unlike entries, every note is passed verbatim
       into every session summary, not just when a name comes up.
     </p>`}
     <div style=${{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 10 }}>
@@ -274,14 +275,14 @@ function TagsSection() {
   const tags = store.campaignTags || [];
 
   async function onDelete(tag) {
-    if (!window.confirm(`Remove "${tag}" from every session in this campaign?`)) return;
+    if (!window.confirm(`Remove "${tag}" from every session in this world?`)) return;
     try { await deleteCampaignTag(tag); } catch (e) { console.warn(e); }
   }
   async function onRename(from, to) { await renameCampaignTag(from, to); }
 
   return html`<div>
     <p style=${{ fontSize: 12.5, color: 'var(--ink-muted)', margin: '0 0 18px', lineHeight: 1.5, maxWidth: 640, fontFamily: 'var(--font-display)', fontStyle: 'italic' }}>
-      The campaign's tag vocabulary, pulled from every session's metadata. Rename to fix or merge a tag
+      The world's tag vocabulary, pulled from every session's metadata. Rename to fix or merge a tag
       across all sessions at once (rename onto an existing tag to merge them); delete to drop one everywhere.
       New summaries reuse this set, so keeping it tidy keeps future tags consistent.
     </p>
@@ -309,121 +310,304 @@ async function attachVaultFlow() {
   catch (e) { window.alert(`Could not attach vault: ${e.message}`); }
 }
 
+// Classic worldbuilding folders we ship the vocabulary for; anything else a GM
+// makes is a "custom" folder, tinted burgundy to show it's theirs.
+const CLASSIC_FOLDERS = new Set(['PCs', 'NPCs', 'Places', 'Factions', 'Items', 'Lore']);
+export const dirOf = (p) => { const i = p.lastIndexOf('/'); return i < 0 ? '' : p.slice(0, i); };
+export const baseName = (p) => { const i = p.lastIndexOf('/'); return i < 0 ? p : p.slice(i + 1); };
+
+function agoLabel(secs) {
+  if (!secs) return '';
+  const diff = Math.max(0, Math.floor(Date.now() / 1000) - secs);
+  if (diff < 90) return 'just now';
+  if (diff < 3600) return `${Math.round(diff / 60)}m ago`;
+  if (diff < 86400) return `${Math.round(diff / 3600)}h ago`;
+  return `${Math.round(diff / 86400)}d ago`;
+}
+
+// Nest the flat folder + page lists into a tree of { name, path, folders:Map, pages:[] }.
+export function buildTree(folders, pages) {
+  const root = { name: '', path: '', folders: new Map(), pages: [] };
+  const ensure = (relDir) => {
+    if (!relDir) return root;
+    let node = root, acc = '';
+    for (const part of relDir.split('/')) {
+      acc = acc ? `${acc}/${part}` : part;
+      if (!node.folders.has(part)) node.folders.set(part, { name: part, path: acc, folders: new Map(), pages: [] });
+      node = node.folders.get(part);
+    }
+    return node;
+  };
+  (folders || []).forEach(ensure);
+  (pages || []).forEach((p) => ensure(dirOf(p.path)).pages.push(p));
+  return root;
+}
+function nodeAt(root, path) {
+  if (!path) return root;
+  let node = root;
+  for (const part of path.split('/')) {
+    node = node?.folders.get(part);
+    if (!node) return null;
+  }
+  return node;
+}
+function countPages(node) {
+  let n = node.pages.length;
+  for (const c of node.folders.values()) n += countPages(c);
+  return n;
+}
+
+function glyphFor(kind, size = 16) {
+  const tone = toneForKind(kind);
+  const col = tone === 'ink-blue' ? 'var(--ink-blue)' : `var(--${tone})`;
+  return html`<div style=${{
+    width: size, height: size, borderRadius: 4, flex: '0 0 auto',
+    background: kind ? `var(--${tone}-50)` : 'var(--paper-deep)', color: kind ? col : 'var(--ink-muted)',
+    display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid rgba(0,0,0,.06)',
+  }}><${Icon} name=${iconForKind(kind)} size=${Math.round(size * 0.6)} /></div>`;
+}
+
+// One row in the tree (page leaf or folder), with hover action icons.
+function HoverActions({ children }) {
+  return html`<span class="ck-row-actions" style=${{ display: 'flex', gap: 2, opacity: 0, transition: 'opacity .12s' }}>${children}</span>`;
+}
+function ActionIcon({ icon, title, onClick }) {
+  return html`<span title=${title} onClick=${(e) => { e.stopPropagation(); onClick(); }}
+    style=${{ padding: 2, borderRadius: 3, color: 'var(--ink-faint)', cursor: 'pointer', display: 'flex' }}
+    onMouseEnter=${(e) => { e.currentTarget.style.color = 'var(--burgundy)'; }}
+    onMouseLeave=${(e) => { e.currentTarget.style.color = 'var(--ink-faint)'; }}><${Icon} name=${icon} size=${12} /></span>`;
+}
+function rowHover(on) {
+  return (e) => { const a = e.currentTarget.querySelector('.ck-row-actions'); if (a) a.style.opacity = on ? 1 : 0; };
+}
+
+function PageLeaf({ page, depth, active, onOpen, act }) {
+  const isActive = page.path === active;
+  return html`<div onClick=${onOpen} onMouseEnter=${rowHover(true)} onMouseLeave=${rowHover(false)}
+    style=${{
+      display: 'flex', alignItems: 'center', gap: 7, padding: '4px 8px', paddingLeft: 27 + depth * 14, borderRadius: 5, cursor: 'pointer',
+      background: isActive ? 'var(--burgundy-50)' : 'transparent',
+      boxShadow: isActive ? 'inset 2px 0 0 var(--burgundy)' : 'none',
+      color: isActive ? 'var(--burgundy-700)' : 'var(--ink-soft)',
+    }}>
+    ${glyphFor(page.kind, 16)}
+    <span style=${{ flex: 1, fontSize: 12.5, fontWeight: isActive ? 500 : 400, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>${page.title}</span>
+    <${HoverActions}>
+      <${ActionIcon} icon="edit" title="Rename" onClick=${() => act.renamePage(page)} />
+      <${ActionIcon} icon="arrow-r" title="Move to folder" onClick=${() => act.movePage(page)} />
+      <${ActionIcon} icon="trash" title="Delete" onClick=${() => act.deletePage(page)} />
+    </${HoverActions}>
+  </div>`;
+}
+
+function FolderNode({ node, depth, openSet, toggle, active, onOpen, act }) {
+  const open = openSet.has(node.path);
+  const custom = depth === 0 && !CLASSIC_FOLDERS.has(node.name);
+  const children = [...node.folders.values()].sort((a, b) => a.name.localeCompare(b.name));
+  return html`<div>
+    <div onClick=${() => toggle(node.path)} onMouseEnter=${rowHover(true)} onMouseLeave=${rowHover(false)}
+      style=${{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 8px', paddingLeft: 10 + depth * 14, borderRadius: 5, cursor: 'pointer', color: 'var(--ink-soft)' }}>
+      <${Icon} name=${open ? 'chev-d' : 'chev-r'} size=${11} className="ck-ink-faint" />
+      <${Icon} name="folder" size=${13} className=${custom ? 'ck-burgundy' : 'ck-ink-muted'} />
+      <span style=${{ flex: 1, fontSize: 12.5, fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>${node.name}</span>
+      <${HoverActions}>
+        <${ActionIcon} icon="plus" title="New page here" onClick=${() => act.newPage(node.path)} />
+        <${ActionIcon} icon="edit" title="Rename folder" onClick=${() => act.renameFolder(node)} />
+        <${ActionIcon} icon="trash" title="Delete (empty only)" onClick=${() => act.deleteFolder(node)} />
+      </${HoverActions}>
+      <span style=${{ fontFamily: 'var(--font-mono)', fontSize: 10.5, color: 'var(--ink-faint)' }}>${countPages(node) || ''}</span>
+    </div>
+    ${open && html`<div>
+      ${children.map((c) => html`<${FolderNode} key=${c.path} node=${c} depth=${depth + 1} openSet=${openSet} toggle=${toggle} active=${active} onOpen=${onOpen} act=${act} />`)}
+      ${node.pages.map((p) => html`<${PageLeaf} key=${p.path} page=${p} depth=${depth + 1} active=${active} onOpen=${() => onOpen(p)} act=${act} />`)}
+    </div>`}
+  </div>`;
+}
+
+export function FileTree({ campaign, tree, active, onOpen, act }) {
+  const [q, setQ] = useState('');
+  const [openSet, setOpenSet] = useState(() => new Set());
+  const toggle = (path) => setOpenSet((s) => { const n = new Set(s); n.has(path) ? n.delete(path) : n.add(path); return n; });
+  const query = q.trim().toLowerCase();
+  const allPages = [];
+  (function walk(node) { node.pages.forEach((p) => allPages.push(p)); node.folders.forEach(walk); })(tree);
+  const matches = query ? allPages.filter((p) => p.title.toLowerCase().includes(query) || p.path.toLowerCase().includes(query)) : null;
+  const rootFolders = [...tree.folders.values()].sort((a, b) => a.name.localeCompare(b.name));
+
+  return html`<aside style=${{ width: 256, flex: '0 0 256px', borderRight: '1px solid var(--rule)', background: 'var(--paper)', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+    <div style=${{ padding: '12px 12px 8px', borderBottom: '1px solid var(--rule-soft)' }}>
+      <${Input} value=${q} onInput=${setQ} placeholder="Search the vault…" style=${{ fontSize: 12.5 }} />
+    </div>
+    <div style=${{ flex: 1, overflow: 'auto', padding: '4px 6px 10px' }}>
+      <div style=${{ display: 'flex', alignItems: 'center', padding: '12px 10px 4px', fontSize: 10, fontWeight: 600, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--ink-faint)' }}>
+        <span style=${{ flex: 1 }}>Vault</span>
+        <span title="New page" onClick=${() => act.newPage('')} style=${{ color: 'var(--ink-faint)', cursor: 'pointer', padding: 2 }}><${Icon} name="plus" size=${12} /></span>
+        <span title="New folder" onClick=${() => act.newFolder('')} style=${{ color: 'var(--ink-faint)', cursor: 'pointer', padding: 2 }}><${Icon} name="folder" size=${12} /></span>
+      </div>
+      ${matches
+        ? (matches.length
+          ? matches.map((p) => html`<${PageLeaf} key=${p.path} page=${p} depth=${0} active=${active} onOpen=${() => onOpen(p)} act=${act} />`)
+          : html`<div style=${{ fontSize: 12, color: 'var(--ink-faint)', fontStyle: 'italic', padding: '6px 10px' }}>No matches.</div>`)
+        : html`<div>
+            ${rootFolders.map((c) => html`<${FolderNode} key=${c.path} node=${c} depth=${0} openSet=${openSet} toggle=${toggle} active=${active} onOpen=${onOpen} act=${act} />`)}
+            ${tree.pages.map((p) => html`<${PageLeaf} key=${p.path} page=${p} depth=${0} active=${active} onOpen=${() => onOpen(p)} act=${act} />`)}
+          </div>`}
+      <!-- Phase 2: Tags + Saved searches sections land with the .ck/index.db link+tag index. -->
+    </div>
+    <div onClick=${attachVaultFlow} title="Change vault folder (advanced)"
+      style=${{ borderTop: '1px solid var(--rule-soft)', padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 8, fontSize: 10.5, color: 'var(--ink-faint)', fontFamily: 'var(--font-mono)', cursor: 'pointer' }}>
+      <span style=${{ width: 6, height: 6, borderRadius: '50%', background: 'var(--moss)', flex: '0 0 auto' }} />
+      <span style=${{ flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', direction: 'rtl', textAlign: 'left' }}>${campaign.vault_path}</span>
+    </div>
+  </aside>`;
+}
+
 function PageCard({ page, onOpen }) {
   const tone = toneForKind(page.kind);
-  const col = tone === 'ink-blue' ? 'var(--ink-blue)' : `var(--${tone})`;
+  const folder = dirOf(page.path);
   return html`<div onClick=${onOpen} style=${{
-    background: 'var(--surface)', border: '1px solid var(--rule)', borderRadius: 6,
-    padding: 14, display: 'flex', flexDirection: 'column', gap: 10, cursor: 'pointer',
+    background: 'var(--surface)', border: '1px solid var(--rule)', borderRadius: 8,
+    padding: 14, display: 'flex', flexDirection: 'column', gap: 9, cursor: 'pointer', boxShadow: 'var(--shadow-soft)',
   }}
     onMouseEnter=${(e) => { e.currentTarget.style.borderColor = 'var(--rule-strong)'; }}
     onMouseLeave=${(e) => { e.currentTarget.style.borderColor = 'var(--rule)'; }}>
     <div style=${{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
-      <div style=${{
-        width: 32, height: 32, borderRadius: 6, flex: '0 0 auto',
-        background: `var(--${tone}-50)`, color: col,
-        display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid rgba(0,0,0,.06)',
-      }}>
-        <${Icon} name=${iconForKind(page.kind)} size=${14} />
-      </div>
+      ${glyphFor(page.kind, 34)}
       <div style=${{ flex: 1, minWidth: 0 }}>
-        <div style=${{ fontFamily: 'var(--font-display)', fontSize: 14.5, fontWeight: 500, color: 'var(--ink)', lineHeight: 1.2 }}>${page.title}</div>
-        <div style=${{ fontSize: 11, color: 'var(--ink-faint)', marginTop: 2, fontFamily: 'var(--font-mono)' }}>${page.path}</div>
+        <div style=${{ fontFamily: 'var(--font-display)', fontSize: 15, fontWeight: 500, color: 'var(--ink)', lineHeight: 1.2 }}>${page.title}</div>
+        <div style=${{ fontSize: 10.5, color: 'var(--ink-faint)', marginTop: 2, display: 'flex', alignItems: 'center', gap: 5, fontFamily: 'var(--font-mono)' }}>
+          <${Icon} name="folder" size=${10} /> ${folder || 'vault root'}
+        </div>
       </div>
     </div>
-    ${page.summary && html`<div style=${{ fontSize: 12.5, color: 'var(--ink-soft)', lineHeight: 1.45, fontFamily: 'var(--font-display)', fontStyle: 'italic' }}>${page.summary}</div>`}
+    ${page.summary && html`<div style=${{ fontSize: 12.5, color: 'var(--ink-soft)', lineHeight: 1.5, fontFamily: 'var(--font-display)', fontStyle: 'italic' }}>${page.summary}</div>`}
+    ${page.modified && html`<div style=${{ display: 'flex', alignItems: 'center', fontSize: 11, color: 'var(--ink-muted)' }}>
+      <span style=${{ flex: 1 }} />
+      <span style=${{ fontFamily: 'var(--font-mono)', fontSize: 10.5, color: 'var(--ink-faint)' }}>${agoLabel(page.modified)}</span>
+    </div>`}
   </div>`;
 }
 
-function NewPageForm({ onSubmit, onCancel }) {
-  const [title, setTitle] = useState('');
-  const [kind, setKind] = useState('npc');
-  const [err, setErr] = useState(null);
-  const [busy, setBusy] = useState(false);
-  async function submit() {
-    if (!title.trim()) { setErr('Title is required'); return; }
-    setBusy(true); setErr(null);
-    try { await onSubmit(title.trim(), kind); }
-    catch (e) { setErr(e.message); setBusy(false); }
-  }
-  return html`<div style=${{ background: 'var(--surface-raised)', border: '1px solid var(--rule)', borderRadius: 6, padding: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
-    <div style=${{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 8 }}>
-      <${Input} value=${title} onInput=${setTitle} placeholder="Page title (becomes the filename)" />
-      <${Select} value=${kind} onChange=${setKind} options=${KINDS.map((k) => ({ value: k.value, label: k.label }))} />
+function FolderCard({ node, onOpen }) {
+  const custom = !CLASSIC_FOLDERS.has(node.name);
+  const subN = node.folders.size;
+  const sub = subN ? `${subN} folder${subN === 1 ? '' : 's'} · ${countPages(node)} page${countPages(node) === 1 ? '' : 's'}` : `${countPages(node)} page${countPages(node) === 1 ? '' : 's'}`;
+  return html`<div onClick=${onOpen} style=${{ background: 'var(--surface)', border: '1px solid var(--rule)', borderRadius: 8, padding: '13px 15px', display: 'flex', alignItems: 'center', gap: 12, cursor: 'pointer', boxShadow: 'var(--shadow-soft)' }}>
+    <div style=${{ width: 36, height: 36, borderRadius: 7, flex: '0 0 auto', background: custom ? 'var(--burgundy-50)' : 'var(--paper-deep)', color: custom ? 'var(--burgundy)' : 'var(--ink-muted)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <${Icon} name="folder" size=${16} />
     </div>
-    ${err && html`<div style=${{ fontSize: 12, color: 'var(--burgundy-700)' }}>${err}</div>`}
-    <div style=${{ display: 'flex', justifyContent: 'flex-end', gap: 6 }}>
-      <${Btn} kind="ghost" size="sm" onClick=${onCancel}>Cancel</${Btn}>
-      <${Btn} kind="primary" size="sm" icon="check" disabled=${busy} onClick=${submit}>Create page</${Btn}>
+    <div style=${{ flex: 1, minWidth: 0 }}>
+      <div style=${{ fontFamily: 'var(--font-display)', fontSize: 14.5, fontWeight: 500, color: 'var(--ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>${node.name}</div>
+      <div style=${{ fontSize: 11, color: 'var(--ink-faint)', marginTop: 1 }}>${sub}</div>
     </div>
+    <${Icon} name="chev-r" size=${13} className="ck-ink-faint" />
   </div>`;
+}
+
+// The vault-mutation menu shared by the Explorer (codex) and the page editor.
+// `opts.afterDelete(path)` lets a caller (e.g. the page screen) react when the
+// page it is showing is deleted.
+export function makeVaultActions(campaign, folders, opts = {}) {
+  return {
+    newPage: (folder) => openModal('textPrompt', {
+      title: 'New page', label: 'Page title', placeholder: 'Lord Ulric Tannerheim', confirmLabel: 'Create page',
+      onSubmit: async (title) => { const page = await createVaultPage(title, 'npc', folder); navigate('page', { path: page.path }); },
+    }),
+    newFolder: (parent) => openModal('textPrompt', {
+      title: 'New folder', label: parent ? `New folder inside ${parent}` : 'New folder name', placeholder: 'Riddles', confirmLabel: 'Create folder',
+      onSubmit: (name) => createVaultFolder(parent ? `${parent}/${name}` : name),
+    }),
+    renamePage: (p) => openModal('textPrompt', {
+      title: 'Rename page', label: 'New title', initial: p.title, confirmLabel: 'Rename',
+      onSubmit: (title) => moveVaultEntry(p.path, dirOf(p.path) ? `${dirOf(p.path)}/${title}.md` : `${title}.md`),
+    }),
+    movePage: (p) => openModal('movePage', {
+      name: p.title, folders, current: dirOf(p.path),
+      onSubmit: (dest) => moveVaultEntry(p.path, dest ? `${dest}/${baseName(p.path)}` : baseName(p.path)),
+    }),
+    deletePage: (p) => openModal('confirm', {
+      title: 'Delete page', message: html`Delete ${html`<strong>${p.title}</strong>`}? The markdown file is removed from your vault. This cannot be undone.`,
+      confirmLabel: 'Delete page', onConfirm: async () => { await deleteVaultPage(p.path); if (opts.afterDelete) opts.afterDelete(p.path); },
+    }),
+    renameFolder: (n) => openModal('textPrompt', {
+      title: 'Rename folder', label: 'New folder name', initial: n.name, confirmLabel: 'Rename',
+      onSubmit: (name) => moveVaultEntry(n.path, dirOf(n.path) ? `${dirOf(n.path)}/${name}` : name),
+    }),
+    deleteFolder: (n) => openModal('confirm', {
+      title: 'Delete folder', message: html`Delete the folder ${html`<strong>${n.name}</strong>`}? Only empty folders can be deleted — move or delete its pages first.`,
+      confirmLabel: 'Delete folder', onConfirm: () => deleteVaultFolder(n.path),
+    }),
+  };
 }
 
 function VaultView({ campaign }) {
   const store = useStore();
-  const [adding, setAdding] = useState(false);
-  const [query, setQuery] = useState('');
+  const [sel, setSel] = useState('');           // current folder path ('' = vault root)
+  const [view, setView] = useState('folders');  // 'folders' | 'all'
+
+  useEffect(() => { loadVaultTree(campaign.campaign_id); }, [campaign.campaign_id]);
+
   const pages = store.vaultPages || [];
+  const folders = store.vaultFolders || [];
+  const tree = buildTree(folders, pages);
+  const cur = nodeAt(tree, sel) || tree;
 
-  useEffect(() => { loadVaultPages(campaign.campaign_id); }, [campaign.campaign_id]);
+  async function openPage(p) { navigate('page', { path: p.path }); }
+  const act = makeVaultActions(campaign, folders);
 
-  const q = query.trim().toLowerCase();
-  const filtered = pages.filter((p) => !q
-    || p.title.toLowerCase().includes(q) || (p.summary || '').toLowerCase().includes(q));
+  const total = pages.length;
+  const subFolders = [...cur.folders.values()].sort((a, b) => a.name.localeCompare(b.name));
+  const recent = [...pages].sort((a, b) => (b.modified || 0) - (a.modified || 0));
+  const crumbs = sel ? sel.split('/') : [];
 
-  async function onCreate(title, kind) {
-    const page = await createVaultPage(title, kind);
-    setAdding(false);
-    navigate('page', { path: page.path });
-  }
-
-  const groups = KINDS
-    .map((k) => ({ kind: k, items: filtered.filter((p) => p.kind === k.value) }))
-    .filter((g) => g.items.length);
-  const other = filtered.filter((p) => !KINDS.some((k) => k.value === p.kind));
-
-  return html`<div style=${{ padding: '20px 24px', overflow: 'auto' }}>
-    <div style=${{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16, flexWrap: 'wrap' }}>
-      <div style=${{ fontSize: 11.5, color: 'var(--ink-faint)', fontFamily: 'var(--font-mono)', display: 'flex', alignItems: 'center', gap: 6 }}>
-        <${Icon} name="folder" size=${12} /> ${campaign.vault_path}
+  return html`<div style=${{ display: 'flex', height: '100%', minHeight: 0 }}>
+    <${FileTree} campaign=${campaign} tree=${tree} active=${null} onOpen=${openPage} act=${act} />
+    <div style=${{ flex: 1, overflow: 'auto', padding: '22px 26px', minWidth: 0 }}>
+      <div style=${{ display: 'flex', alignItems: 'flex-end', gap: 12, marginBottom: 4 }}>
+        <div style=${{ maxWidth: 560 }}>
+          <div style=${{ fontSize: 10.5, fontWeight: 600, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--burgundy)' }}>The world wiki</div>
+          <h2 style=${{ fontFamily: 'var(--font-display)', fontSize: 24, fontWeight: 500, letterSpacing: '-0.015em', marginTop: 2 }}>
+            The Codex <span style=${{ color: 'var(--ink-faint)', fontFamily: 'var(--font-mono)', fontSize: 16 }}>${total}</span>
+          </h2>
+          <div style=${{ fontSize: 12.5, color: 'var(--ink-muted)', marginTop: 6, lineHeight: 1.5, fontFamily: 'var(--font-display)', fontStyle: 'italic' }}>
+            Markdown files in folders you arrange however you like. Folders are real on disk — yours to nest and rename.
+          </div>
+        </div>
+        <span style=${{ flex: 1 }} />
+        <div style=${{ display: 'flex', gap: 4, padding: 3, background: 'var(--surface)', border: '1px solid var(--rule)', borderRadius: 5 }}>
+          <button onClick=${() => setView('folders')} style=${{ padding: '5px 9px', borderRadius: 3, background: view === 'folders' ? 'var(--paper-deep)' : 'transparent', color: view === 'folders' ? 'var(--ink)' : 'var(--ink-muted)', fontSize: 12, display: 'flex', alignItems: 'center', gap: 5, cursor: 'pointer' }}><${Icon} name="grid" size=${12} /> Folders</button>
+          <button onClick=${() => { setView('all'); setSel(''); }} style=${{ padding: '5px 9px', borderRadius: 3, background: view === 'all' ? 'var(--paper-deep)' : 'transparent', color: view === 'all' ? 'var(--ink)' : 'var(--ink-muted)', fontSize: 12, display: 'flex', alignItems: 'center', gap: 5, cursor: 'pointer' }}><${Icon} name="scroll" size=${12} /> All pages</button>
+        </div>
       </div>
-      <span style=${{ flex: 1 }} />
-      <${Input} value=${query} onInput=${setQuery} placeholder="Search pages…" style=${{ width: 200 }} />
-      <${Btn} kind="ghost" size="sm" icon="folder" onClick=${attachVaultFlow}>Change folder</${Btn}>
-      <${Btn} kind="primary" size="sm" icon="plus" onClick=${() => setAdding(true)}>New page</${Btn}>
-    </div>
 
-    ${adding && html`<div style=${{ marginBottom: 14 }}><${NewPageForm} onSubmit=${onCreate} onCancel=${() => setAdding(false)} /></div>`}
+      ${total === 0
+        ? html`<div style=${{ marginTop: 24 }}><${Empty} icon="scroll" title="No pages yet">Create your first page or folder from the Vault panel — each page is a plain markdown file you fully own.</${Empty}></div>`
+        : view === 'all'
+          ? html`<div style=${{ marginTop: 18, display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 10 }}>
+              ${recent.map((p) => html`<${PageCard} key=${p.path} page=${p} onOpen=${() => openPage(p)} />`)}
+            </div>`
+          : html`<div>
+              <div style=${{ display: 'flex', alignItems: 'center', gap: 6, margin: '20px 0 10px', fontSize: 12.5, color: 'var(--ink-muted)' }}>
+                <span onClick=${() => setSel('')} style=${{ cursor: 'pointer', color: sel ? 'var(--burgundy)' : 'var(--ink-faint)', fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', fontSize: 10.5 }}>Vault</span>
+                ${crumbs.map((part, i) => html`<span key=${i} style=${{ display: 'flex', alignItems: 'center', gap: 6 }}><${Icon} name="chev-r" size=${10} className="ck-ink-faint" /><span onClick=${() => setSel(crumbs.slice(0, i + 1).join('/'))} style=${{ cursor: 'pointer' }}>${part}</span></span>`)}
+              </div>
 
-    ${pages.length === 0 && !adding
-      ? html`<${Empty} icon="scroll" title="No pages yet">
-          Create your first page — an NPC, a place, a faction. Each one is a plain
-          markdown file in your vault folder that you fully own.
-        </${Empty}>`
-      : filtered.length === 0
-        ? html`<div style=${{ fontSize: 12.5, color: 'var(--ink-faint)', fontStyle: 'italic', padding: '12px 0' }}>No pages match.</div>`
-        : html`<div>
-            ${groups.map((g) => html`<div key=${g.kind.value} style=${{ marginBottom: 22 }}>
-              <div style=${{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-                <${Icon} name=${iconForKind(g.kind.value)} size=${13} className="ck-ink-muted" />
-                <h3 style=${{ fontFamily: 'var(--font-display)', fontSize: 14, fontWeight: 500, margin: 0 }}>${g.kind.plural}</h3>
-                <span style=${{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--ink-faint)' }}>${g.items.length}</span>
+              <div style=${{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(228px, 1fr))', gap: 10 }}>
+                ${subFolders.map((n) => html`<${FolderCard} key=${n.path} node=${n} onOpen=${() => setSel(n.path)} />`)}
+                <div onClick=${() => newFolder(sel)} style=${{ border: '1.5px dashed var(--rule-strong)', borderRadius: 8, padding: '13px 15px', display: 'flex', alignItems: 'center', gap: 12, color: 'var(--ink-muted)', cursor: 'pointer' }}>
+                  <div style=${{ width: 36, height: 36, borderRadius: 7, flex: '0 0 auto', background: 'var(--paper-deep)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--burgundy)' }}><${Icon} name="plus" size=${16} /></div>
+                  <div style=${{ fontFamily: 'var(--font-display)', fontSize: 14, color: 'var(--ink-soft)' }}>New folder</div>
+                </div>
               </div>
-              <div style=${{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 10 }}>
-                ${g.items.map((p) => html`<${PageCard} key=${p.path} page=${p} onOpen=${() => navigate('page', { path: p.path })} />`)}
-              </div>
-            </div>`)}
-            ${other.length > 0 && html`<div style=${{ marginBottom: 22 }}>
-              <div style=${{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-                <${Icon} name="doc" size=${13} className="ck-ink-muted" />
-                <h3 style=${{ fontFamily: 'var(--font-display)', fontSize: 14, fontWeight: 500, margin: 0 }}>Other</h3>
-                <span style=${{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--ink-faint)' }}>${other.length}</span>
-              </div>
-              <div style=${{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 10 }}>
-                ${other.map((p) => html`<${PageCard} key=${p.path} page=${p} onOpen=${() => navigate('page', { path: p.path })} />`)}
-              </div>
+
+              ${cur.pages.length > 0 && html`<div>
+                <div style=${{ fontSize: 10.5, fontWeight: 600, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--ink-faint)', margin: '24px 0 10px' }}>${sel ? 'Pages here' : 'Pages at the root'}</div>
+                <div style=${{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 10 }}>
+                  ${cur.pages.map((p) => html`<${PageCard} key=${p.path} page=${p} onOpen=${() => openPage(p)} />`)}
+                </div>
+              </div>`}
             </div>`}
-          </div>`}
+    </div>
   </div>`;
 }
 

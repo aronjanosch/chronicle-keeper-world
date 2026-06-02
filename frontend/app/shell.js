@@ -28,6 +28,10 @@ function codexCount(_campaign) {
   if (count > 0) return count;
   return hasFreeform ? '●' : null;
 }
+function sessionsCount() {
+  const n = (store.campaignSessions || []).length;
+  return n > 0 ? n : null;
+}
 
 function NavHead({ children }) {
   return html`<div style=${{ padding: '14px 8px 4px', fontSize: 10.5, fontWeight: 600, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--ink-faint)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>${children}</div>`;
@@ -45,27 +49,29 @@ export function Sidebar({ variant = 'library', active, campaign }) {
       <${BrandMark} size=${30} />
       <div style=${{ lineHeight: 1.15 }}>
         <div style=${{ fontFamily: 'var(--font-display)', fontSize: 15, fontWeight: 500, letterSpacing: '-0.01em' }}>Chronicle Keeper</div>
-        <div style=${{ fontSize: 10, fontWeight: 500, color: 'var(--ink-faint)', letterSpacing: '0.08em', textTransform: 'uppercase', marginTop: 2 }}>v0.4 · local</div>
+        <div style=${{ fontSize: 10, fontWeight: 500, color: 'var(--ink-faint)', letterSpacing: '0.08em', textTransform: 'uppercase', marginTop: 2 }}>v0.5 · worldbuilding</div>
       </div>
     </div>
 
     ${variant === 'library' ? html`
       <${NavHead}>Library</${NavHead}>
-      <${NavItem} icon="book" label="Campaigns" active=${active === 'campaigns'} onClick=${() => navigate('library')} />
+      <${NavItem} icon="globe" label="Worlds" active=${active === 'campaigns' || active === 'worlds'} onClick=${() => navigate('library')} />
       <${NavHead}>Workshop</${NavHead}>
       <${NavItem} icon="cog" label="Settings" active=${active === 'settings'} onClick=${() => navigate('settings')} />
     ` : html`
-      <${NavItem} icon="chev-l" label="All campaigns" onClick=${() => navigate('library')} />
+      <${NavItem} icon="chev-l" label="All worlds" onClick=${() => navigate('library')} />
       <div style=${{ margin: '10px 4px 6px', padding: '10px', background: 'var(--surface)', border: '1px solid var(--rule-soft)', borderRadius: 6, display: 'flex', alignItems: 'center', gap: 10 }}>
         <${Sigil} ch=${campaign?.sigil || '?'} tone=${campaign?.tone || 'burgundy'} />
         <div style=${{ lineHeight: 1.2, minWidth: 0 }}>
-          <div style=${{ fontFamily: 'var(--font-display)', fontSize: 14, fontWeight: 500, color: 'var(--ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>${campaign?.name || 'Campaign'}</div>
+          <div style=${{ fontFamily: 'var(--font-display)', fontSize: 14, fontWeight: 500, color: 'var(--ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>${campaign?.name || 'World'}</div>
           <div style=${{ fontSize: 11, color: 'var(--ink-muted)', marginTop: 2 }}>${campaign?.system || '—'}</div>
         </div>
       </div>
-      <${NavHead}>${campaign?.name || 'Chronicle'}</${NavHead}>
+      <${NavHead}>World</${NavHead}>
       <${NavItem} icon="compass" label="Overview" active=${active === 'overview'} onClick=${() => navigate('campaign', { id: campaign?.campaign_id })} />
-      <${NavItem} icon="book" label="Codex" count=${codexCount(campaign)} active=${active === 'codex'} onClick=${() => navigate('codex', { id: campaign?.campaign_id })} />
+      <${NavItem} icon="book" label="The Codex" count=${codexCount(campaign)} active=${active === 'codex'} onClick=${() => navigate('codex', { id: campaign?.campaign_id })} />
+      <${NavHead}>Sessions</${NavHead}>
+      <${NavItem} icon="mic" label="Sessions" count=${sessionsCount()} active=${active === 'sessions'} onClick=${() => navigate('sessions', { id: campaign?.campaign_id })} />
       <${NavHead}>Workshop</${NavHead}>
       <${NavItem} icon="cog" label="Settings" active=${active === 'settings'} onClick=${() => navigate('settings')} />
     `}

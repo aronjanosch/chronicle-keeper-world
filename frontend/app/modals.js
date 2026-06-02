@@ -88,11 +88,11 @@ function CampaignModal({ edit }) {
     } catch (e) { setErr(e.message); setBusy(false); }
   }
 
-  return html`<${ModalShell} title=${edit ? 'Edit campaign' : 'New campaign'} footer=${html`
+  return html`<${ModalShell} title=${edit ? 'Edit world' : 'New world'} footer=${html`
     <${Btn} kind="ghost" onClick=${closeModal}>Cancel</${Btn}>
-    <${Btn} kind="primary" disabled=${busy} onClick=${save}>${busy ? 'Saving…' : (edit ? 'Save changes' : 'Create campaign')}</${Btn}>`}>
+    <${Btn} kind="primary" disabled=${busy} onClick=${save}>${busy ? 'Saving…' : (edit ? 'Save changes' : 'Create world')}</${Btn}>`}>
     ${err && html`<div style=${{ color: 'var(--burgundy-700)', fontSize: 13 }}>${err}</div>`}
-    <${Field} label="Campaign name"><${Input} value=${f.name} onInput=${(v) => set('name', v)} placeholder="The Iron Crown" /></${Field}>
+    <${Field} label="World name"><${Input} value=${f.name} onInput=${(v) => set('name', v)} placeholder="The Iron Crown" /></${Field}>
     <div style=${{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
       <${Field} label="System"><${Input} value=${f.system} onInput=${(v) => set('system', v)} placeholder="D&D 5e" /></${Field}>
       <${Field} label="Setting"><${Input} value=${f.setting} onInput=${(v) => set('setting', v)} placeholder="Forgotten Realms" /></${Field}>
@@ -102,9 +102,9 @@ function CampaignModal({ edit }) {
       </div></${Field}>
       <${Field} label="Default language"><${Input} value=${f.default_language} onInput=${(v) => set('default_language', v)} placeholder="en" mono /></${Field}>
     </div>
-    ${!edit && html`<${Field} label="Start session #" hint="First session number for this campaign."><${Input} type="number" value=${f.start} onInput=${(v) => set('start', v)} style=${{ width: 120 }} /></${Field}>`}
+    ${!edit && html`<${Field} label="Start session #" hint="First session number for this world."><${Input} type="number" value=${f.start} onInput=${(v) => set('start', v)} style=${{ width: 120 }} /></${Field}>`}
     <${Field} label="Players"><${PlayerRows} players=${f.players} onChange=${(p) => set('players', p)} /></${Field}>
-    <${Field} label="Additional information" hint="World frame or special campaign notes."><${Textarea} value=${f.extra_info} onInput=${(v) => set('extra_info', v)} rows=${3} /></${Field}>
+    <${Field} label="Additional information" hint="World frame or special notes."><${Textarea} value=${f.extra_info} onInput=${(v) => set('extra_info', v)} rows=${3} /></${Field}>
   </${ModalShell}>`;
 }
 
@@ -216,6 +216,53 @@ function ConfirmModal({ title = 'Are you sure?', message, confirmLabel = 'Delete
     <${Btn} kind="primary" disabled=${busy} onClick=${go}>${busy ? 'Working…' : confirmLabel}</${Btn}>`}>
     ${err && html`<div style=${{ color: 'var(--burgundy-700)', fontSize: 13 }}>${err}</div>`}
     <div style=${{ fontSize: 13.5, color: 'var(--ink-soft)', lineHeight: 1.5 }}>${message}</div>
+  </${ModalShell}>`;
+}
+
+// ── Generic single-line prompt (new folder, rename) ───────────────
+function TextPromptModal({ title, label, initial = '', placeholder, confirmLabel = 'Save', onSubmit }) {
+  const [val, setVal] = useState(initial);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState(null);
+  async function go() {
+    const v = val.trim();
+    if (!v) { setErr('Required'); return; }
+    setBusy(true); setErr(null);
+    try { await onSubmit(v); closeModal(); }
+    catch (e) { setErr(e.message); setBusy(false); }
+  }
+  return html`<${ModalShell} title=${title} footer=${html`
+    <${Btn} kind="ghost" disabled=${busy} onClick=${closeModal}>Cancel</${Btn}>
+    <${Btn} kind="primary" disabled=${busy} onClick=${go}>${busy ? 'Working…' : confirmLabel}</${Btn}>`}>
+    ${err && html`<div style=${{ color: 'var(--burgundy-700)', fontSize: 13 }}>${err}</div>`}
+    <${Field} label=${label}>
+      <${Input} value=${val} onInput=${setVal} placeholder=${placeholder}
+        onKeydown=${(e) => { if (e.key === 'Enter') go(); }} />
+    </${Field}>
+  </${ModalShell}>`;
+}
+
+// ── Move a page/folder into another folder ─────────────────────────
+function MovePageModal({ name, folders = [], current = '', onSubmit }) {
+  const [dest, setDest] = useState(current);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState(null);
+  const options = [{ value: '', label: 'Vault root' }, ...folders.map((f) => ({ value: f, label: f }))];
+  async function go() {
+    setBusy(true); setErr(null);
+    try { await onSubmit(dest); closeModal(); }
+    catch (e) { setErr(e.message); setBusy(false); }
+  }
+  return html`<${ModalShell} title=${html`Move <em style=${{ fontStyle: 'italic' }}>${name}</em>`} footer=${html`
+    <${Btn} kind="ghost" disabled=${busy} onClick=${closeModal}>Cancel</${Btn}>
+    <${Btn} kind="primary" disabled=${busy} onClick=${go}>${busy ? 'Moving…' : 'Move'}</${Btn}>`}>
+    ${err && html`<div style=${{ color: 'var(--burgundy-700)', fontSize: 13 }}>${err}</div>`}
+    <${Field} label="Destination folder">
+      <${Select} value=${dest} onChange=${setDest} options=${options} />
+    </${Field}>
+    <div style=${{ fontSize: 12, color: 'var(--ink-faint)', fontStyle: 'italic' }}>
+      Links to this page aren't rewritten yet — that arrives with wikilinks in Phase 2.
+    </div>
   </${ModalShell}>`;
 }
 
@@ -418,6 +465,8 @@ export function ModalHost({ modal }) {
     case 'promptTemplate': return html`<${PromptTemplateModal} ...${modal.props} />`;
     case 'viewer': return html`<${ViewerModal} ...${modal.props} />`;
     case 'confirm': return html`<${ConfirmModal} ...${modal.props} />`;
+    case 'textPrompt': return html`<${TextPromptModal} ...${modal.props} />`;
+    case 'movePage': return html`<${MovePageModal} ...${modal.props} />`;
     default: return null;
   }
 }

@@ -87,7 +87,7 @@ export function SummarizeScreen({ store }) {
   return html`<${Shell}
     sidebar=${html`<${Sidebar} variant="campaign" active="sessions" campaign=${c} />`}
     topbar=${html`<${Topbar} crumbs=${[
-      { label: 'Campaigns', onClick: () => navigate('library') },
+      { label: 'Worlds', onClick: () => navigate('library') },
       c && { label: c.name, onClick: () => openCampaign(c.campaign_id) },
       { label: `Session ${cam.session_number || '?'}`, onClick: () => navigate('session', { id: sess.session_id }) },
       'Summarize',
@@ -153,7 +153,7 @@ export function SummarizeScreen({ store }) {
             <${Icon} name="book" size=${14} />
             <span>${(store.codexEntries?.length || 0) > 0
               ? `${store.codexEntries.length} codex ${store.codexEntries.length === 1 ? 'entry is' : 'entries are'} fed to the summarizer automatically.`
-              : 'Codex entries for this campaign are fed to the summarizer automatically. None yet.'}</span>
+              : 'Codex entries for this world are fed to the summarizer automatically. None yet.'}</span>
           </div>
         </div>
       </div>

@@ -9,7 +9,7 @@ export const store = {
   apiToken: null,
   shellMode: false,       // true when the Tauri shell injected the API base (browser-dev → false)
 
-  // routing: { name: 'library'|'campaign'|'session'|'newSession'|'summarize'|'settings'|'codex'|'codexEntry'|'page', params }
+  // routing: { name: 'library'|'campaign'|'sessions'|'session'|'newSession'|'summarize'|'settings'|'codex'|'codexEntry'|'page', params }
   route: { name: 'library', params: {} },
 
   // data
@@ -19,6 +19,7 @@ export const store = {
   campaignSessions: [],   // sessions of current campaign
   codexEntries: [],       // structured codex entries for current campaign
   vaultPages: [],
+  vaultFolders: [],
   currentPage: null,
   session: null,          // current session detail (campaign{}, tracks[], speakers[], metadata{})
   transcripts: [],

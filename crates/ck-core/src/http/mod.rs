@@ -66,13 +66,22 @@ pub fn router(state: AppState) -> Router {
         .route("/campaigns/:id/codex/import/commit", post(codex::commit))
         // vault pages
         .route("/campaigns/:id/vault", axum::routing::put(vault::attach))
+        .route("/campaigns/:id/vault/tree", get(vault::list_tree))
+        .route("/campaigns/:id/vault/folders", post(vault::create_folder))
+        .route(
+            "/campaigns/:id/vault/folders/*folder",
+            axum::routing::delete(vault::delete_folder),
+        )
+        .route("/campaigns/:id/vault/move", post(vault::move_entry))
         .route(
             "/campaigns/:id/vault/pages",
             get(vault::list_pages).post(vault::create_page),
         )
         .route(
             "/campaigns/:id/vault/pages/*page",
-            get(vault::read_page).put(vault::write_page),
+            get(vault::read_page)
+                .put(vault::write_page)
+                .delete(vault::delete_page),
         )
         // sessions
         .route("/sessions", get(sessions::list))

@@ -170,7 +170,7 @@ export function NewSessionScreen({ store }) {
   return html`<${Shell}
     sidebar=${html`<${Sidebar} variant="campaign" active="sessions" campaign=${c} />`}
     topbar=${html`<${Topbar} crumbs=${[
-      { label: 'Campaigns', onClick: () => navigate('library') },
+      { label: 'Worlds', onClick: () => navigate('library') },
       c && { label: c.name, onClick: () => openCampaign(c.campaign_id) },
       attachId ? 'Add recording' : 'New session',
     ]} right=${html`

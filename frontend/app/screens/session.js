@@ -188,7 +188,7 @@ export function SessionScreen({ store }) {
   return html`<${Shell}
     sidebar=${html`<${Sidebar} variant="campaign" active="sessions" campaign=${c} />`}
     topbar=${html`<${Topbar} crumbs=${[
-      { label: 'Campaigns', onClick: () => navigate('library') },
+      { label: 'Worlds', onClick: () => navigate('library') },
       c && { label: c.name, onClick: () => openCampaign(c.campaign_id) },
       `Session ${cam.session_number || '?'}`,
     ]} right=${html`

@@ -13,6 +13,7 @@ import { SettingsScreen } from './screens/settings.js';
 import { CodexScreen } from './screens/codex.js';
 import { CodexEntryScreen } from './screens/codexEntry.js';
 import { PageScreen } from './screens/page.js';
+import { SessionsScreen } from './screens/sessions.js';
 
 function OpBanner({ op }) {
   if (!op) return null;
@@ -43,6 +44,7 @@ function App() {
     case 'summarize': screen = html`<${SummarizeScreen} store=${store} />`; break;
     case 'settings': screen = html`<${SettingsScreen} store=${store} />`; break;
     case 'codex': screen = html`<${CodexScreen} store=${store} />`; break;
+    case 'sessions': screen = html`<${SessionsScreen} store=${store} />`; break;
     case 'codexEntry': screen = html`<${CodexEntryScreen} store=${store} />`; break;
     case 'page': screen = html`<${PageScreen} store=${store} />`; break;
     default: screen = html`<${LibraryScreen} store=${store} />`;

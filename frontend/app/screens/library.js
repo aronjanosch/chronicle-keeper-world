@@ -67,15 +67,15 @@ function CampaignCard({ c }) {
 export function LibraryScreen({ store }) {
   const [q, setQ] = useState('');
   const campaigns = store.campaigns.filter((c) => !q || (c.name || '').toLowerCase().includes(q.toLowerCase()));
-  const newBtn = html`<${Btn} kind="primary" icon="plus" onClick=${() => openModal('campaign', {})}>New campaign</${Btn}>`;
+  const newBtn = html`<${Btn} kind="primary" icon="plus" onClick=${() => openModal('campaign', {})}>New world</${Btn}>`;
 
   return html`<${Shell}
-    sidebar=${html`<${Sidebar} variant="library" active="campaigns" />`}
-    topbar=${html`<${Topbar} crumbs=${['Library', 'Campaigns']} right=${html`
+    sidebar=${html`<${Sidebar} variant="library" active="worlds" />`}
+    topbar=${html`<${Topbar} crumbs=${['Library', 'Worlds']} right=${html`
       <div style=${{ display: 'flex', gap: 8, alignItems: 'center' }}>
         <div style=${{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 10px', background: 'var(--surface)', border: '1px solid var(--rule)', borderRadius: 4, color: 'var(--ink-muted)', fontSize: 12.5, minWidth: 220 }}>
           <${Icon} name="search" size=${13} />
-          <input value=${q} onInput=${(e) => setQ(e.target.value)} placeholder="Search campaigns…"
+          <input value=${q} onInput=${(e) => setQ(e.target.value)} placeholder="Search worlds…"
             style=${{ flex: 1, border: 'none', background: 'transparent', outline: 'none', fontSize: 12.5, color: 'var(--ink)' }} />
         </div>
         ${newBtn}
@@ -88,8 +88,8 @@ export function LibraryScreen({ store }) {
       </h1>
       <div style=${{ fontSize: 13, color: 'var(--ink-muted)', marginTop: 6, fontFamily: 'var(--font-display)', fontStyle: 'italic' }}>
         ${store.campaigns.length
-          ? `${store.campaigns.length} campaign${store.campaigns.length === 1 ? '' : 's'} in play.`
-          : 'No campaigns yet — begin your first chronicle.'}
+          ? `${store.campaigns.length} world${store.campaigns.length === 1 ? '' : 's'} in play.`
+          : 'No worlds yet — begin your first chronicle.'}
       </div>
     </div>
 
@@ -108,7 +108,7 @@ export function LibraryScreen({ store }) {
             </div>
             <div style=${{ fontFamily: 'var(--font-display)', fontSize: 16, fontWeight: 500, color: 'var(--ink-soft)' }}>Begin a new chronicle</div>
             <div style=${{ fontSize: 12.5, color: 'var(--ink-muted)', fontStyle: 'italic', fontFamily: 'var(--font-display)', textAlign: 'center' }}>
-              Name the campaign, the system, the world, the company that will tell it.
+              Name the world, the system, the setting, the company that will tell it.
             </div>
           </div>
         </div>`}
