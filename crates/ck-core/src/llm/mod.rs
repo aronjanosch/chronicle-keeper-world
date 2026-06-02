@@ -8,6 +8,7 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use chrono::Utc;
+use futures_util::StreamExt;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::{json, Value};
 
@@ -91,7 +92,7 @@ pub static REGISTRY: &[Provider] = &[
         needs_key: true,
         default_api_base: Some("https://api.anthropic.com"),
         models: &[
-            "claude-opus-4-7",
+            "claude-opus-4-8",
             "claude-sonnet-4-6",
             "claude-haiku-4-5-20251001",
         ],
@@ -272,6 +273,7 @@ pub struct Resolved {
     pub model: String,
     pub timeout: u64,
     pub needs_key: bool,
+    pub num_ctx_max: Option<u32>,
 }
 
 /// Resolve provider/model/base/timeout for a call, layering per-request overrides
@@ -332,6 +334,10 @@ pub fn resolve(
         .and_then(|s| s.parse().ok())
         .unwrap_or(120);
 
+    let num_ctx_max = (p.transport == Transport::Ollama)
+        .then(|| cfg.get("ollama_num_ctx_max").and_then(|s| s.parse().ok()))
+        .flatten();
+
     Ok(Resolved {
         provider,
         transport: p.transport,
@@ -340,7 +346,27 @@ pub fn resolve(
         model,
         timeout,
         needs_key: p.needs_key,
+        num_ctx_max,
     })
+}
+
+/// Rough token estimate. ~3 chars/token is conservative for German + lots of
+/// proper names (English averages ~4); undershooting here silently truncates.
+fn approx_tokens(chars: usize) -> usize {
+    chars / 3
+}
+
+/// Size the Ollama context window to the prompt: enough to hold the whole
+/// prompt plus room to generate, rounded up to a common bucket, clamped to the
+/// caller's memory ceiling. Below 2048 Ollama silently truncates long prompts.
+fn fit_num_ctx(prompt_chars: usize, max: u32) -> u32 {
+    let needed = approx_tokens(prompt_chars) as u32 + 2048;
+    for bucket in [4096u32, 8192, 16384, 32768, 65536, 131072] {
+        if bucket >= needed {
+            return bucket.min(max);
+        }
+    }
+    max
 }
 
 // ---- chat client ----
@@ -358,6 +384,7 @@ pub async fn chat(
     prompt: &str,
     timeout_secs: u64,
     json_mode: bool,
+    num_ctx_max: Option<u32>,
 ) -> Result<String, LlmError> {
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(timeout_secs))
@@ -374,6 +401,19 @@ pub async fn chat(
             if json_mode {
                 body["format"] = json!("json");
             }
+            let num_ctx = num_ctx_max.map(|max| fit_num_ctx(prompt.len(), max));
+            if let Some(n) = num_ctx {
+                body["options"] = json!({ "num_ctx": n });
+            }
+            tracing::info!(
+                model,
+                prompt_chars = prompt.len(),
+                approx_prompt_tokens = approx_tokens(prompt.len()),
+                num_ctx,
+                num_ctx_max,
+                json_mode,
+                "ollama chat request"
+            );
             let url = format!("{}/api/chat", api_base.trim_end_matches('/'));
             // Local Ollama needs no auth (empty key → no header); Ollama Cloud
             // (ollama.com) authenticates with a Bearer key.
@@ -384,6 +424,24 @@ pub async fn chat(
             let resp = req.send().await.map_err(|e| LlmError(e.to_string()))?;
             let resp = error_for_status(resp).await?;
             let v: Value = resp.json().await.map_err(|e| LlmError(e.to_string()))?;
+            let prompt_eval_count = v.get("prompt_eval_count").and_then(Value::as_u64);
+            let eval_count = v.get("eval_count").and_then(Value::as_u64);
+            let done_reason = v.get("done_reason").and_then(Value::as_str);
+            tracing::info!(
+                prompt_eval_count,
+                eval_count,
+                done_reason,
+                "ollama chat response"
+            );
+            if let (Some(sent), Some(n)) = (prompt_eval_count, num_ctx) {
+                if sent >= u64::from(n) {
+                    tracing::warn!(
+                        prompt_eval_count = sent,
+                        num_ctx = n,
+                        "prompt hit the context ceiling — transcript truncated; raise ollama_num_ctx_max if VRAM allows"
+                    );
+                }
+            }
             Ok(v.get("message")
                 .and_then(|m| m.get("content"))
                 .and_then(Value::as_str)
@@ -449,6 +507,218 @@ pub async fn chat(
             "This provider's native client is not yet available in this build.".into(),
         )),
     }
+}
+
+/// One streamed line yields zero or more text chunks plus an end-of-stream flag.
+struct LineOutcome {
+    token: Option<String>,
+    done: bool,
+}
+
+/// Parse a single decoded transport line into a text chunk / done signal.
+/// Ollama emits bare JSON objects per line; OpenAI-compat and Anthropic use SSE
+/// `data:` framing. Returns `Err` on an explicit error event in the stream.
+fn parse_stream_line(transport: Transport, line: &str) -> Result<LineOutcome, LlmError> {
+    let none = LineOutcome {
+        token: None,
+        done: false,
+    };
+    match transport {
+        Transport::Ollama => {
+            let Ok(v) = serde_json::from_str::<Value>(line) else {
+                return Ok(none);
+            };
+            let token = v
+                .get("message")
+                .and_then(|m| m.get("content"))
+                .and_then(Value::as_str)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string);
+            let done = v.get("done").and_then(Value::as_bool).unwrap_or(false);
+            Ok(LineOutcome { token, done })
+        }
+        Transport::OpenAiCompat | Transport::Anthropic => {
+            // SSE: ignore everything but `data:` lines; `event:`/comment/blank skipped.
+            let Some(data) = line.strip_prefix("data:") else {
+                return Ok(none);
+            };
+            let data = data.trim();
+            // OpenAI terminates the stream with a literal `[DONE]` sentinel.
+            if data == "[DONE]" {
+                return Ok(LineOutcome {
+                    token: None,
+                    done: true,
+                });
+            }
+            let Ok(v) = serde_json::from_str::<Value>(data) else {
+                return Ok(none);
+            };
+            if transport == Transport::OpenAiCompat {
+                let token = v
+                    .get("choices")
+                    .and_then(|c| c.get(0))
+                    .and_then(|c| c.get("delta"))
+                    .and_then(|d| d.get("content"))
+                    .and_then(Value::as_str)
+                    .filter(|s| !s.is_empty())
+                    .map(str::to_string);
+                Ok(LineOutcome { token, done: false })
+            } else {
+                // Anthropic typed events. Text arrives as content_block_delta /
+                // text_delta; message_stop ends it; an error event aborts.
+                match v.get("type").and_then(Value::as_str) {
+                    Some("error") => {
+                        let msg = v
+                            .get("error")
+                            .and_then(|e| e.get("message"))
+                            .and_then(Value::as_str)
+                            .unwrap_or("Anthropic stream error");
+                        Err(LlmError(msg.to_string()))
+                    }
+                    Some("message_stop") => Ok(LineOutcome {
+                        token: None,
+                        done: true,
+                    }),
+                    Some("content_block_delta") => {
+                        let token = v
+                            .get("delta")
+                            .filter(|d| {
+                                d.get("type").and_then(Value::as_str) == Some("text_delta")
+                            })
+                            .and_then(|d| d.get("text"))
+                            .and_then(Value::as_str)
+                            .filter(|s| !s.is_empty())
+                            .map(str::to_string);
+                        Ok(LineOutcome { token, done: false })
+                    }
+                    _ => Ok(none),
+                }
+            }
+        }
+        Transport::Unsupported => Ok(none),
+    }
+}
+
+/// Streaming chat completion. Calls `on_token` with each text chunk as it
+/// arrives and returns the full accumulated text. All transports stream
+/// incrementally: Ollama via NDJSON (`stream:true`), OpenAI-compat and Anthropic
+/// via their native SSE deltas. Never used for JSON-mode calls — partial JSON is
+/// unparseable, so the metadata pass stays on the blocking `chat`.
+pub async fn chat_stream<F: FnMut(&str)>(
+    transport: Transport,
+    api_base: &str,
+    api_key: &str,
+    model: &str,
+    prompt: &str,
+    timeout_secs: u64,
+    num_ctx_max: Option<u32>,
+    mut on_token: F,
+) -> Result<String, LlmError> {
+    if transport == Transport::Unsupported {
+        return Err(LlmError(
+            "This provider's native client is not yet available in this build.".into(),
+        ));
+    }
+
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(timeout_secs))
+        .build()
+        .map_err(|e| LlmError(e.to_string()))?;
+
+    // Build the per-transport streaming request.
+    let num_ctx = (transport == Transport::Ollama)
+        .then(|| num_ctx_max.map(|max| fit_num_ctx(prompt.len(), max)))
+        .flatten();
+    let req = match transport {
+        Transport::Ollama => {
+            let mut body = json!({
+                "model": model,
+                "messages": [{ "role": "user", "content": prompt }],
+                "stream": true,
+            });
+            if let Some(n) = num_ctx {
+                body["options"] = json!({ "num_ctx": n });
+            }
+            tracing::info!(
+                model,
+                prompt_chars = prompt.len(),
+                approx_prompt_tokens = approx_tokens(prompt.len()),
+                num_ctx,
+                num_ctx_max,
+                "ollama chat stream request"
+            );
+            let url = format!("{}/api/chat", api_base.trim_end_matches('/'));
+            let mut req = client.post(url).json(&body);
+            if !api_key.is_empty() {
+                req = req.bearer_auth(api_key);
+            }
+            req
+        }
+        Transport::OpenAiCompat => {
+            let body = json!({
+                "model": model,
+                "messages": [{ "role": "user", "content": prompt }],
+                "stream": true,
+            });
+            let url = format!("{}/chat/completions", api_base.trim_end_matches('/'));
+            let mut req = client.post(url).json(&body);
+            if !api_key.is_empty() {
+                req = req.bearer_auth(api_key);
+            }
+            req
+        }
+        Transport::Anthropic => {
+            let base = if api_base.is_empty() {
+                "https://api.anthropic.com"
+            } else {
+                api_base
+            };
+            let body = json!({
+                "model": model,
+                "max_tokens": 8192,
+                "stream": true,
+                "messages": [{ "role": "user", "content": prompt }],
+            });
+            let url = format!("{}/v1/messages", base.trim_end_matches('/'));
+            client
+                .post(url)
+                .header("x-api-key", api_key)
+                .header("anthropic-version", "2023-06-01")
+                .json(&body)
+        }
+        Transport::Unsupported => unreachable!(),
+    };
+
+    let resp = req.send().await.map_err(|e| LlmError(e.to_string()))?;
+    let resp = error_for_status(resp).await?;
+
+    let mut stream = resp.bytes_stream();
+    // Chunks split anywhere, so buffer raw bytes and only decode a line once it's
+    // complete (keeps multibyte UTF-8 intact across chunk boundaries). Both NDJSON
+    // and SSE are newline-delimited, so a line-oriented reader serves all three.
+    let mut buf: Vec<u8> = Vec::new();
+    let mut full = String::new();
+    'outer: while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|e| LlmError(e.to_string()))?;
+        buf.extend_from_slice(&chunk);
+        while let Some(pos) = buf.iter().position(|&b| b == b'\n') {
+            let line: Vec<u8> = buf.drain(..=pos).collect();
+            let line = String::from_utf8_lossy(&line);
+            let line = line.trim();
+            if line.is_empty() {
+                continue;
+            }
+            let outcome = parse_stream_line(transport, line)?;
+            if let Some(tok) = outcome.token {
+                full.push_str(&tok);
+                on_token(&tok);
+            }
+            if outcome.done {
+                break 'outer;
+            }
+        }
+    }
+    Ok(full.trim().to_string())
 }
 
 /// Cheap reachability probe. For Ollama we hit `/api/tags` (instant, no model
@@ -523,5 +793,59 @@ fn extract_openai_content(v: &Value) -> String {
             .trim()
             .to_string(),
         _ => String::new(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tok(transport: Transport, line: &str) -> Option<String> {
+        parse_stream_line(transport, line).unwrap().token
+    }
+    fn done(transport: Transport, line: &str) -> bool {
+        parse_stream_line(transport, line).unwrap().done
+    }
+
+    #[test]
+    fn ollama_stream_line() {
+        let mid = r#"{"message":{"role":"assistant","content":"Hallo"},"done":false}"#;
+        assert_eq!(tok(Transport::Ollama, mid).as_deref(), Some("Hallo"));
+        assert!(!done(Transport::Ollama, mid));
+        let end = r#"{"message":{"content":""},"done":true,"done_reason":"stop"}"#;
+        assert_eq!(tok(Transport::Ollama, end), None);
+        assert!(done(Transport::Ollama, end));
+    }
+
+    #[test]
+    fn openai_stream_line() {
+        let chunk = r#"data: {"choices":[{"delta":{"content":"Hi"}}]}"#;
+        assert_eq!(tok(Transport::OpenAiCompat, chunk).as_deref(), Some("Hi"));
+        // Role-only opening chunk carries no content.
+        let role = r#"data: {"choices":[{"delta":{"role":"assistant"}}]}"#;
+        assert_eq!(tok(Transport::OpenAiCompat, role), None);
+        // Terminator.
+        assert!(done(Transport::OpenAiCompat, "data: [DONE]"));
+        assert!(!done(Transport::OpenAiCompat, chunk));
+    }
+
+    #[test]
+    fn anthropic_stream_line() {
+        let delta = r#"data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hello"}}"#;
+        assert_eq!(tok(Transport::Anthropic, delta).as_deref(), Some("Hello"));
+        // Non-text deltas (e.g. input_json_delta) are not summary text.
+        let json_delta = r#"data: {"type":"content_block_delta","delta":{"type":"input_json_delta","partial_json":"{"}}"#;
+        assert_eq!(tok(Transport::Anthropic, json_delta), None);
+        // message_stop ends the stream; event:/ping/blank lines are inert.
+        assert!(done(Transport::Anthropic, r#"data: {"type":"message_stop"}"#));
+        assert!(!done(Transport::Anthropic, "event: message_stop"));
+        assert_eq!(tok(Transport::Anthropic, r#"data: {"type":"ping"}"#), None);
+    }
+
+    #[test]
+    fn anthropic_stream_error_propagates() {
+        let err = r#"data: {"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}"#;
+        let res = parse_stream_line(Transport::Anthropic, err);
+        assert!(matches!(res, Err(LlmError(m)) if m == "Overloaded"));
     }
 }
