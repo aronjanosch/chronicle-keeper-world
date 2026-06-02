@@ -83,11 +83,30 @@ async fn run_summarize(
             .map(campaigns::codex_freeform_text)
             .unwrap_or_default();
         let gm = campaign.as_ref().map(|c| c.gm.clone()).unwrap_or_default();
-        let codex_entries = campaign_id
-            .as_deref()
-            .map(|cid| codex::list_entries(conn, cid))
-            .transpose()?
-            .unwrap_or_default();
+        // Files-as-truth: read the glossary one-liners from vault page `summary:`
+        // frontmatter. Fall back to the legacy codex_entries table when a campaign
+        // has no vault yet (un-migrated session-notes-only).
+        let codex_entries = match campaign.as_ref().and_then(|c| c.vault_path.as_deref()) {
+            Some(vp) => crate::vault::list_pages(std::path::Path::new(vp))
+                .unwrap_or_default()
+                .into_iter()
+                .map(|p| crate::models::CodexEntry {
+                    entry_id: String::new(),
+                    campaign_id: campaign_id.clone().unwrap_or_default(),
+                    name: p.title,
+                    kind: p.kind.unwrap_or_else(|| "lore".into()),
+                    body: p.summary,
+                    detail: String::new(),
+                    source: String::new(),
+                    updated_at: String::new(),
+                })
+                .collect(),
+            None => campaign_id
+                .as_deref()
+                .map(|cid| codex::list_entries(conn, cid))
+                .transpose()?
+                .unwrap_or_default(),
+        };
         // Campaign tag vocabulary so metadata extraction reuses canonical tags
         // instead of inventing a fresh (differently-cased / English) set.
         let known_tags = campaign_id
@@ -400,9 +419,13 @@ fn replace_metadata(
     )?;
 
     // Promote extracted names into the campaign codex (auto-extract; never
-    // overwrites a row the user already touched — `upsert_auto` is a no-op when
-    // the natural key exists).
+    // overwrites what the user already has). Files-as-truth: write a stub page
+    // when the campaign has a vault; otherwise the legacy upsert_auto row.
     if let Some(cid) = campaign_id.as_deref().filter(|s| !s.is_empty()) {
+        let vault = campaigns::get_campaign(conn, cid)
+            .ok()
+            .flatten()
+            .and_then(|c| c.vault_path);
         if let Value::Object(map) = metadata {
             for (key, kind) in [
                 ("characters", "npc"),
@@ -414,7 +437,14 @@ fn replace_metadata(
                 };
                 for v in list {
                     if let Some(name) = extract_name(v) {
-                        let _ = codex::upsert_auto(conn, cid, &name, kind);
+                        match &vault {
+                            Some(vp) => {
+                                crate::vault::create_stub(std::path::Path::new(vp), &name, kind);
+                            }
+                            None => {
+                                let _ = codex::upsert_auto(conn, cid, &name, kind);
+                            }
+                        }
                     }
                 }
             }

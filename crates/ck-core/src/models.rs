@@ -27,6 +27,7 @@ pub struct CampaignDetail {
     pub recap: String,
     /// When `recap` was last generated (local naive timestamp; empty if never).
     pub recap_updated_at: String,
+    pub vault_path: Option<String>,
 }
 
 #[derive(Debug, Serialize)]

@@ -17,6 +17,7 @@ pub mod sync;
 pub mod transcript_format;
 #[cfg(feature = "transcription")]
 pub mod transcription;
+pub mod vault;
 
 use std::net::SocketAddr;
 

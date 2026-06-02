@@ -182,6 +182,60 @@ export async function commitCodexImport(entries) {
   return r;
 }
 
+// ── Vault pages ───────────────────────────────────────────────────
+// Native folder picker in the Tauri shell; null in browser-dev (path typed instead).
+export async function pickVaultFolder() {
+  const dialog = window.__TAURI__?.dialog;
+  if (!dialog?.open) return null;
+  const picked = await dialog.open({ directory: true, multiple: false, title: 'Choose a vault folder' });
+  return typeof picked === 'string' ? picked : null;
+}
+
+export async function attachVault(path) {
+  const id = store.campaign.campaign_id;
+  const campaign = decorateCampaign(await apiJson(`/campaigns/${id}/vault`, 'PUT', { path: path || null }));
+  setState({ campaign, vaultPages: [], currentPage: null });
+  await loadCampaigns();
+  if (campaign.vault_path) await loadVaultPages(id);
+  return campaign;
+}
+
+export async function loadVaultPages(campaignId) {
+  const id = campaignId || store.campaign?.campaign_id;
+  if (!id) return [];
+  const r = await apiFetch(`/campaigns/${id}/vault/pages`).catch((e) => {
+    console.warn('loadVaultPages failed:', e);
+    return { pages: [] };
+  });
+  setState({ vaultPages: r.pages || [] });
+  return r.pages || [];
+}
+
+export async function readVaultPage(path) {
+  const id = store.campaign.campaign_id;
+  const page = await apiFetch(`/campaigns/${id}/vault/pages/${encodeURI(path)}`);
+  setState({ currentPage: page });
+  return page;
+}
+
+export async function saveVaultPage(path, content) {
+  const id = store.campaign.campaign_id;
+  const page = await apiJson(`/campaigns/${id}/vault/pages/${encodeURI(path)}`, 'PUT', { content });
+  setState({
+    currentPage: store.currentPage?.path === path ? page : store.currentPage,
+    vaultPages: (store.vaultPages || []).map((p) => (p.path === path
+      ? { path: page.path, title: page.title, kind: page.kind, summary: page.summary } : p)),
+  });
+  return page;
+}
+
+export async function createVaultPage(title, kind) {
+  const id = store.campaign.campaign_id;
+  const page = await apiJson(`/campaigns/${id}/vault/pages`, 'POST', { title, kind });
+  await loadVaultPages(id);
+  return page;
+}
+
 // ── Sessions ──────────────────────────────────────────────────────
 export async function loadSession(id) {
   setState({ loading: true, error: null });

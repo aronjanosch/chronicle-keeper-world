@@ -84,6 +84,30 @@ button { font-family: inherit; }
 }
 .ck-prose a.ck-codex-link:hover { border-bottom-color: var(--burgundy); }
 
+/* GFM tables + code blocks (vault pages) */
+.ck-prose table { border-collapse: collapse; margin: 0 0 14px; font-size: 14px; width: 100%; }
+.ck-prose th, .ck-prose td { border: 1px solid var(--rule); padding: 6px 10px; text-align: left; }
+.ck-prose th { background: var(--surface-inset); font-weight: 600; }
+.ck-prose pre {
+  background: var(--surface-inset); border: 1px solid var(--rule); border-radius: 6px;
+  padding: 12px 14px; overflow: auto; margin: 0 0 14px;
+}
+.ck-prose pre code { background: none; padding: 0; font-size: 12.5px; }
+.ck-prose ul li.task-list-item { list-style: none; margin-left: -18px; }
+
+/* Callouts: > [!type] */
+.ck-prose blockquote[data-callout] {
+  border-left-width: 3px; border-left-style: solid; border-radius: 0 6px 6px 0;
+  padding: 10px 14px; margin: 0 0 14px; font-style: normal; color: var(--ink-soft);
+  background: var(--surface-raised);
+}
+.ck-prose blockquote[data-callout="info"]    { border-left-color: var(--ink-blue); }
+.ck-prose blockquote[data-callout="note"]    { border-left-color: var(--ink-blue); }
+.ck-prose blockquote[data-callout="tip"]     { border-left-color: var(--moss); }
+.ck-prose blockquote[data-callout="warning"] { border-left-color: var(--ochre); }
+.ck-prose blockquote[data-callout="danger"]  { border-left-color: var(--burgundy); }
+.ck-prose blockquote[data-callout="quote"]   { border-left-color: var(--rule-strong); font-style: italic; }
+
 /* Monospace transcript block */
 .ck-pre {
   font-family: var(--font-mono); font-size: 12.5px; line-height: 1.6; color: var(--ink-soft);

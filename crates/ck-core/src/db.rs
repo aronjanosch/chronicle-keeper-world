@@ -135,6 +135,8 @@ fn migrate(conn: &Connection) -> Result<()> {
         "ALTER TABLE campaigns ADD COLUMN recap TEXT NOT NULL DEFAULT ''",
         "ALTER TABLE campaigns ADD COLUMN recap_updated_at TEXT NOT NULL DEFAULT ''",
         "ALTER TABLE campaigns ADD COLUMN gm_pronouns TEXT NOT NULL DEFAULT ''",
+        // Vault folder path; local-only, never synced.
+        "ALTER TABLE campaigns ADD COLUMN vault_path TEXT",
     ];
     for sql in add_columns {
         if let Err(e) = conn.execute(sql, []) {

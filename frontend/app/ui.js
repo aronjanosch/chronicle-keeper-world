@@ -1,5 +1,6 @@
 // Shared atoms ported from the design's atoms.jsx + a few form/primitive helpers.
 import { html } from '../vendor/htm-preact-standalone.mjs';
+import { marked } from '../vendor/marked.esm.js';
 import { navigate } from './core.js';
 
 // ── Icon — monoline 16-grid SVGs ──────────────────────────────────
@@ -338,4 +339,23 @@ function mdToHtml(md) {
   }
   closeLists();
   return out.join('\n');
+}
+
+// ── Vault page renderer (marked GFM + CK post-process) ────────────
+function stripFrontmatter(text) {
+  const m = /^---\r?\n[\s\S]*?\r?\n---\r?\n?/.exec(text || '');
+  return m ? text.slice(m[0].length) : (text || '');
+}
+
+function ckPostprocess(htmlStr) {
+  return htmlStr.replace(/<blockquote>\s*<p>\s*\[!([a-zA-Z]+)\]\s*/g,
+    (_, type) => `<blockquote data-callout="${type.toLowerCase()}"><p>`);
+}
+
+export function renderPageHtml(text) {
+  return ckPostprocess(marked.parse(stripFrontmatter(text), { gfm: true }));
+}
+
+export function PageBody({ text }) {
+  return html`<div class="ck-prose" dangerouslySetInnerHTML=${{ __html: renderPageHtml(text) }} />`;
 }

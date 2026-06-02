@@ -10,7 +10,7 @@ use crate::models::{CampaignSessionInfo, SessionInfo, SessionMetadataRequest};
 use crate::normalize::{normalize_metadata, sanitize_folder_name};
 use crate::store::{artifacts, campaigns, now};
 
-fn output_root(conn: &Connection) -> AppResult<PathBuf> {
+pub(crate) fn output_root(conn: &Connection) -> AppResult<PathBuf> {
     let map = get_config_map(conn)?;
     let root = map.get("output_root").cloned().unwrap_or_default();
     Ok(shellexpand_home(&root))

@@ -7,7 +7,8 @@ import { navigate, openModal, useStore } from '../core.js';
 import { Shell, Sidebar, Topbar } from '../shell.js';
 import { Btn, Empty, Icon, Markdown, Input, Textarea, Select } from '../ui.js';
 import { loadCodexEntries, createCodexEntry, openCampaign, updateCampaign,
-  loadCampaignTags, renameCampaignTag, deleteCampaignTag } from '../actions.js';
+  loadCampaignTags, renameCampaignTag, deleteCampaignTag,
+  loadVaultPages, createVaultPage, attachVault, pickVaultFolder } from '../actions.js';
 
 export const KINDS = [
   { value: 'pc',      label: 'PC',      plural: 'PCs',      tone: 'gilt' },
@@ -298,6 +299,134 @@ function TagsSection() {
   </div>`;
 }
 
+async function attachVaultFlow() {
+  let path = await pickVaultFolder();
+  if (!path) {
+    path = window.prompt('Absolute path to the vault folder for this world:');
+    if (!path) return;
+  }
+  try { await attachVault(path.trim()); }
+  catch (e) { window.alert(`Could not attach vault: ${e.message}`); }
+}
+
+function PageCard({ page, onOpen }) {
+  const tone = toneForKind(page.kind);
+  const col = tone === 'ink-blue' ? 'var(--ink-blue)' : `var(--${tone})`;
+  return html`<div onClick=${onOpen} style=${{
+    background: 'var(--surface)', border: '1px solid var(--rule)', borderRadius: 6,
+    padding: 14, display: 'flex', flexDirection: 'column', gap: 10, cursor: 'pointer',
+  }}
+    onMouseEnter=${(e) => { e.currentTarget.style.borderColor = 'var(--rule-strong)'; }}
+    onMouseLeave=${(e) => { e.currentTarget.style.borderColor = 'var(--rule)'; }}>
+    <div style=${{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+      <div style=${{
+        width: 32, height: 32, borderRadius: 6, flex: '0 0 auto',
+        background: `var(--${tone}-50)`, color: col,
+        display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid rgba(0,0,0,.06)',
+      }}>
+        <${Icon} name=${iconForKind(page.kind)} size=${14} />
+      </div>
+      <div style=${{ flex: 1, minWidth: 0 }}>
+        <div style=${{ fontFamily: 'var(--font-display)', fontSize: 14.5, fontWeight: 500, color: 'var(--ink)', lineHeight: 1.2 }}>${page.title}</div>
+        <div style=${{ fontSize: 11, color: 'var(--ink-faint)', marginTop: 2, fontFamily: 'var(--font-mono)' }}>${page.path}</div>
+      </div>
+    </div>
+    ${page.summary && html`<div style=${{ fontSize: 12.5, color: 'var(--ink-soft)', lineHeight: 1.45, fontFamily: 'var(--font-display)', fontStyle: 'italic' }}>${page.summary}</div>`}
+  </div>`;
+}
+
+function NewPageForm({ onSubmit, onCancel }) {
+  const [title, setTitle] = useState('');
+  const [kind, setKind] = useState('npc');
+  const [err, setErr] = useState(null);
+  const [busy, setBusy] = useState(false);
+  async function submit() {
+    if (!title.trim()) { setErr('Title is required'); return; }
+    setBusy(true); setErr(null);
+    try { await onSubmit(title.trim(), kind); }
+    catch (e) { setErr(e.message); setBusy(false); }
+  }
+  return html`<div style=${{ background: 'var(--surface-raised)', border: '1px solid var(--rule)', borderRadius: 6, padding: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
+    <div style=${{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 8 }}>
+      <${Input} value=${title} onInput=${setTitle} placeholder="Page title (becomes the filename)" />
+      <${Select} value=${kind} onChange=${setKind} options=${KINDS.map((k) => ({ value: k.value, label: k.label }))} />
+    </div>
+    ${err && html`<div style=${{ fontSize: 12, color: 'var(--burgundy-700)' }}>${err}</div>`}
+    <div style=${{ display: 'flex', justifyContent: 'flex-end', gap: 6 }}>
+      <${Btn} kind="ghost" size="sm" onClick=${onCancel}>Cancel</${Btn}>
+      <${Btn} kind="primary" size="sm" icon="check" disabled=${busy} onClick=${submit}>Create page</${Btn}>
+    </div>
+  </div>`;
+}
+
+function VaultView({ campaign }) {
+  const store = useStore();
+  const [adding, setAdding] = useState(false);
+  const [query, setQuery] = useState('');
+  const pages = store.vaultPages || [];
+
+  useEffect(() => { loadVaultPages(campaign.campaign_id); }, [campaign.campaign_id]);
+
+  const q = query.trim().toLowerCase();
+  const filtered = pages.filter((p) => !q
+    || p.title.toLowerCase().includes(q) || (p.summary || '').toLowerCase().includes(q));
+
+  async function onCreate(title, kind) {
+    const page = await createVaultPage(title, kind);
+    setAdding(false);
+    navigate('page', { path: page.path });
+  }
+
+  const groups = KINDS
+    .map((k) => ({ kind: k, items: filtered.filter((p) => p.kind === k.value) }))
+    .filter((g) => g.items.length);
+  const other = filtered.filter((p) => !KINDS.some((k) => k.value === p.kind));
+
+  return html`<div style=${{ padding: '20px 24px', overflow: 'auto' }}>
+    <div style=${{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16, flexWrap: 'wrap' }}>
+      <div style=${{ fontSize: 11.5, color: 'var(--ink-faint)', fontFamily: 'var(--font-mono)', display: 'flex', alignItems: 'center', gap: 6 }}>
+        <${Icon} name="folder" size=${12} /> ${campaign.vault_path}
+      </div>
+      <span style=${{ flex: 1 }} />
+      <${Input} value=${query} onInput=${setQuery} placeholder="Search pages…" style=${{ width: 200 }} />
+      <${Btn} kind="ghost" size="sm" icon="folder" onClick=${attachVaultFlow}>Change folder</${Btn}>
+      <${Btn} kind="primary" size="sm" icon="plus" onClick=${() => setAdding(true)}>New page</${Btn}>
+    </div>
+
+    ${adding && html`<div style=${{ marginBottom: 14 }}><${NewPageForm} onSubmit=${onCreate} onCancel=${() => setAdding(false)} /></div>`}
+
+    ${pages.length === 0 && !adding
+      ? html`<${Empty} icon="scroll" title="No pages yet">
+          Create your first page — an NPC, a place, a faction. Each one is a plain
+          markdown file in your vault folder that you fully own.
+        </${Empty}>`
+      : filtered.length === 0
+        ? html`<div style=${{ fontSize: 12.5, color: 'var(--ink-faint)', fontStyle: 'italic', padding: '12px 0' }}>No pages match.</div>`
+        : html`<div>
+            ${groups.map((g) => html`<div key=${g.kind.value} style=${{ marginBottom: 22 }}>
+              <div style=${{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+                <${Icon} name=${iconForKind(g.kind.value)} size=${13} className="ck-ink-muted" />
+                <h3 style=${{ fontFamily: 'var(--font-display)', fontSize: 14, fontWeight: 500, margin: 0 }}>${g.kind.plural}</h3>
+                <span style=${{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--ink-faint)' }}>${g.items.length}</span>
+              </div>
+              <div style=${{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 10 }}>
+                ${g.items.map((p) => html`<${PageCard} key=${p.path} page=${p} onOpen=${() => navigate('page', { path: p.path })} />`)}
+              </div>
+            </div>`)}
+            ${other.length > 0 && html`<div style=${{ marginBottom: 22 }}>
+              <div style=${{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+                <${Icon} name="doc" size=${13} className="ck-ink-muted" />
+                <h3 style=${{ fontFamily: 'var(--font-display)', fontSize: 14, fontWeight: 500, margin: 0 }}>Other</h3>
+                <span style=${{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--ink-faint)' }}>${other.length}</span>
+              </div>
+              <div style=${{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 10 }}>
+                ${other.map((p) => html`<${PageCard} key=${p.path} page=${p} onOpen=${() => navigate('page', { path: p.path })} />`)}
+              </div>
+            </div>`}
+          </div>`}
+  </div>`;
+}
+
 export function CodexScreen() {
   const store = useStore();
   const c = store.campaign;
@@ -311,6 +440,18 @@ export function CodexScreen() {
   }, [c?.campaign_id]);
 
   if (!c) { navigate('library'); return null; }
+
+  if (c.vault_path) {
+    const sidebar = html`<${Sidebar} variant="campaign" active="codex" campaign=${c} />`;
+    const topbar = html`<${Topbar} crumbs=${[
+      { label: 'Campaigns', onClick: () => navigate('library') },
+      { label: c.name, onClick: () => openCampaign(c.campaign_id) },
+      'Codex',
+    ]} />`;
+    return html`<${Shell} sidebar=${sidebar} topbar=${topbar} bodyStyle=${{ padding: 0 }}>
+      <${VaultView} campaign=${c} />
+    </${Shell}>`;
+  }
 
   const entries = store.codexEntries || [];
   const notesCount = effectiveNotes(c).length;
@@ -346,6 +487,7 @@ export function CodexScreen() {
       : html`<div style=${{ display: 'flex', gap: 8, alignItems: 'center' }}>
       <${SourceFilter} value=${source} onChange=${setSource} counts=${sourceCounts} />
       <${Input} value=${query} onInput=${setQuery} placeholder="Search the codex…" style=${{ width: 220 }} />
+      <${Btn} kind="ghost" size="sm" icon="folder" onClick=${attachVaultFlow}>Attach vault</${Btn}>
       <${Btn} kind="ghost" size="sm" icon="sparkle" onClick=${() => openModal('codexImport')}>Import</${Btn}>
       <${Btn} kind="primary" size="sm" icon="plus" onClick=${() => setAdding(true)}>Add entry</${Btn}>
     </div>`} />`;

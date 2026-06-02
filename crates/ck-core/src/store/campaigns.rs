@@ -45,7 +45,52 @@ fn row_to_detail(row: &rusqlite::Row, fallback_lang: &str) -> rusqlite::Result<C
         recap_updated_at: row
             .get::<_, Option<String>>("recap_updated_at")?
             .unwrap_or_default(),
+        vault_path: row
+            .get::<_, Option<String>>("vault_path")?
+            .filter(|s| !s.is_empty()),
     })
+}
+
+// Idempotent: auto-create the campaign's vault (default location if unset),
+// then migrate codex_entries → files once (when the vault has no pages yet).
+// Best-effort caller-side — a filesystem error must not block opening a campaign.
+pub fn ensure_vault(conn: &Connection, campaign_id: &str) -> AppResult<()> {
+    let Some(campaign) = get_campaign(conn, campaign_id)? else {
+        return Ok(());
+    };
+    let root = crate::store::sessions::output_root(conn)?;
+    if root.as_os_str().is_empty() {
+        return Ok(());
+    }
+    let vault = match &campaign.vault_path {
+        Some(p) => std::path::PathBuf::from(p),
+        None => crate::vault::default_vault_path(&root, &campaign.name),
+    };
+    std::fs::create_dir_all(&vault)
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("create vault: {e}")))?;
+    crate::vault::ensure_ck_dir(&vault)?;
+    if campaign.vault_path.is_none() {
+        set_vault_path(conn, campaign_id, Some(&vault.to_string_lossy()))?;
+    }
+    if !crate::vault::has_pages(&vault) {
+        for e in crate::store::codex::list_entries(conn, campaign_id)? {
+            let _ = crate::vault::write_migrated_entry(&vault, &e.name, &e.kind, &e.body, &e.detail);
+        }
+    }
+    Ok(())
+}
+
+pub fn set_vault_path(conn: &Connection, campaign_id: &str, path: Option<&str>) -> AppResult<()> {
+    let n = conn.execute(
+        "UPDATE campaigns SET vault_path = ?1 WHERE campaign_id = ?2",
+        params![path, campaign_id],
+    )?;
+    if n == 0 {
+        return Err(AppError::NotFound(format!(
+            "Campaign not found: {campaign_id}"
+        )));
+    }
+    Ok(())
 }
 
 /// Store a freshly generated recap. Stamps `recap_updated_at` and the sync
@@ -287,4 +332,45 @@ pub fn set_current_campaign_id(conn: &Connection, campaign_id: &str) -> AppResul
         params![campaign_id],
     )?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::store::codex;
+
+    #[test]
+    fn ensure_vault_auto_creates_migrates_and_is_idempotent() {
+        let conn = crate::db::open_in_memory().unwrap();
+        let tmp = std::env::temp_dir().join(format!("ck-ev-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        crate::config::set_value(&conn, "output_root", &tmp.to_string_lossy()).unwrap();
+        create_campaign(&conn, "c1", "My World", 1).unwrap();
+        codex::create_entry(
+            &conn,
+            "c1",
+            &crate::models::CodexEntryCreate {
+                name: "Aragorn".into(),
+                kind: "npc".into(),
+                body: "A ranger.".into(),
+                detail: "Heir of Isildur.".into(),
+            },
+        )
+        .unwrap();
+
+        ensure_vault(&conn, "c1").unwrap();
+        let vp = get_campaign(&conn, "c1").unwrap().unwrap().vault_path.unwrap();
+        let vault = std::path::Path::new(&vp);
+        assert!(crate::vault::page_exists(vault, "Aragorn"));
+        assert_eq!(crate::vault::read_page(vault, "Aragorn.md").unwrap().summary, "A ranger.");
+
+        ensure_vault(&conn, "c1").unwrap(); // no duplicate page on re-run
+        assert_eq!(crate::vault::list_pages(vault).unwrap().len(), 1);
+
+        assert!(crate::vault::create_stub(vault, "Bree", "place"));
+        assert!(!crate::vault::create_stub(vault, "aragorn", "npc")); // case-insensitive skip
+        assert_eq!(crate::vault::list_pages(vault).unwrap().len(), 2);
+
+        std::fs::remove_dir_all(&tmp).ok();
+    }
 }
