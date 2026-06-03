@@ -2,14 +2,16 @@
 // Overview (Phase 3): a kind rail + searchable card grid. Each card is one entry
 // fed to the LLM as a one-liner; click through to the entry-detail inspector.
 // Keeps the Phase 1 freeform paste box (campaign-wide note, injected verbatim).
-import { html, useState, useEffect } from '../../vendor/htm-preact-standalone.mjs';
+import { html, useState, useEffect, useRef } from '../../vendor/htm-preact-standalone.mjs';
 import { navigate, openModal, useStore } from '../core.js';
 import { Shell, Sidebar, Topbar } from '../shell.js';
 import { Btn, Empty, Icon, Markdown, Input, Textarea, Select, BrandMark } from '../ui.js';
 import { loadCodexEntries, createCodexEntry, openCampaign, updateCampaign,
   loadCampaignTags, renameCampaignTag, deleteCampaignTag,
   loadVaultTree, createVaultPage, createVaultFolder, moveVaultEntry,
-  deleteVaultPage, deleteVaultFolder, attachVault, pickVaultFolder } from '../actions.js';
+  deleteVaultPage, deleteVaultFolder, attachVault, pickVaultFolder,
+  searchVault, loadVaultTags, sniffVault, importVaultFolder, enhanceVaultPages, watchVault } from '../actions.js';
+import { kindForFolder } from '../folderKinds.js';
 
 export const KINDS = [
   { value: 'pc',      label: 'PC',      plural: 'PCs',      tone: 'gilt' },
@@ -133,7 +135,7 @@ function SourceFilter({ value, onChange, counts }) {
   </div>`;
 }
 
-function KindRail({ entries, selected, onSelect, notesCount, tagsCount }) {
+function KindRail({ entries, selected, onSelect, tagsCount }) {
   const counts = { all: entries.length };
   for (const k of KINDS) counts[k.value] = entries.filter((e) => e.kind === k.value).length;
   const Row = ({ value, icon, label, n }) => {
@@ -156,85 +158,12 @@ function KindRail({ entries, selected, onSelect, notesCount, tagsCount }) {
     ${KINDS.map((k) => html`<${Row} key=${k.value} value=${k.value} icon=${iconForKind(k.value)} label=${k.plural} n=${counts[k.value]} />`)}
     <div style=${{ height: 1, background: 'var(--rule-soft)', margin: '8px 8px' }} />
     <div style=${{ padding: '0 8px 8px', fontSize: 10.5, fontWeight: 600, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--ink-faint)' }}>World-wide</div>
-    <${Row} value="notes" icon="feather" label="Freeform notes" n=${notesCount} />
     <${Row} value="tags" icon="tag" label="Tags" n=${tagsCount} />
   </aside>`;
 }
 
-// The effective notes list: stored codex_notes, else the legacy single codex
-// string surfaced as one note (migrated on first save).
-function effectiveNotes(campaign) {
-  const raw = Array.isArray(campaign.codex_notes) ? campaign.codex_notes : [];
-  if (raw.length) return raw;
-  const legacy = (campaign.codex || '').trim();
-  return legacy ? [{ title: '', body: legacy }] : [];
-}
-
-function NoteEditor({ draft, onChange, onSave, onCancel, saving }) {
-  return html`<div style=${{ display: 'flex', flexDirection: 'column', gap: 8, background: 'var(--surface-raised)', border: '1px solid var(--rule)', borderRadius: 8, padding: 12 }}>
-    <${Input} value=${draft.title} onInput=${(v) => onChange({ ...draft, title: v })} placeholder="Title (optional) — e.g. Tone, House rules, Setting" />
-    <${Textarea} value=${draft.body} onInput=${(v) => onChange({ ...draft, body: v })} rows=${6}
-      placeholder="Anything the model should know for every summary of this world." />
-    <div style=${{ display: 'flex', justifyContent: 'flex-end', gap: 6 }}>
-      <${Btn} kind="ghost" size="sm" disabled=${saving} onClick=${onCancel}>Cancel</${Btn}>
-      <${Btn} kind="primary" size="sm" icon="check" disabled=${saving || !draft.body.trim()} onClick=${onSave}>Save</${Btn}>
-    </div>
-  </div>`;
-}
-
-function NotesSection({ campaign, standalone }) {
-  const notes = effectiveNotes(campaign);
-  const [editIdx, setEditIdx] = useState(null); // index being edited, or 'new'
-  const [draft, setDraft] = useState({ title: '', body: '' });
-  const [saving, setSaving] = useState(false);
-
-  async function persist(next) {
-    setSaving(true);
-    try { await updateCampaign({ codex_notes: next }); setEditIdx(null); }
-    finally { setSaving(false); }
-  }
-  const saveEdit = (i) => persist(notes.map((n, j) => (j === i ? draft : n)));
-  const saveNew = () => persist([...notes, draft]);
-  const remove = (i) => persist(notes.filter((_, j) => j !== i));
-
-  const wrapStyle = standalone ? {} : { marginTop: 28, paddingTop: 20, borderTop: '1px solid var(--rule)' };
-  return html`<div style=${wrapStyle}>
-    ${standalone && html`<p style=${{ fontSize: 12.5, color: 'var(--ink-muted)', margin: '0 0 18px', lineHeight: 1.5, maxWidth: 640, fontFamily: 'var(--font-display)', fontStyle: 'italic' }}>
-      World-wide context — tone, setting brief, house rules. Unlike entries, every note is passed verbatim
-      into every session summary, not just when a name comes up.
-    </p>`}
-    <div style=${{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 10 }}>
-      <h3 style=${{ fontFamily: 'var(--font-display)', fontSize: 15, fontWeight: 500, margin: 0 }}>Freeform notes</h3>
-      <span style=${{ fontSize: 11.5, color: 'var(--ink-faint)' }}>every note is passed verbatim into every summary</span>
-      <span style=${{ flex: 1 }} />
-      ${editIdx === null && html`<${Btn} kind="ghost" size="sm" icon="plus" onClick=${() => { setDraft({ title: '', body: '' }); setEditIdx('new'); }}>Add note</${Btn}>`}
-    </div>
-
-    <div style=${{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-      ${notes.map((n, i) => editIdx === i
-        ? html`<${NoteEditor} key=${`e${i}`} draft=${draft} onChange=${setDraft} saving=${saving}
-            onSave=${() => saveEdit(i)} onCancel=${() => setEditIdx(null)} />`
-        : html`<div key=${i} style=${{ background: 'var(--surface-raised)', border: '1px solid var(--rule)', borderRadius: 8, padding: '14px 18px' }}>
-            <div style=${{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: n.title ? 6 : 0 }}>
-              ${n.title && html`<h4 style=${{ fontFamily: 'var(--font-display)', fontSize: 14, fontWeight: 500, margin: 0 }}>${n.title}</h4>`}
-              <span style=${{ flex: 1 }} />
-              ${editIdx === null && html`<div style=${{ display: 'flex', gap: 4 }}>
-                <${Btn} kind="ghost" size="sm" icon="edit" onClick=${() => { setDraft({ title: n.title || '', body: n.body || '' }); setEditIdx(i); }}>Edit</${Btn}>
-                <${Btn} kind="ghost" size="sm" icon="trash" onClick=${() => remove(i)}>Delete</${Btn}>
-              </div>`}
-            </div>
-            <${Markdown} text=${n.body} />
-          </div>`)}
-
-      ${editIdx === 'new' && html`<${NoteEditor} draft=${draft} onChange=${setDraft} saving=${saving}
-        onSave=${saveNew} onCancel=${() => setEditIdx(null)} />`}
-
-      ${notes.length === 0 && editIdx === null && html`<div style=${{ fontSize: 12.5, color: 'var(--ink-faint)', fontStyle: 'italic', padding: '4px 0' }}>
-        No notes yet — add a setting brief, tone, or house rules the model should know for every summary.
-      </div>`}
-    </div>
-  </div>`;
-}
+// Freeform codex notes retired (Phase 2): pages are the notes now. Legacy
+// content survives in the inert DB rows for a Phase 5 import.
 
 // One tag row: name, usage count, rename (which merges if the target exists),
 // and delete-across-all-sessions.
@@ -310,9 +239,35 @@ async function attachVaultFlow() {
   catch (e) { window.alert(`Could not attach vault: ${e.message}`); }
 }
 
-// Classic worldbuilding folders we ship the vocabulary for; anything else a GM
-// makes is a "custom" folder, tinted burgundy to show it's theirs.
-const CLASSIC_FOLDERS = new Set(['PCs', 'NPCs', 'Places', 'Factions', 'Items', 'Lore']);
+// Copy-in import: pick a folder of .md notes (e.g. an Obsidian vault), preview
+// the page count, copy into the Codex. The source folder is never touched.
+async function importNotesFlow() {
+  let path = await pickVaultFolder();
+  if (!path) {
+    path = window.prompt('Folder to import (absolute path):');
+    if (!path) return;
+  }
+  path = path.trim();
+  const s = await sniffVault(path);
+  if (s && s.md_pages === 0) { window.alert('No markdown pages found in that folder.'); return; }
+  const count = s ? `${s.md_pages} page${s.md_pages === 1 ? '' : 's'}` : 'all pages';
+  openModal('confirm', {
+    title: 'Import notes',
+    message: html`Copy ${count} from ${html`<strong>${path}</strong>`} into this world's Codex?
+      Folder structure is kept; name collisions get a suffix. The source folder is not changed.`,
+    confirmLabel: 'Import',
+    onConfirm: async () => {
+      const r = await importVaultFolder(path);
+      window.alert(`Imported ${r.imported} page${r.imported === 1 ? '' : 's'}${r.renamed ? ` (${r.renamed} renamed — name already taken)` : ''}.`);
+    },
+  });
+}
+
+// Standalone AI enhancement run: pick folders to enhance, then batch-enhance.
+function enhanceFlow() {
+  openModal('enhanceFolder');
+}
+
 export const dirOf = (p) => { const i = p.lastIndexOf('/'); return i < 0 ? '' : p.slice(0, i); };
 export const baseName = (p) => { const i = p.lastIndexOf('/'); return i < 0 ? p : p.slice(i + 1); };
 
@@ -381,9 +336,31 @@ function rowHover(on) {
   return (e) => { const a = e.currentTarget.querySelector('.ck-row-actions'); if (a) a.style.opacity = on ? 1 : 0; };
 }
 
-function PageLeaf({ page, depth, active, onOpen, act }) {
+// In-place rename field (file-browser style): auto-focus + select-all,
+// Enter/blur commits, Escape cancels.
+function RenameInput({ initial, onCommit, onCancel }) {
+  const ref = useRef(null);
+  const done = useRef(false);
+  useEffect(() => { const el = ref.current; if (el) { el.value = initial; el.focus(); el.select(); } }, []);
+  const finish = (commit) => {
+    if (done.current) return;
+    done.current = true;
+    const v = (ref.current?.value || '').replace(/[/\\]/g, '').trim();
+    if (commit && v && v !== initial) onCommit(v); else onCancel();
+  };
+  return html`<input ref=${ref}
+    onClick=${(e) => e.stopPropagation()}
+    onKeyDown=${(e) => { e.stopPropagation(); if (e.key === 'Enter') finish(true); if (e.key === 'Escape') finish(false); }}
+    onBlur=${() => finish(true)}
+    style=${{ flex: 1, minWidth: 0, font: 'inherit', fontSize: 12.5, padding: '1px 4px',
+      border: '1px solid var(--burgundy)', borderRadius: 3, background: 'var(--surface)',
+      color: 'var(--ink)', outline: 'none' }} />`;
+}
+
+function PageLeaf({ page, depth, active, onOpen, act, ren }) {
   const isActive = page.path === active;
-  return html`<div onClick=${onOpen} onMouseEnter=${rowHover(true)} onMouseLeave=${rowHover(false)}
+  const renaming = ren && ren.path === page.path;
+  return html`<div onClick=${renaming ? null : onOpen} onMouseEnter=${rowHover(true)} onMouseLeave=${rowHover(false)}
     style=${{
       display: 'flex', alignItems: 'center', gap: 7, padding: '4px 8px', paddingLeft: 27 + depth * 14, borderRadius: 5, cursor: 'pointer',
       background: isActive ? 'var(--burgundy-50)' : 'transparent',
@@ -391,48 +368,106 @@ function PageLeaf({ page, depth, active, onOpen, act }) {
       color: isActive ? 'var(--burgundy-700)' : 'var(--ink-soft)',
     }}>
     ${glyphFor(page.kind, 16)}
-    <span style=${{ flex: 1, fontSize: 12.5, fontWeight: isActive ? 500 : 400, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>${page.title}</span>
+    ${renaming
+      ? html`<${RenameInput} initial=${page.title} onCommit=${(v) => ren.commit(page.path, false, v)} onCancel=${ren.cancel} />`
+      : html`<span style=${{ flex: 1, fontSize: 12.5, fontWeight: isActive ? 500 : 400, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>${page.title}</span>
     <${HoverActions}>
-      <${ActionIcon} icon="edit" title="Rename" onClick=${() => act.renamePage(page)} />
+      <${ActionIcon} icon="edit" title="Rename" onClick=${() => (ren ? ren.start(page.path) : act.renamePage(page))} />
       <${ActionIcon} icon="arrow-r" title="Move to folder" onClick=${() => act.movePage(page)} />
       <${ActionIcon} icon="trash" title="Delete" onClick=${() => act.deletePage(page)} />
-    </${HoverActions}>
+    </${HoverActions}>`}
   </div>`;
 }
 
-function FolderNode({ node, depth, openSet, toggle, active, onOpen, act }) {
+function FolderNode({ node, depth, openSet, toggle, active, onOpen, act, ren }) {
   const open = openSet.has(node.path);
-  const custom = depth === 0 && !CLASSIC_FOLDERS.has(node.name);
+  const kind = kindForFolder(node.name);
+  const renaming = ren && ren.path === node.path;
   const children = [...node.folders.values()].sort((a, b) => a.name.localeCompare(b.name));
   return html`<div>
-    <div onClick=${() => toggle(node.path)} onMouseEnter=${rowHover(true)} onMouseLeave=${rowHover(false)}
+    <div onClick=${renaming ? null : () => toggle(node.path)} onMouseEnter=${rowHover(true)} onMouseLeave=${rowHover(false)}
       style=${{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 8px', paddingLeft: 10 + depth * 14, borderRadius: 5, cursor: 'pointer', color: 'var(--ink-soft)' }}>
       <${Icon} name=${open ? 'chev-d' : 'chev-r'} size=${11} className="ck-ink-faint" />
-      <${Icon} name="folder" size=${13} className=${custom ? 'ck-burgundy' : 'ck-ink-muted'} />
-      <span style=${{ flex: 1, fontSize: 12.5, fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>${node.name}</span>
+      ${kind ? glyphFor(kind, 16) : html`<${Icon} name="folder" size=${13} className="ck-burgundy" />`}
+      ${renaming
+        ? html`<${RenameInput} initial=${node.name} onCommit=${(v) => ren.commit(node.path, true, v)} onCancel=${ren.cancel} />`
+        : html`<span style=${{ flex: 1, fontSize: 12.5, fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>${node.name}</span>
       <${HoverActions}>
         <${ActionIcon} icon="plus" title="New page here" onClick=${() => act.newPage(node.path)} />
-        <${ActionIcon} icon="edit" title="Rename folder" onClick=${() => act.renameFolder(node)} />
-        <${ActionIcon} icon="trash" title="Delete (empty only)" onClick=${() => act.deleteFolder(node)} />
+        <${ActionIcon} icon="edit" title="Rename folder" onClick=${() => (ren ? ren.start(node.path) : act.renameFolder(node))} />
+        <${ActionIcon} icon="trash" title="Move folder to trash" onClick=${() => act.deleteFolder(node)} />
       </${HoverActions}>
-      <span style=${{ fontFamily: 'var(--font-mono)', fontSize: 10.5, color: 'var(--ink-faint)' }}>${countPages(node) || ''}</span>
+      <span style=${{ fontFamily: 'var(--font-mono)', fontSize: 10.5, color: 'var(--ink-faint)' }}>${countPages(node) || ''}</span>`}
     </div>
     ${open && html`<div>
-      ${children.map((c) => html`<${FolderNode} key=${c.path} node=${c} depth=${depth + 1} openSet=${openSet} toggle=${toggle} active=${active} onOpen=${onOpen} act=${act} />`)}
-      ${node.pages.map((p) => html`<${PageLeaf} key=${p.path} page=${p} depth=${depth + 1} active=${active} onOpen=${() => onOpen(p)} act=${act} />`)}
+      ${children.map((c) => html`<${FolderNode} key=${c.path} node=${c} depth=${depth + 1} openSet=${openSet} toggle=${toggle} active=${active} onOpen=${onOpen} act=${act} ren=${ren} />`)}
+      ${node.pages.map((p) => html`<${PageLeaf} key=${p.path} page=${p} depth=${depth + 1} active=${active} onOpen=${() => onOpen(p)} act=${act} ren=${ren} />`)}
     </div>`}
   </div>`;
 }
 
+// Saved searches: a per-world list of { label, query } in localStorage.
+function savedSearchKey(campaignId) { return `ck_saved_searches_${campaignId}`; }
+function loadSavedSearches(campaignId) {
+  try { return JSON.parse(localStorage.getItem(savedSearchKey(campaignId)) || '[]'); } catch (_) { return []; }
+}
+function storeSavedSearches(campaignId, list) {
+  try { localStorage.setItem(savedSearchKey(campaignId), JSON.stringify(list)); } catch (_) { /* private mode */ }
+}
+
 export function FileTree({ campaign, tree, active, onOpen, act }) {
+  const store = useStore();
   const [q, setQ] = useState('');
   const [openSet, setOpenSet] = useState(() => new Set());
+  const [ftsHits, setFtsHits] = useState([]);
+  const [saved, setSaved] = useState(() => loadSavedSearches(campaign?.campaign_id));
+  const [renPath, setRenPath] = useState(null);
+  const ftsTimer = useRef(null);
+  // Inline rename (file-browser style) replaces the modal inside the tree.
+  const ren = {
+    path: renPath,
+    start: setRenPath,
+    cancel: () => setRenPath(null),
+    commit: async (path, isFolder, name) => {
+      setRenPath(null);
+      const dest = dirOf(path) ? `${dirOf(path)}/${name}` : name;
+      try { await moveVaultEntry(path, isFolder ? dest : `${dest}.md`); }
+      catch (e) { window.alert(`Rename failed: ${e.message}`); }
+    },
+  };
   const toggle = (path) => setOpenSet((s) => { const n = new Set(s); n.has(path) ? n.delete(path) : n.add(path); return n; });
   const query = q.trim().toLowerCase();
   const allPages = [];
   (function walk(node) { node.pages.forEach((p) => allPages.push(p)); node.folders.forEach(walk); })(tree);
-  const matches = query ? allPages.filter((p) => p.title.toLowerCase().includes(query) || p.path.toLowerCase().includes(query)) : null;
+  const matches = query
+    ? allPages.filter((p) => p.title.toLowerCase().includes(query) || p.path.toLowerCase().includes(query)
+        || (p.aliases || []).some((a) => a.includes(query)))
+    : null;
   const rootFolders = [...tree.folders.values()].sort((a, b) => a.name.localeCompare(b.name));
+
+  // Full-text hits (body matches) layered under the instant name matches.
+  useEffect(() => {
+    if (ftsTimer.current) clearTimeout(ftsTimer.current);
+    if (query.length < 2) { setFtsHits([]); return; }
+    ftsTimer.current = setTimeout(() => {
+      searchVault(query).then((hits) => setFtsHits(hits || [])).catch(() => setFtsHits([]));
+    }, 250);
+    return () => { if (ftsTimer.current) clearTimeout(ftsTimer.current); };
+  }, [query]);
+  const nameMatched = new Set((matches || []).map((p) => p.path));
+  const bodyHits = (ftsHits || []).filter((h) => !nameMatched.has(h.path));
+  const diag = store.vaultLinks || null;
+
+  function saveCurrentSearch() {
+    const trimmed = q.trim();
+    if (!trimmed || saved.some((s) => s.query === trimmed)) return;
+    const next = [...saved, { label: trimmed, query: trimmed }];
+    setSaved(next); storeSavedSearches(campaign?.campaign_id, next);
+  }
+  function removeSaved(i) {
+    const next = saved.filter((_, j) => j !== i);
+    setSaved(next); storeSavedSearches(campaign?.campaign_id, next);
+  }
 
   return html`<aside style=${{ width: 220, flex: '0 0 220px', borderRight: '1px solid var(--rule)', background: 'var(--paper-deep)', padding: '14px 12px', display: 'flex', flexDirection: 'column', gap: 2, minHeight: 0 }}>
     <div style=${{ display: 'flex', alignItems: 'center', gap: 10, padding: '4px 6px 14px', borderBottom: '1px solid var(--rule-soft)', marginBottom: 4, cursor: 'pointer' }}
@@ -449,7 +484,19 @@ export function FileTree({ campaign, tree, active, onOpen, act }) {
       <${Icon} name="chev-l" size=${13} />
       <span style=${{ flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>${campaign?.name || 'World'}</span>
     </div>
-    <${Input} value=${q} onInput=${setQ} placeholder="Search the vault…" style=${{ fontSize: 12.5 }} />
+    <div style=${{ display: 'flex', gap: 4, alignItems: 'center' }}>
+      <${Input} value=${q} onInput=${setQ} placeholder="Search the vault…" style=${{ fontSize: 12.5, flex: 1 }} />
+      ${query && html`<span title="Save this search" onClick=${saveCurrentSearch}
+        style=${{ color: 'var(--ink-faint)', cursor: 'pointer', padding: 3, display: 'flex' }}><${Icon} name="sparkle" size=${13} /></span>`}
+    </div>
+    ${!query && saved.length > 0 && html`<div style=${{ padding: '4px 2px 0' }}>
+      ${saved.map((s, i) => html`<div key=${s.query} onClick=${() => setQ(s.query)} onMouseEnter=${rowHover(true)} onMouseLeave=${rowHover(false)}
+        style=${{ display: 'flex', alignItems: 'center', gap: 6, padding: '3px 6px', borderRadius: 4, fontSize: 11.5, color: 'var(--ink-muted)', cursor: 'pointer' }}>
+        <${Icon} name="sparkle" size=${10} className="ck-ink-faint" />
+        <span style=${{ flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontFamily: 'var(--font-mono)' }}>${s.label}</span>
+        <${HoverActions}><${ActionIcon} icon="trash" title="Remove saved search" onClick=${() => removeSaved(i)} /></${HoverActions}>
+      </div>`)}
+    </div>`}
     <div style=${{ flex: 1, overflow: 'auto', padding: '4px 0 10px', margin: '0 -12px' }}>
       <div style=${{ display: 'flex', alignItems: 'center', padding: '8px 12px 4px', fontSize: 10, fontWeight: 600, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--ink-faint)' }}>
         <span style=${{ flex: 1 }}>Vault</span>
@@ -457,14 +504,29 @@ export function FileTree({ campaign, tree, active, onOpen, act }) {
         <span title="New folder" onClick=${() => act.newFolder('')} style=${{ color: 'var(--ink-faint)', cursor: 'pointer', padding: 2 }}><${Icon} name="folder" size=${12} /></span>
       </div>
       ${matches
-        ? (matches.length
-          ? matches.map((p) => html`<${PageLeaf} key=${p.path} page=${p} depth=${0} active=${active} onOpen=${() => onOpen(p)} act=${act} />`)
-          : html`<div style=${{ fontSize: 12, color: 'var(--ink-faint)', fontStyle: 'italic', padding: '6px 12px' }}>No matches.</div>`)
+        ? html`<div>
+            ${matches.map((p) => html`<${PageLeaf} key=${p.path} page=${p} depth=${0} active=${active} onOpen=${() => onOpen(p)} act=${act} ren=${ren} />`)}
+            ${bodyHits.length > 0 && html`<div>
+              <div style=${{ padding: '10px 12px 4px', fontSize: 10, fontWeight: 600, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--ink-faint)' }}>In page text</div>
+              ${bodyHits.map((h) => html`<div key=${h.path} onClick=${() => onOpen(h)}
+                style=${{ padding: '4px 12px 4px 27px', cursor: 'pointer', borderRadius: 5 }}>
+                <div style=${{ fontSize: 12.5, color: 'var(--ink-soft)', fontWeight: 500 }}>${h.title}</div>
+                <div style=${{ fontSize: 11, color: 'var(--ink-faint)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
+                  dangerouslySetInnerHTML=${{ __html: h.snippet }} />
+              </div>`)}
+            </div>`}
+            ${matches.length === 0 && bodyHits.length === 0 && html`<div style=${{ fontSize: 12, color: 'var(--ink-faint)', fontStyle: 'italic', padding: '6px 12px' }}>No matches.</div>`}
+          </div>`
         : html`<div>
-            ${rootFolders.map((c) => html`<${FolderNode} key=${c.path} node=${c} depth=${0} openSet=${openSet} toggle=${toggle} active=${active} onOpen=${onOpen} act=${act} />`)}
-            ${tree.pages.map((p) => html`<${PageLeaf} key=${p.path} page=${p} depth=${0} active=${active} onOpen=${() => onOpen(p)} act=${act} />`)}
+            ${rootFolders.map((c) => html`<${FolderNode} key=${c.path} node=${c} depth=${0} openSet=${openSet} toggle=${toggle} active=${active} onOpen=${onOpen} act=${act} ren=${ren} />`)}
+            ${tree.pages.map((p) => html`<${PageLeaf} key=${p.path} page=${p} depth=${0} active=${active} onOpen=${() => onOpen(p)} act=${act} ren=${ren} />`)}
           </div>`}
     </div>
+    ${diag && (diag.unresolved > 0 || diag.orphans > 0) && html`<div title="Vault diagnostics: unresolved [[links]] and pages nothing links to"
+      style=${{ margin: '0 -12px', borderTop: '1px solid var(--rule-soft)', padding: '7px 12px', display: 'flex', alignItems: 'center', gap: 10, fontSize: 10.5, color: 'var(--ink-faint)', fontFamily: 'var(--font-mono)' }}>
+      ${diag.unresolved > 0 && html`<span style=${{ display: 'flex', alignItems: 'center', gap: 4 }}><span style=${{ width: 6, height: 6, borderRadius: '50%', background: 'var(--ochre)' }} />${diag.unresolved} broken link${diag.unresolved === 1 ? '' : 's'}</span>`}
+      ${diag.orphans > 0 && html`<span style=${{ display: 'flex', alignItems: 'center', gap: 4 }}><span style=${{ width: 6, height: 6, borderRadius: '50%', background: 'var(--rule-strong)' }} />${diag.orphans} orphan${diag.orphans === 1 ? '' : 's'}</span>`}
+    </div>`}
     <div onClick=${attachVaultFlow} title="Change vault folder (advanced)"
       style=${{ margin: '0 -12px -14px', borderTop: '1px solid var(--rule-soft)', padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 8, fontSize: 10.5, color: 'var(--ink-faint)', fontFamily: 'var(--font-mono)', cursor: 'pointer' }}>
       <span style=${{ width: 6, height: 6, borderRadius: '50%', background: 'var(--moss)', flex: '0 0 auto' }} />
@@ -500,13 +562,13 @@ function PageCard({ page, onOpen }) {
 }
 
 function FolderCard({ node, onOpen }) {
-  const custom = !CLASSIC_FOLDERS.has(node.name);
+  const kind = kindForFolder(node.name);
   const subN = node.folders.size;
   const sub = subN ? `${subN} folder${subN === 1 ? '' : 's'} · ${countPages(node)} page${countPages(node) === 1 ? '' : 's'}` : `${countPages(node)} page${countPages(node) === 1 ? '' : 's'}`;
   return html`<div onClick=${onOpen} style=${{ background: 'var(--surface)', border: '1px solid var(--rule)', borderRadius: 8, padding: '13px 15px', display: 'flex', alignItems: 'center', gap: 12, cursor: 'pointer', boxShadow: 'var(--shadow-soft)' }}>
-    <div style=${{ width: 36, height: 36, borderRadius: 7, flex: '0 0 auto', background: custom ? 'var(--burgundy-50)' : 'var(--paper-deep)', color: custom ? 'var(--burgundy)' : 'var(--ink-muted)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+    ${kind ? glyphFor(kind, 36) : html`<div style=${{ width: 36, height: 36, borderRadius: 7, flex: '0 0 auto', background: 'var(--burgundy-50)', color: 'var(--burgundy)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
       <${Icon} name="folder" size=${16} />
-    </div>
+    </div>`}
     <div style=${{ flex: 1, minWidth: 0 }}>
       <div style=${{ fontFamily: 'var(--font-display)', fontSize: 14.5, fontWeight: 500, color: 'var(--ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>${node.name}</div>
       <div style=${{ fontSize: 11, color: 'var(--ink-faint)', marginTop: 1 }}>${sub}</div>
@@ -522,7 +584,7 @@ export function makeVaultActions(campaign, folders, opts = {}) {
   return {
     newPage: (folder) => openModal('textPrompt', {
       title: 'New page', label: 'Page title', placeholder: 'Lord Ulric Tannerheim', confirmLabel: 'Create page',
-      onSubmit: async (title) => { const page = await createVaultPage(title, 'npc', folder); navigate('page', { path: page.path }); },
+      onSubmit: async (title) => { const page = await createVaultPage(title, kindForFolder(baseName(folder)) || 'npc', folder); navigate('page', { path: page.path }); },
     }),
     newFolder: (parent) => openModal('textPrompt', {
       title: 'New folder', label: parent ? `New folder inside ${parent}` : 'New folder name', placeholder: 'Riddles', confirmLabel: 'Create folder',
@@ -537,26 +599,43 @@ export function makeVaultActions(campaign, folders, opts = {}) {
       onSubmit: (dest) => moveVaultEntry(p.path, dest ? `${dest}/${baseName(p.path)}` : baseName(p.path)),
     }),
     deletePage: (p) => openModal('confirm', {
-      title: 'Delete page', message: html`Delete ${html`<strong>${p.title}</strong>`}? The markdown file is removed from your vault. This cannot be undone.`,
-      confirmLabel: 'Delete page', onConfirm: async () => { await deleteVaultPage(p.path); if (opts.afterDelete) opts.afterDelete(p.path); },
+      title: 'Move page to trash', message: html`Move ${html`<strong>${p.title}</strong>`} to the system trash? You can restore it from Finder or your file manager.`,
+      confirmLabel: 'Move to trash', onConfirm: async () => { await deleteVaultPage(p.path); if (opts.afterDelete) opts.afterDelete(p.path); },
     }),
     renameFolder: (n) => openModal('textPrompt', {
       title: 'Rename folder', label: 'New folder name', initial: n.name, confirmLabel: 'Rename',
       onSubmit: (name) => moveVaultEntry(n.path, dirOf(n.path) ? `${dirOf(n.path)}/${name}` : name),
     }),
-    deleteFolder: (n) => openModal('confirm', {
-      title: 'Delete folder', message: html`Delete the folder ${html`<strong>${n.name}</strong>`}? Only empty folders can be deleted — move or delete its pages first.`,
-      confirmLabel: 'Delete folder', onConfirm: () => deleteVaultFolder(n.path),
-    }),
+    deleteFolder: (n) => {
+      const nPages = countPages(n);
+      const detail = nPages
+        ? html` This moves the folder, its ${nPages} page${nPages === 1 ? '' : 's'}, and any subfolders to the system trash.`
+        : html` This moves the empty folder to the system trash.`;
+      openModal('confirm', {
+        title: 'Move folder to trash',
+        message: html`Move ${html`<strong>${n.name}</strong>`} to the system trash?${detail} You can restore from Finder or your file manager.`,
+        confirmLabel: 'Move to trash',
+        onConfirm: async () => {
+          await deleteVaultFolder(n.path);
+          if (opts.afterDeleteFolder) opts.afterDeleteFolder(n.path);
+        },
+      });
+    },
   };
 }
 
 function VaultView({ campaign }) {
   const store = useStore();
   const [sel, setSel] = useState('');           // current folder path ('' = vault root)
-  const [view, setView] = useState('folders');  // 'folders' | 'all'
+  const [view, setView] = useState('folders');  // 'folders' | 'all' | 'tags'
+  const [selTag, setSelTag] = useState(null);
 
   useEffect(() => { loadVaultTree(campaign.campaign_id); }, [campaign.campaign_id]);
+  useEffect(() => { if (view === 'tags') loadVaultTags(campaign.campaign_id); }, [view, campaign.campaign_id]);
+  useEffect(() => watchVault(campaign.campaign_id, () => {
+    loadVaultTree(campaign.campaign_id);
+    loadVaultTags(campaign.campaign_id);
+  }), [campaign.campaign_id]);
 
   const pages = store.vaultPages || [];
   const folders = store.vaultFolders || [];
@@ -587,14 +666,36 @@ function VaultView({ campaign }) {
           </div>
         </div>
         <span style=${{ flex: 1 }} />
+        <${Btn} kind="ghost" size="sm" icon="download" onClick=${importNotesFlow} title="Copy markdown notes (e.g. an Obsidian vault) into this Codex">Import notes</${Btn}>
+        <${Btn} kind="ghost" size="sm" icon="sparkle" onClick=${enhanceFlow} title="Assign kinds and generate summaries for pages that lack them (AI)">Enhance with AI</${Btn}>
         <div style=${{ display: 'flex', gap: 4, padding: 3, background: 'var(--surface)', border: '1px solid var(--rule)', borderRadius: 5 }}>
           <button onClick=${() => setView('folders')} style=${{ padding: '5px 9px', borderRadius: 3, background: view === 'folders' ? 'var(--paper-deep)' : 'transparent', color: view === 'folders' ? 'var(--ink)' : 'var(--ink-muted)', fontSize: 12, display: 'flex', alignItems: 'center', gap: 5, cursor: 'pointer' }}><${Icon} name="grid" size=${12} /> Folders</button>
           <button onClick=${() => { setView('all'); setSel(''); }} style=${{ padding: '5px 9px', borderRadius: 3, background: view === 'all' ? 'var(--paper-deep)' : 'transparent', color: view === 'all' ? 'var(--ink)' : 'var(--ink-muted)', fontSize: 12, display: 'flex', alignItems: 'center', gap: 5, cursor: 'pointer' }}><${Icon} name="scroll" size=${12} /> All pages</button>
+          <button onClick=${() => { setView('tags'); setSel(''); }} style=${{ padding: '5px 9px', borderRadius: 3, background: view === 'tags' ? 'var(--paper-deep)' : 'transparent', color: view === 'tags' ? 'var(--ink)' : 'var(--ink-muted)', fontSize: 12, display: 'flex', alignItems: 'center', gap: 5, cursor: 'pointer' }}><${Icon} name="tag" size=${12} /> Tags</button>
         </div>
       </div>
 
       ${total === 0
         ? html`<div style=${{ marginTop: 24 }}><${Empty} icon="scroll" title="No pages yet">Create your first page or folder from the Vault panel — each page is a plain markdown file you fully own.</${Empty}></div>`
+        : view === 'tags'
+          ? html`<div style=${{ marginTop: 18 }}>
+              ${(store.vaultTags || []).length === 0
+                ? html`<${Empty} icon="tag" title="No page tags yet">Add <code>tags:</code> to a page's frontmatter — hierarchies via <code>/</code> (e.g. <code>Location/City</code>).</${Empty}>`
+                : html`<div>
+                    <div style=${{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 18 }}>
+                      ${(store.vaultTags || []).map((t) => html`<span key=${t.tag} onClick=${() => setSelTag(selTag === t.tag ? null : t.tag)}
+                        style=${{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '3px 10px', borderRadius: 999, fontSize: 12, fontFamily: 'var(--font-mono)', cursor: 'pointer',
+                          background: selTag === t.tag ? 'var(--burgundy-50)' : 'var(--surface)', border: `1px solid ${selTag === t.tag ? 'var(--burgundy-300)' : 'var(--rule)'}`,
+                          color: selTag === t.tag ? 'var(--burgundy-700)' : 'var(--ink-soft)' }}>
+                        #${t.tag}<span style=${{ fontSize: 10.5, color: 'var(--ink-faint)' }}>${t.count}</span>
+                      </span>`)}
+                    </div>
+                    ${selTag && html`<div style=${{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 10 }}>
+                      ${pages.filter((p) => (p.tags || []).some((tg) => tg === selTag || tg.startsWith(selTag + '/')))
+                        .map((p) => html`<${PageCard} key=${p.path} page=${p} onOpen=${() => openPage(p)} />`)}
+                    </div>`}
+                  </div>`}
+            </div>`
         : view === 'all'
           ? html`<div style=${{ marginTop: 18, display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 10 }}>
               ${recent.map((p) => html`<${PageCard} key=${p.path} page=${p} onOpen=${() => openPage(p)} />`)}
@@ -641,9 +742,7 @@ export function CodexScreen() {
   if (c.vault_path) return html`<${VaultView} campaign=${c} />`;
 
   const entries = store.codexEntries || [];
-  const notesCount = effectiveNotes(c).length;
   const tagsCount = (store.campaignTags || []).length;
-  const showingNotes = selectedKind === 'notes';
   const showingTags = selectedKind === 'tags';
   const q = query.trim().toLowerCase();
   // 'manual' is the historical default for rows with no source set.
@@ -669,7 +768,7 @@ export function CodexScreen() {
     { label: c.name, onClick: () => openCampaign(c.campaign_id) },
     'Codex',
   ]}
-    right=${(showingNotes || showingTags)
+    right=${showingTags
       ? html`<${Btn} kind="ghost" size="sm" icon="compass" onClick=${() => setSelectedKind('all')}>Back to entries</${Btn}>`
       : html`<div style=${{ display: 'flex', gap: 8, alignItems: 'center' }}>
       <${SourceFilter} value=${source} onChange=${setSource} counts=${sourceCounts} />
@@ -686,12 +785,10 @@ export function CodexScreen() {
 
   return html`<${Shell} sidebar=${sidebar} topbar=${topbar} bodyStyle=${{ padding: 0 }}>
     <div style=${{ display: 'grid', gridTemplateColumns: '220px 1fr', height: '100%' }}>
-      <${KindRail} entries=${entries} selected=${selectedKind} onSelect=${setSelectedKind} notesCount=${notesCount} tagsCount=${tagsCount} />
+      <${KindRail} entries=${entries} selected=${selectedKind} onSelect=${setSelectedKind} tagsCount=${tagsCount} />
 
       <div style=${{ padding: '20px 24px', overflow: 'auto' }}>
-        ${showingNotes
-          ? html`<${NotesSection} campaign=${c} standalone=${true} />`
-          : showingTags
+        ${showingTags
           ? html`<${TagsSection} />`
           : html`
         <p style=${{ fontSize: 12.5, color: 'var(--ink-muted)', margin: '0 0 18px', lineHeight: 1.5, maxWidth: 640, fontFamily: 'var(--font-display)', fontStyle: 'italic' }}>

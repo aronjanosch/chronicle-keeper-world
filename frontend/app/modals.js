@@ -5,9 +5,10 @@ import { Icon, Btn, Field, Input, Textarea, Select, Spinner } from './ui.js';
 import {
   createCampaign, updateCampaign, saveSessionMetadata, loadSession,
   runExport,
-  loadLlmProviders, saveLlmProvider, testLlmProvider,
+  loadLlmProviders, saveLlmProvider, testLlmProvider, fetchLlmModels,
   importCodex, commitCodexImport,
   createPromptTemplate, updatePromptTemplate,
+  enhanceVaultPages,
 } from './actions.js';
 
 const PRONOUNS = ['she/her', 'he/him', 'they/them'];
@@ -174,7 +175,10 @@ function ProviderModal({ id }) {
   const [apiBase, setApiBase] = useState('');
   const [apiKey, setApiKey] = useState('');
   const [status, setStatus] = useState(null);
+  const [liveModels, setLiveModels] = useState(null);
+  useEffect(() => { if (p) fetchLlmModels(id).then((m) => { if (m.length) setLiveModels(m); }); }, [id]);
   if (!p) { closeModal(); return null; }
+  const suggestions = liveModels || p.models || [];
 
   async function save() {
     setStatus({ msg: 'Saving…' });
@@ -191,9 +195,9 @@ function ProviderModal({ id }) {
     <span style=${{ flex: 1, fontSize: 12.5, color: status?.ok === false ? 'var(--burgundy-700)' : 'var(--moss)' }}>${status?.msg || ''}</span>
     <${Btn} kind="ghost" onClick=${test}>Test</${Btn}>
     <${Btn} kind="primary" onClick=${save}>Save</${Btn}>`}>
-    <${Field} label="Default model" hint=${p.id === 'ollama' ? 'Must match a model pulled in Ollama.' : (p.models?.length ? 'Pick a suggestion or type any model name.' : 'Type the exact model id (e.g. from ollama.com).')}>
-      <${Input} value=${model} onInput=${setModel} mono list=${p.models?.length ? 'ck-prov-models' : undefined} />
-      ${p.models?.length ? html`<datalist id="ck-prov-models">${p.models.map((m, i) => html`<option key=${i} value=${m} />`)}</datalist>` : ''}
+    <${Field} label="Default model" hint=${liveModels ? 'Installed models, live from the provider.' : (p.id === 'ollama' ? 'Must match a model pulled in Ollama.' : (p.models?.length ? 'Pick a suggestion or type any model name.' : 'Type the exact model id (e.g. from ollama.com).'))}>
+      <${Input} value=${model} onInput=${setModel} mono list=${suggestions.length ? 'ck-prov-models' : undefined} />
+      ${suggestions.length ? html`<datalist id="ck-prov-models">${suggestions.map((m, i) => html`<option key=${i} value=${m} />`)}</datalist>` : ''}
     </${Field}>
     <${Field} label=${`API base${p.default_api_base ? '' : ' (optional)'}`}><${Input} value=${apiBase} onInput=${setApiBase} placeholder=${p.default_api_base ? `Default: ${p.default_api_base}` : 'Provider default'} mono /></${Field}>
     ${p.needs_key && html`<${Field} label=${`API key${p.has_key ? ' (saved — enter to replace)' : ''}`}><${Input} type="password" value=${apiKey} onInput=${setApiKey} placeholder=${p.has_key ? '••••••••' : 'Paste API key'} autocomplete="off" /></${Field}>`}
@@ -453,6 +457,67 @@ function ViewerModal({ title, text }) {
   </${ModalShell}>`;
 }
 
+// ── Vault folder enhance picker ───────────────────────────────────
+function EnhanceFolderModal() {
+  const pages = store.vaultPages || [];
+  const folders = store.vaultFolders || [];
+
+  const needsEnhance = (p) => !p.kind || !p.summary;
+  const topFolders = folders.filter((f) => !f.includes('/'));
+
+  const countFor = (f) => f === ''
+    ? pages.filter((p) => !p.path.includes('/') && needsEnhance(p)).length
+    : pages.filter((p) => p.path.startsWith(f + '/') && needsEnhance(p)).length;
+
+  const items = [
+    { path: '', label: '(root)' },
+    ...topFolders.map((f) => ({ path: f, label: f })),
+  ].map((x) => ({ ...x, count: countFor(x.path) })).filter((x) => x.count > 0);
+
+  const total = items.reduce((s, x) => s + x.count, 0);
+  const [checked, setChecked] = useState(() => new Set(items.map((x) => x.path)));
+
+  const toggle = (path) => setChecked((s) => { const n = new Set(s); n.has(path) ? n.delete(path) : n.add(path); return n; });
+  const selectedItems = items.filter((x) => checked.has(x.path));
+  const selectedCount = selectedItems.reduce((s, x) => s + x.count, 0);
+  const selectedFolders = selectedItems.map((x) => x.path);
+
+  function go() {
+    closeModal();
+    enhanceVaultPages(selectedFolders).catch(() => {});
+  }
+
+  if (total === 0) {
+    return html`<${ModalShell} title="Enhance with AI" footer=${html`<${Btn} kind="primary" onClick=${closeModal}>Close</${Btn}>`}>
+      <div style=${{ fontSize: 13.5, color: 'var(--ink-soft)', lineHeight: 1.5 }}>All pages already have kind and summary — nothing to enhance.</div>
+    </${ModalShell}>`;
+  }
+
+  return html`<${ModalShell} title="Enhance pages with AI" footer=${html`
+    <${Btn} kind="ghost" onClick=${closeModal}>Cancel</${Btn}>
+    <${Btn} kind="primary" icon="sparkle" disabled=${!selectedFolders.length} onClick=${go}>
+      Enhance ${selectedCount} page${selectedCount === 1 ? '' : 's'}
+    </${Btn}>`}>
+    <div style=${{ fontSize: 12.5, color: 'var(--ink-muted)', lineHeight: 1.5 }}>
+      Select which folders to enhance. Pages in the same folder are sent as one batch — far fewer LLM calls.
+      Pages that already have kind and summary are skipped automatically.
+    </div>
+    <div style=${{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      ${items.map((x) => html`<label key=${x.path} style=${{
+        display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px',
+        borderRadius: 6, cursor: 'pointer',
+        background: checked.has(x.path) ? 'var(--surface)' : 'transparent',
+        border: '1px solid ' + (checked.has(x.path) ? 'var(--rule)' : 'var(--rule-soft)'),
+      }}>
+        <input type="checkbox" checked=${checked.has(x.path)} onChange=${() => toggle(x.path)}
+          style=${{ cursor: 'pointer', width: 14, height: 14, flexShrink: 0 }} />
+        <span style=${{ flex: 1, fontSize: 13, fontFamily: 'var(--font-mono)', color: 'var(--ink)' }}>${x.label}</span>
+        <span style=${{ fontSize: 11.5, color: 'var(--ink-faint)' }}>${x.count} page${x.count === 1 ? '' : 's'}</span>
+      </label>`)}
+    </div>
+  </${ModalShell}>`;
+}
+
 // ── Host ──────────────────────────────────────────────────────────
 export function ModalHost({ modal }) {
   if (!modal) return null;
@@ -467,6 +532,7 @@ export function ModalHost({ modal }) {
     case 'confirm': return html`<${ConfirmModal} ...${modal.props} />`;
     case 'textPrompt': return html`<${TextPromptModal} ...${modal.props} />`;
     case 'movePage': return html`<${MovePageModal} ...${modal.props} />`;
+    case 'enhanceFolder': return html`<${EnhanceFolderModal} />`;
     default: return null;
   }
 }

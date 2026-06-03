@@ -200,6 +200,12 @@ export function SessionScreen({ store }) {
           onConfirm: () => deleteSession(sess.session_id),
         })} />
         ${tracks.length > 0 && !hasT ? html`<${Btn} kind="secondary" icon="users" onClick=${() => navigate('newSession', { id: cam.campaign_id, attach: sess.session_id })}>Label speakers</${Btn}>` : ''}
+        ${hasT ? html`<${Btn} kind="secondary" icon="mic" onClick=${() => openModal('confirm', {
+          title: 'Re-transcribe session',
+          message: 'Run transcription again? A new transcript is added; existing transcripts are kept.',
+          confirmLabel: 'Re-transcribe',
+          onConfirm: () => runTranscribe(),
+        })}>Re-transcribe</${Btn}>` : ''}
         <${Btn} kind="secondary" icon="export" disabled=${!hasS} onClick=${() => openModal('export', {})}>Export</${Btn}>
         ${primary}
       </div>`} />`}

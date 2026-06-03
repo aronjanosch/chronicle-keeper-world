@@ -25,9 +25,7 @@ function codexCount(_campaign) {
   const vaultCount = (store.vaultPages || []).length;
   if (_campaign?.vault_path) return vaultCount > 0 ? vaultCount : null;
   const count = (store.codexEntries || []).length;
-  const hasFreeform = !!(_campaign?.codex || '').trim();
-  if (count > 0) return count;
-  return hasFreeform ? '●' : null;
+  return count > 0 ? count : null;
 }
 function sessionsCount() {
   const n = (store.campaignSessions || []).length;

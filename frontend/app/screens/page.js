@@ -7,11 +7,60 @@ import { html, useState, useEffect, useRef, useMemo } from '../../vendor/htm-pre
 import { navigate, useStore } from '../core.js';
 import { Shell, Topbar } from '../shell.js';
 import { Btn, Empty, Icon, PageBody, renderBlockHtml, splitDoc, joinDoc, parseProps } from '../ui.js';
-import { readVaultPage, saveVaultPage, openCampaign, loadVaultTree, createVaultPage } from '../actions.js';
+import { readVaultPage, saveVaultPage, openCampaign, loadVaultTree, loadKindSchemas, createVaultPage, watchVault } from '../actions.js';
 import { FileTree, buildTree, makeVaultActions, iconForKind, KINDS } from './codex.js';
 
 function kindLabel(k) {
   return (KINDS.find((x) => x.value === k) || {}).label || k || 'Page';
+}
+
+// Frontmatter keys that never render as infobox fields (page-data-model-spec).
+const RESERVED_KEYS = new Set(['kind', 'aliases', 'tags', 'summary', 'cssclasses', 'publish', 'permalink']);
+
+function schemaFor(schemas, kind) {
+  return ((schemas || []).find((s) => s.kind === kind) || {}).fields || [];
+}
+
+const CHECKED = new Set(['true', 'yes', 'x', '✓', '1']);
+
+function FieldVal({ type, values }) {
+  if (type === 'checkbox') {
+    const on = CHECKED.has(String(values[0] || '').toLowerCase());
+    return html`<span class="ck-prop-tag" style=${{ color: on ? 'var(--moss)' : 'var(--ink-faint)' }}>${on ? '✓ yes' : '— no'}</span>`;
+  }
+  return values.map((v, i) => html`<span class="ck-prop-tag" key=${i}>${v}</span>`);
+}
+
+// Schema fields first (typed; blanks kept as placeholders), then custom
+// non-reserved keys as plain text rows.
+function infoboxRows(props, fields) {
+  const byKey = new Map(props.map((p) => [p.key, p]));
+  const rows = fields.map((f) => ({
+    key: f.name,
+    type: f.type,
+    values: ((byKey.get(f.name) || {}).values || []).filter((v) => v !== ''),
+  }));
+  const known = new Set(fields.map((f) => f.name));
+  for (const p of props) {
+    if (known.has(p.key) || RESERVED_KEYS.has(p.key)) continue;
+    rows.push({ key: p.key, type: p.list ? 'list' : 'text', values: p.values.filter((v) => v !== '') });
+  }
+  return rows;
+}
+
+// Right-floated wiki infobox in the reading view: the page's kind fields from
+// frontmatter. Hidden when nothing is filled in.
+function Infobox({ fm, kind, schemas }) {
+  const fields = schemaFor(schemas, kind);
+  const rows = infoboxRows(parseProps(fm), fields).filter((r) => r.values.length);
+  if (!rows.length) return null;
+  return html`<div class="ck-infobox">
+    <div class="ck-infobox-head"><${Icon} name=${iconForKind(kind)} size=${12} /> ${kindLabel(kind)}</div>
+    ${rows.map((r) => html`<div class="ck-infobox-row" key=${r.key}>
+      <span class="ck-infobox-key">${r.key}</span>
+      <span class="ck-prop-vals"><${FieldVal} type=${r.type} values=${r.values} /></span>
+    </div>`)}
+  </div>`;
 }
 
 let _blkId = 0;
@@ -63,21 +112,37 @@ function caretCoords(ta) {
   }
 }
 
-function PropsStrip({ fmText, onEdit }) {
+function PropsStrip({ fmText, schemas, onEdit }) {
   const props = parseProps(fmText).filter((p) => p.key !== 'summary');
+  const kind = ((props.find((p) => p.key === 'kind') || {}).values || [])[0];
+  const fields = schemaFor(schemas, kind);
+  const typeOf = new Map(fields.map((f) => [f.name, f.type]));
+  const have = new Set(props.map((p) => p.key));
+  const missing = fields.filter((f) => !have.has(f.name));
   return html`<div class="ck-props" onClick=${onEdit} title="Click to edit properties">
-    ${props.length
-      ? props.map((p) => html`<div class="ck-prop-row" key=${p.key}>
-          <span class="ck-prop-key">${p.key}</span>
-          <span class="ck-prop-vals">
-            ${p.values.filter((v) => v !== '').map((v, i) => html`<span class="ck-prop-tag ${p.key === 'tags' ? 'mono' : ''}" key=${i}>${p.key === 'tags' ? '#' + String(v).replace(/^#/, '') : v}</span>`)}
-          </span>
-        </div>`)
+    ${props.length || missing.length
+      ? html`${props.map((p) => {
+          const vals = p.values.filter((v) => v !== '');
+          return html`<div class="ck-prop-row" key=${p.key}>
+            <span class="ck-prop-key">${p.key}</span>
+            <span class="ck-prop-vals">
+              ${p.key === 'tags'
+                ? vals.map((v, i) => html`<span class="ck-prop-tag mono" key=${i}>${'#' + String(v).replace(/^#/, '')}</span>`)
+                : !vals.length
+                  ? html`<span class="ck-prop-blank">—</span>`
+                  : html`<${FieldVal} type=${typeOf.get(p.key) || 'text'} values=${vals} />`}
+            </span>
+          </div>`;
+        })}
+        ${missing.map((f) => html`<div class="ck-prop-row" key=${f.name}>
+          <span class="ck-prop-key">${f.name}</span>
+          <span class="ck-prop-vals"><span class="ck-prop-blank">—</span></span>
+        </div>`)}`
       : html`<div class="ck-prop-empty"><${Icon} name="plus" size=${11} /> Add properties</div>`}
   </div>`;
 }
 
-function LiveEditor({ content, pages, onSave, onState }) {
+function LiveEditor({ content, pages, schemas, onSave, onState }) {
   const init = useMemo(() => splitDoc(content), []);
   const [fmText, setFmText] = useState(init.fm);
   const [blocks, setBlocks] = useState(() => splitBody(init.body));
@@ -170,7 +235,11 @@ function LiveEditor({ content, pages, onSave, onState }) {
       const between = before.slice(open + 2);
       if (between.includes(']]') || between.includes('\n')) { setAc(null); return; }
       const ql = between.toLowerCase();
-      const items = (pages || []).filter((p) => p.title && p.title.toLowerCase().includes(ql)).slice(0, 6);
+      // Match on title or any alias (aliases come normalized lowercase from the index).
+      const items = (pages || [])
+        .filter((p) => p.title && (p.title.toLowerCase().includes(ql)
+          || (p.aliases || []).some((a) => a.includes(ql))))
+        .slice(0, 6);
       const co = caretCoords(ta);
       setAc({ open, query: between, items, index: 0, top: co.top + co.lineHeight, left: co.left });
     } catch (_) { setAc(null); }
@@ -222,7 +291,7 @@ function LiveEditor({ content, pages, onSave, onState }) {
   return html`<div class="ck-live">
     ${activeId === '__fm__'
       ? html`<textarea ...${taProps} key="__fm__" style=${{ fontFamily: 'var(--font-mono)' }} />`
-      : html`<${PropsStrip} fmText=${fmText} onEdit=${enterFm} />`}
+      : html`<${PropsStrip} fmText=${fmText} schemas=${schemas} onEdit=${enterFm} />`}
 
     <div class="ck-live-body">
       ${blocks.map((b) => (b.id === activeId
@@ -236,15 +305,20 @@ function LiveEditor({ content, pages, onSave, onState }) {
 
     ${ac && html`<div class="ck-ac" style=${{ top: ac.top, left: ac.left }}>
       <div class="ck-ac-head">Link a page</div>
-      ${ac.items.map((it, i) => html`<div class="ck-ac-item ${i === ac.index ? 'on' : ''}" key=${it.path}
+      ${ac.items.map((it, i) => {
+        const ql = ac.query.toLowerCase();
+        const via = !it.title.toLowerCase().includes(ql)
+          && ((it.aliases || []).find((a) => a.includes(ql)) || null);
+        return html`<div class="ck-ac-item ${i === ac.index ? 'on' : ''}" key=${it.path}
           onMouseDown=${(e) => { e.preventDefault(); acceptAc(it); }}>
         <span class="ck-ac-glyph"><${Icon} name=${iconForKind(it.kind)} size=${13} /></span>
         <div style=${{ flex: 1, minWidth: 0 }}>
           <div class="ck-ac-name">${it.title}</div>
-          <div class="ck-ac-sub">${kindLabel(it.kind)}</div>
+          <div class="ck-ac-sub">${kindLabel(it.kind)}${via ? ` · alias “${via}”` : ''}</div>
         </div>
         ${i === ac.index && html`<span class="ck-ac-kbd">↵</span>`}
-      </div>`)}
+      </div>`;
+      })}
       <div class="ck-ac-item ck-ac-create ${ac.index === ac.items.length ? 'on' : ''}"
           onMouseDown=${(e) => { e.preventDefault(); acceptAc('create'); }}>
         <${Icon} name="plus" size=${11} /> <span>Create ${ac.query ? `“${ac.query}”` : 'a new page'}</span>
@@ -292,7 +366,34 @@ function Provenance({ path }) {
   </div>`;
 }
 
-function ReadView({ page, path, pages, onBroken }) {
+// "Linked from" — client-side scan of the link-graph index for [[this page]].
+function Backlinks({ path, pages, links }) {
+  const sources = [...new Set((links || [])
+    .filter((l) => l.target_path === path)
+    .map((l) => l.source_path))];
+  if (!sources.length) return null;
+  const byPath = new Map((pages || []).map((p) => [p.path, p]));
+  return html`<div style=${{ clear: 'both', marginTop: 36, paddingTop: 18, borderTop: '1px solid var(--rule)' }}>
+    <div style=${{ fontSize: 10.5, fontWeight: 600, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--ink-faint)', marginBottom: 10 }}>
+      Linked from <span style=${{ fontFamily: 'var(--font-mono)' }}>${sources.length}</span>
+    </div>
+    <div style=${{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      ${sources.map((src) => {
+        const p = byPath.get(src);
+        return html`<div key=${src} onClick=${() => navigate('page', { path: src })}
+          style=${{ display: 'flex', alignItems: 'center', gap: 9, padding: '8px 11px', background: 'var(--surface)', border: '1px solid var(--rule-soft)', borderRadius: 6, cursor: 'pointer' }}
+          onMouseEnter=${(e) => { e.currentTarget.style.borderColor = 'var(--rule-strong)'; }}
+          onMouseLeave=${(e) => { e.currentTarget.style.borderColor = 'var(--rule-soft)'; }}>
+          <${Icon} name=${iconForKind(p?.kind)} size=${13} className="ck-ink-muted" />
+          <span style=${{ fontSize: 13, fontWeight: 500, color: 'var(--ink)' }}>${p?.title || src}</span>
+          ${p?.summary && html`<span style=${{ flex: 1, fontSize: 12, color: 'var(--ink-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontStyle: 'italic' }}>${p.summary}</span>`}
+        </div>`;
+      })}
+    </div>
+  </div>`;
+}
+
+function ReadView({ page, path, pages, links, schemas, onBroken }) {
   const { fm, body } = splitDoc(page.content);
   const props = parseProps(fm);
   const role = (props.find((p) => p.key === 'role') || {}).values?.[0];
@@ -314,7 +415,9 @@ function ReadView({ page, path, pages, onBroken }) {
       </div>`}
 
       <div style=${{ height: 1, background: 'var(--rule)', margin: '26px 0' }} />
+      <${Infobox} fm=${fm} kind=${page.kind} schemas=${schemas} />
       <${PageBody} text=${prose} pages=${pages} onBroken=${onBroken} />
+      <${Backlinks} path=${path} pages=${pages} links=${links} />
     </div>
   </div>`;
 }
@@ -365,6 +468,10 @@ export function PageScreen() {
   const [mode, setMode] = useState('read');
   const [editStyle, setEditStyle] = useState(loadEditStyle);
   const [saveState, setSaveState] = useState('saved');
+  const [rev, setRev] = useState(0); // bumped on external reload to re-key the editor
+
+  const pageRef = useRef(null); pageRef.current = page;
+  const saveRef = useRef(saveState); saveRef.current = saveState;
 
   function toggleEditStyle() {
     setEditStyle((s) => {
@@ -375,7 +482,7 @@ export function PageScreen() {
     setMode('edit');
   }
 
-  useEffect(() => { if (c) loadVaultTree(c.campaign_id); }, [c?.campaign_id]);
+  useEffect(() => { if (c) { loadVaultTree(c.campaign_id); loadKindSchemas(c.campaign_id); } }, [c?.campaign_id]);
 
   useEffect(() => {
     let cancelled = false;
@@ -386,12 +493,39 @@ export function PageScreen() {
     return () => { cancelled = true; };
   }, [path, c?.campaign_id]);
 
+  // External edits (Obsidian, Finder): refresh the tree, and reload the open
+  // page unless the editor holds unsaved changes.
+  useEffect(() => {
+    if (!c?.campaign_id) return undefined;
+    return watchVault(c.campaign_id, async () => {
+      loadVaultTree(c.campaign_id);
+      if (saveRef.current !== 'saved') return;
+      try {
+        const p = await readVaultPage(path);
+        const cur = pageRef.current;
+        if (cur && cur.content === p.content) return;
+        setPage(p);
+        setMissing(false);
+        setRev((r) => r + 1);
+      } catch (_) {
+        if (!pageRef.current) return;
+        setPage(null);
+        setMissing(true);
+      }
+    });
+  }, [path, c?.campaign_id]);
+
   if (!c) { navigate('library'); return null; }
 
   const pages = store.vaultPages || [];
   const folders = store.vaultFolders || [];
   const tree = buildTree(folders, pages);
-  const act = makeVaultActions(c, folders, { afterDelete: () => navigate('codex', { id: c.campaign_id }) });
+  const act = makeVaultActions(c, folders, {
+    afterDelete: () => navigate('codex', { id: c.campaign_id }),
+    afterDeleteFolder: (folderPath) => {
+      if (path && path.startsWith(`${folderPath}/`)) navigate('codex', { id: c.campaign_id });
+    },
+  });
 
   const openBroken = (name) => createVaultPage(name, 'lore', '').then((p) => navigate('page', { path: p.path })).catch(() => {});
 
@@ -427,7 +561,7 @@ export function PageScreen() {
         { icon: editStyle === 'live' ? 'check' : 'feather', label: editStyle === 'live' ? 'Live preview ✓' : 'Live preview', onClick: toggleEditStyle },
         { icon: 'edit', label: 'Rename', onClick: () => act.renamePage(pageLeaf) },
         { icon: 'folder', label: 'Move…', onClick: () => act.movePage(pageLeaf) },
-        { icon: 'trash', label: 'Delete', danger: true, onClick: () => act.deletePage(pageLeaf) },
+        { icon: 'trash', label: 'Move to trash', danger: true, onClick: () => act.deletePage(pageLeaf) },
       ]} />`}
     </div>`} />`;
 
@@ -440,13 +574,13 @@ export function PageScreen() {
       ${page === null
         ? html`<div style=${{ flex: 1, padding: 40, color: 'var(--ink-faint)', fontStyle: 'italic' }}>Loading…</div>`
         : mode === 'read'
-          ? html`<${ReadView} page=${page} path=${path} pages=${pages} onBroken=${openBroken} />`
+          ? html`<${ReadView} page=${page} path=${path} pages=${pages} links=${(store.vaultLinks || {}).links} schemas=${store.kindSchemas} onBroken=${openBroken} />`
           : html`<div style=${{ flex: 1, overflow: 'auto', background: 'var(--paper)', padding: '34px 0 64px', minWidth: 0 }}>
               <div style=${{ maxWidth: 720, margin: '0 auto', padding: '0 52px' }}>
                 <${Provenance} path=${path} />
                 ${editStyle === 'live'
-                  ? html`<${LiveEditor} key=${'live:' + path} content=${page.content} pages=${pages} onSave=${doSave} onState=${setSaveState} />`
-                  : html`<${SourceEditor} key=${'src:' + path} content=${page.content} onSave=${doSave} onState=${setSaveState} />`}
+                  ? html`<${LiveEditor} key=${'live:' + rev + ':' + path} content=${page.content} pages=${pages} schemas=${store.kindSchemas} onSave=${doSave} onState=${setSaveState} />`
+                  : html`<${SourceEditor} key=${'src:' + rev + ':' + path} content=${page.content} onSave=${doSave} onState=${setSaveState} />`}
               </div>
             </div>`}
     </div>

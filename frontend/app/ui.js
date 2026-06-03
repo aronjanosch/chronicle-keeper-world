@@ -356,13 +356,25 @@ function ckPostprocess(htmlStr) {
     });
 }
 
-// Resolve [[Name]] / [[Name|Label]] against the vault page list. Resolved links
-// carry data-path (navigable); unresolved ones get data-name (offer to create).
-// Walks tokens so we never rewrite inside existing <a>/<code>.
+// Resolve [[Name]] / [[Name|Label]] / [[Name#Heading]] against the vault page
+// list — by title or alias, case-insensitive; collisions pick the shortest
+// path. Resolved links carry data-path (navigable); unresolved ones get
+// data-name (offer to create). Walks tokens so we never rewrite inside
+// existing <a>/<code>.
 export function resolveWikilinks(htmlStr, pages) {
   if (!htmlStr.includes('[[')) return htmlStr;
-  const byTitle = new Map();
-  (pages || []).forEach((p) => { if (p && p.title) byTitle.set(p.title.trim().toLowerCase(), p.path); });
+  const byName = new Map();
+  const add = (name, path) => {
+    const key = name.trim().toLowerCase();
+    if (!key) return;
+    const cur = byName.get(key);
+    if (!cur || path.length < cur.length || (path.length === cur.length && path < cur)) byName.set(key, path);
+  };
+  (pages || []).forEach((p) => {
+    if (!p || !p.title) return;
+    add(p.title, p.path);
+    (p.aliases || []).forEach((a) => add(a, p.path));
+  });
   const tokens = htmlStr.split(/(<[^>]+>)/);
   let skip = 0;
   for (let i = 0; i < tokens.length; i++) {
@@ -373,12 +385,17 @@ export function resolveWikilinks(htmlStr, pages) {
       continue;
     }
     if (skip > 0 || !t.includes('[[')) continue;
-    tokens[i] = t.replace(/\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g, (_, target, label) => {
-      const name = target.trim();
-      const text = escapeHtml((label || name).trim());
-      const path = byTitle.get(name.toLowerCase());
+    tokens[i] = t.replace(/\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g, (m, target, label) => {
+      const raw = target.trim();
+      // Block refs ([[Page#^id]]) are a locked Drop — plain text.
+      if (raw.includes('#^')) return escapeHtml((label || raw).trim());
+      const hash = raw.indexOf('#');
+      const name = (hash < 0 ? raw : raw.slice(0, hash)).trim();
+      const anchor = hash < 0 ? '' : raw.slice(hash + 1).trim();
+      const text = escapeHtml((label || raw).trim());
+      const path = byName.get(name.toLowerCase());
       return path
-        ? `<a class="ck-wikilink" data-path="${escapeHtml(path)}">${text}</a>`
+        ? `<a class="ck-wikilink" data-path="${escapeHtml(path)}"${anchor ? ` data-anchor="${escapeHtml(anchor)}"` : ''}>${text}</a>`
         : `<a class="ck-wikilink ck-wikilink--broken" data-name="${escapeHtml(name)}">${text}</a>`;
     });
   }
@@ -395,14 +412,19 @@ export function renderBlockHtml(text, pages) {
 }
 
 // Click handler shared by reading view + live preview: navigate resolved wikilinks,
-// hand unresolved ones to onBroken (e.g. create a page).
+// hand unresolved ones to onBroken (e.g. create a page). Also reveals/hides
+// GM-only [!secret] callouts.
 export function wikilinkClick(onBroken) {
   return (e) => {
     const a = e.target && e.target.closest && e.target.closest('.ck-wikilink');
-    if (!a) return;
-    e.preventDefault();
-    if (a.dataset.path) navigate('page', { path: a.dataset.path });
-    else if (a.dataset.name && onBroken) onBroken(a.dataset.name);
+    if (a) {
+      e.preventDefault();
+      if (a.dataset.path) navigate('page', { path: a.dataset.path });
+      else if (a.dataset.name && onBroken) onBroken(a.dataset.name);
+      return;
+    }
+    const secret = e.target && e.target.closest && e.target.closest('blockquote[data-callout="secret"]');
+    if (secret) secret.classList.toggle('ck-revealed');
   };
 }
 

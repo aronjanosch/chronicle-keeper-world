@@ -37,6 +37,7 @@ export async function openCampaign(id) {
       vaultFolders: vaultTree.folders || [],
       loading: false,
     });
+    if (campaign.vault_path) { loadVaultLinks(id); loadKindSchemas(id); }
     navigate('campaign', { id });
   } catch (e) { setState({ error: e.message, loading: false }); }
 }
@@ -65,6 +66,7 @@ export async function createCampaign(form) {
     start_session_number: Number(form.start) || 1,
     vault_path: form.vault_path || null,
     scaffold: form.scaffold || false,
+    adopt: form.adopt || false,
   });
   await apiJson(`/campaigns/${id}`, 'PUT', {
     name: form.name, system: form.system, setting: form.setting,
@@ -74,6 +76,14 @@ export async function createCampaign(form) {
   await loadCampaigns();
   await openCampaign(id);
   return id;
+}
+
+// Re-add the demo world (New-World screen). 409 when it already exists.
+export async function addExampleWorld() {
+  const campaign = await apiJson('/seed-example', 'POST', {});
+  await loadCampaigns();
+  await openCampaign(campaign.campaign_id);
+  return campaign.campaign_id;
 }
 
 export async function updateCampaign(patch) {
@@ -202,6 +212,47 @@ export async function pickVaultFolder() {
   return typeof picked === 'string' ? picked : null;
 }
 
+// Layout sniff for the New-World "open existing" preview. Null on any error
+// (bad path, server down) — the preview just stays generic.
+export async function sniffVault(path) {
+  try {
+    return await apiJson('/vault/sniff', 'POST', { path });
+  } catch {
+    return null;
+  }
+}
+
+// Copy-in import: .md pages from a folder (e.g. an Obsidian vault) into this
+// world's Codex. Returns { imported, renamed }.
+export async function importVaultFolder(path) {
+  const id = store.campaign.campaign_id;
+  const r = await apiJson(`/campaigns/${id}/vault/import`, 'POST', { path });
+  await loadVaultTree(id);
+  return r;
+}
+
+// AI enhancement: assign kind + generate summary frontmatter for pages that lack them.
+// `folders` is an array of top-level folder names to process; empty → all folders.
+// Returns { enhanced, skipped, failed }.
+export async function enhanceVaultPages(folders) {
+  const id = store.campaign.campaign_id;
+  setOp('Enhancing pages with AI…');
+  try {
+    const r = await apiJson(`/campaigns/${id}/vault/enhance`, 'POST', { folders: folders || [] });
+    await loadVaultTree(id);
+    if (r.enhanced === 0 && r.failed === 0) {
+      setOp('All pages already enhanced — nothing to do', 'done');
+    } else {
+      const msg = `Enhanced ${r.enhanced} page${r.enhanced === 1 ? '' : 's'}${r.failed ? ` · ${r.failed} failed` : ''}`;
+      setOp(msg, r.failed ? 'err' : 'done');
+    }
+    return r;
+  } catch (e) {
+    setOp(e.message, 'err');
+    throw e;
+  }
+}
+
 export async function attachVault(path) {
   const id = store.campaign.campaign_id;
   const campaign = decorateCampaign(await apiJson(`/campaigns/${id}/vault`, 'PUT', { path: path || null }));
@@ -223,6 +274,7 @@ export async function loadVaultPages(campaignId) {
 }
 
 // Folders + pages in one shot — the Explorer's source of truth.
+// Also refreshes the link graph (non-blocking) so backlinks + diagnostics track mutations.
 export async function loadVaultTree(campaignId) {
   const id = campaignId || store.campaign?.campaign_id;
   if (!id) return { folders: [], pages: [] };
@@ -231,7 +283,59 @@ export async function loadVaultTree(campaignId) {
     return { folders: [], pages: [] };
   });
   setState({ vaultFolders: r.folders || [], vaultPages: r.pages || [] });
+  loadVaultLinks(id);
   return r;
+}
+
+// Per-kind infobox field schemas (.ck/config.toml overrides merged with built-ins).
+export async function loadKindSchemas(campaignId) {
+  const id = campaignId || store.campaign?.campaign_id;
+  if (!id) return;
+  const r = await apiFetch(`/campaigns/${id}/vault/kinds`).catch(() => null);
+  if (r) setState({ kindSchemas: r.kinds || [] });
+}
+
+// Poll the vault change counter; call onChange when files changed outside CK
+// (Obsidian, Finder, sync). Returns a stop function — use as a useEffect cleanup.
+export function watchVault(campaignId, onChange) {
+  let stopped = false;
+  let last = null;
+  const tick = async () => {
+    if (stopped) return;
+    try {
+      const r = await apiFetch(`/campaigns/${campaignId}/vault/seq`);
+      if (stopped) return;
+      if (last !== null && r.seq !== last) onChange();
+      last = r.seq;
+    } catch (_) { /* core restarting — keep polling */ }
+    if (!stopped) setTimeout(tick, 1500);
+  };
+  tick();
+  return () => { stopped = true; };
+}
+
+// ── Vault index (links, search, tags) ─────────────────────────────
+export async function loadVaultLinks(campaignId) {
+  const id = campaignId || store.campaign?.campaign_id;
+  if (!id) return null;
+  const r = await apiFetch(`/campaigns/${id}/vault/index/links`).catch(() => null);
+  if (r) setState({ vaultLinks: r });
+  return r;
+}
+
+export async function searchVault(q) {
+  const id = store.campaign?.campaign_id;
+  if (!id || !q || !q.trim()) return [];
+  const r = await apiFetch(`/campaigns/${id}/vault/search?q=${encodeURIComponent(q)}`).catch(() => null);
+  return (r && r.results) || [];
+}
+
+export async function loadVaultTags(campaignId) {
+  const id = campaignId || store.campaign?.campaign_id;
+  if (!id) return [];
+  const r = await apiFetch(`/campaigns/${id}/vault/index/tags`).catch(() => null);
+  if (r) setState({ vaultTags: r.tags || [] });
+  return (r && r.tags) || [];
 }
 
 export async function createVaultFolder(path) {
@@ -271,8 +375,9 @@ export async function saveVaultPage(path, content) {
   setState({
     currentPage: store.currentPage?.path === path ? page : store.currentPage,
     vaultPages: (store.vaultPages || []).map((p) => (p.path === path
-      ? { path: page.path, title: page.title, kind: page.kind, summary: page.summary } : p)),
+      ? { ...p, path: page.path, title: page.title, kind: page.kind, summary: page.summary } : p)),
   });
+  loadVaultLinks(id);
   return page;
 }
 
@@ -377,6 +482,10 @@ function pollModelStatus() {
           setOp(`Downloading model ${bar(p.downloaded / p.total)} ${pct}% (${(p.downloaded / MB).toFixed(0)}/${(p.total / MB).toFixed(0)} MB)`);
         } else setOp(`Downloading model… ${(p.downloaded / MB).toFixed(0)} MB`);
       } else if (p.phase === 'extracting') setOp('Extracting model…');
+      else if (p.phase === 'error') {
+        setOp(p.message || 'Model download failed.', 'err');
+        stopped = true; return;
+      }
       else if (p.phase === 'transcribing') {
         const tot = p.track_total || 0;
         if (tot > 0) {
@@ -566,6 +675,12 @@ export function testLlmProvider(id, model) {
 
 export function pingLlmProvider(id) {
   return apiFetch(`/llm-providers/${id}/ping`);
+}
+
+// Live model list (Ollama only); empty array for other providers.
+export async function fetchLlmModels(id) {
+  try { return (await apiFetch(`/llm-providers/${id}/models`)).models || []; }
+  catch (_) { return []; }
 }
 
 // Status of the active summary provider for the sidebar badge. Only flags real

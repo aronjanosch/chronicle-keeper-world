@@ -111,6 +111,16 @@ button { font-family: inherit; }
 .ck-callout-title { display: block; font-weight: 600; font-size: 12px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink-muted); margin-bottom: 4px; }
 .ck-prose blockquote[data-callout="secret"] .ck-callout-title { color: var(--burgundy-700); }
 
+/* GM-only spoiler: content blurred until clicked (click again to re-hide) */
+.ck-prose blockquote[data-callout="secret"] { cursor: pointer; position: relative; }
+.ck-prose blockquote[data-callout="secret"]:not(.ck-revealed) > * { filter: blur(5px); user-select: none; pointer-events: none; }
+.ck-prose blockquote[data-callout="secret"]:not(.ck-revealed)::after {
+  content: 'Secret · click to reveal'; position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--burgundy-700);
+}
+
 /* Wikilinks */
 .ck-prose a.ck-wikilink { color: var(--burgundy); text-decoration: none; border-bottom: 1px solid var(--burgundy-300); cursor: pointer; }
 .ck-prose a.ck-wikilink:hover { border-bottom-color: var(--burgundy); }
@@ -152,6 +162,13 @@ button { font-family: inherit; }
 .ck-prop-tag { padding: 1px 7px; border-radius: 3px; background: var(--paper-deep); border: 1px solid var(--rule-soft); font-size: 11px; color: var(--ink-soft); }
 .ck-prop-tag.mono { font-family: var(--font-mono); }
 .ck-prop-empty { color: var(--ink-faint); font-size: 12px; display: flex; align-items: center; gap: 5px; }
+.ck-prop-blank { color: var(--ink-faint); font-size: 11px; }
+
+/* Reading-view infobox: the page kind's frontmatter fields, floated right */
+.ck-infobox { float: right; width: 220px; margin: 0 0 14px 22px; padding: 10px 12px 8px; background: var(--surface); border: 1px solid var(--rule); border-radius: 8px; }
+.ck-infobox-head { display: flex; align-items: center; gap: 6px; font-size: 10.5px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: var(--burgundy); padding-bottom: 7px; margin-bottom: 7px; border-bottom: 1px solid var(--rule-soft); }
+.ck-infobox-row { display: flex; align-items: baseline; gap: 8px; padding: 3px 0; font-size: 12px; }
+.ck-infobox-key { width: 72px; flex: 0 0 auto; color: var(--ink-faint); font-family: var(--font-mono); font-size: 10.5px; }
 
 /* files-as-truth provenance line */
 .ck-provenance { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--ink-faint); font-family: var(--font-mono); }

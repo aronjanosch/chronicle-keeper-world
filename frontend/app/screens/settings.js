@@ -1,7 +1,7 @@
 // Screen 08 — Settings. Calm single page, grouped into cards. Real config.
 import { html, useState, useEffect } from '../../vendor/htm-preact-standalone.mjs';
 import { store, setOp, openModal } from '../core.js';
-import { loadConfig, saveConfig, loadLlmProviders, loadPromptTemplates, deletePromptTemplate, restorePromptDefaults } from '../actions.js';
+import { loadConfig, saveConfig, loadLlmProviders, loadPromptTemplates, deletePromptTemplate, restorePromptDefaults, pingLlmProvider } from '../actions.js';
 import { Shell, Sidebar, Topbar } from '../shell.js';
 import { Icon, Btn } from '../ui.js';
 
@@ -28,8 +28,8 @@ function SettingsCard({ icon, title, desc, children }) {
 }
 const inp = (extra = {}) => ({ width: '100%', padding: '7px 10px', background: 'var(--surface-raised)', border: '1px solid var(--rule)', borderRadius: 4, fontSize: 13, color: 'var(--ink)', ...extra });
 
-function ProviderCard({ p }) {
-  const status = !p.needs_key ? 'ok' : (p.has_key ? 'ok' : 'missing');
+function ProviderCard({ p, live }) {
+  const status = live === false ? 'down' : !p.needs_key ? 'ok' : (p.has_key ? 'ok' : 'missing');
   const model = p.saved_model || p.default_model;
   const badge = { ollama: { ch: '◉', bg: '#1F1813' }, 'ollama-cloud': { ch: '☁', bg: '#0B6E99' }, anthropic: { ch: 'A', bg: '#C96442' }, openai: { ch: 'O', bg: '#0F8C66' }, groq: { ch: 'G', bg: '#F55036' }, mistral: { ch: 'M', bg: '#FF7000' } }[p.id] || { ch: p.name[0], bg: 'var(--ink-muted)' };
   const isDefault = (store.config?.summary_provider || 'ollama').toLowerCase() === p.id;
@@ -42,9 +42,9 @@ function ProviderCard({ p }) {
       </div>
       <div style=${{ fontSize: 11.5, color: 'var(--ink-muted)', fontFamily: 'var(--font-mono)', marginTop: 1 }}>${model}</div>
     </div>
-    <div style=${{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11.5, color: status === 'ok' ? 'var(--moss)' : 'var(--ink-faint)', fontWeight: 500 }}>
-      <span style=${{ width: 6, height: 6, borderRadius: '50%', background: status === 'ok' ? 'var(--moss)' : 'var(--ink-ghost)' }} />
-      ${status === 'ok' ? (p.needs_key ? 'Key saved' : 'Local') : 'No key'}
+    <div style=${{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11.5, color: status === 'ok' ? 'var(--moss)' : status === 'down' ? 'var(--burgundy-700)' : 'var(--ink-faint)', fontWeight: 500 }}>
+      <span style=${{ width: 6, height: 6, borderRadius: '50%', background: status === 'ok' ? 'var(--moss)' : status === 'down' ? 'var(--burgundy-700)' : 'var(--ink-ghost)' }} />
+      ${status === 'down' ? 'Unreachable' : status === 'ok' ? (live ? 'Online' : p.needs_key ? 'Key saved' : 'Local') : 'No key'}
     </div>
     <${Btn} kind="ghost" size="sm" onClick=${() => openModal('provider', { id: p.id })}>Manage ›</${Btn}>
   </div>`;
@@ -96,6 +96,7 @@ export function SettingsScreen({ store }) {
   const [f, setF] = useState(null);
   const [apiBase, setApiBase] = useState(store.apiBase);
   const [saving, setSaving] = useState(false);
+  const [pings, setPings] = useState({});
   const set = (k, v) => setF((s) => ({ ...s, [k]: v }));
 
   useEffect(() => {
@@ -106,8 +107,15 @@ export function SettingsScreen({ store }) {
       setF({
         output_root: cfg.output_root || '',
         summary_provider: (cfg.summary_provider || 'ollama').toLowerCase(),
+        transcription_timeout_seconds: cfg.transcription_timeout_seconds || 3600,
       });
       setApiBase(store.apiBase);
+      // Live reachability, Ollama-family only (other transports have no keyless probe).
+      for (const p of (store.llmProviders || []).filter((x) => x.id.startsWith('ollama'))) {
+        pingLlmProvider(p.id)
+          .then((r) => setPings((m) => ({ ...m, [p.id]: !!r.ok })))
+          .catch(() => setPings((m) => ({ ...m, [p.id]: false })));
+      }
     })();
   }, []);
 
@@ -119,6 +127,7 @@ export function SettingsScreen({ store }) {
       const payload = {
         output_root: f.output_root.trim(),
         summary_provider: f.summary_provider || 'ollama',
+        transcription_timeout_seconds: Math.max(60, parseInt(f.transcription_timeout_seconds, 10) || 3600),
       };
       await saveConfig(payload, apiBase.trim());
       setOp('Settings saved', 'done');
@@ -146,6 +155,9 @@ export function SettingsScreen({ store }) {
               <div style=${{ padding: '7px 10px', background: 'var(--paper-deep)', border: '1px solid var(--rule-soft)', borderRadius: 4, fontSize: 12.5, color: 'var(--ink-faint)' }}>Dark (soon)</div>
             </div>
           </${Row}>
+          <${Row} label="Transcription timeout" hint="Cap a single transcription run, in seconds. Raise for very long sessions.">
+            <input type="number" min="60" step="60" value=${f.transcription_timeout_seconds} onInput=${(e) => set('transcription_timeout_seconds', e.target.value)} style=${inp({ width: 140, fontFamily: 'var(--font-mono)' })} />
+          </${Row}>
           ${!store.shellMode && html`
           <${Row} label="Backend URL" hint="Where the Chronicle Keeper core is running. Stored in this browser only.">
             <input value=${apiBase} onInput=${(e) => setApiBase(e.target.value)} placeholder="http://127.0.0.1:8000" style=${inp({ width: 340, fontFamily: 'var(--font-mono)' })} />
@@ -159,7 +171,7 @@ export function SettingsScreen({ store }) {
             </select>
           </${Row}>
           <div style=${{ display: 'flex', flexDirection: 'column', gap: 8, paddingTop: 12 }}>
-            ${providers.map((p) => html`<${ProviderCard} key=${p.id} p=${p} />`)}
+            ${providers.map((p) => html`<${ProviderCard} key=${p.id} p=${p} live=${pings[p.id]} />`)}
           </div>
         </${SettingsCard}>
 
