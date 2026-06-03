@@ -148,6 +148,27 @@ pub async fn ping_provider(
     }))
 }
 
+/// Live model list (Ollama `/api/tags`); empty for other transports.
+pub async fn list_provider_models(
+    State(state): State<AppState>,
+    Path(provider_id): Path<String>,
+) -> AppResult<Json<serde_json::Value>> {
+    let p = llm::get(&provider_id)
+        .ok_or_else(|| AppError::NotFound(format!("Unknown provider: {provider_id}")))?;
+    let saved = state
+        .with_db(|conn| llm::get_key(conn, &provider_id))?
+        .unwrap_or_default();
+    let api_base = if !saved.api_base.is_empty() {
+        saved.api_base.clone()
+    } else {
+        p.default_api_base.unwrap_or("").to_string()
+    };
+    let models = llm::list_models(p.transport, &api_base, &saved.api_key, 4)
+        .await
+        .unwrap_or_default();
+    Ok(Json(json!({ "models": models })))
+}
+
 pub async fn summarize(
     State(state): State<AppState>,
     Json(req): Json<SummarizeRequest>,

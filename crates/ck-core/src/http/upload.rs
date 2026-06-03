@@ -264,12 +264,8 @@ pub async fn label_speakers(
     State(state): State<AppState>,
     Json(req): Json<LabelSpeakersRequest>,
 ) -> AppResult<Json<Value>> {
-    state.with_db(|conn| -> crate::error::AppResult<()> {
-        sessions::set_speakers(conn, &req.session_id, &req.speakers)?;
-        // Write session.toml with updated speaker map (vault sessions only).
-        let _ = crate::session_files::sync_session_toml(conn, &req.session_id);
-        Ok(())
-    })?;
+    // set_speakers writes the speaker map straight into session.toml (truth).
+    state.with_db(|conn| sessions::set_speakers(conn, &req.session_id, &req.speakers))?;
     Ok(Json(
         json!({ "session_id": req.session_id, "speakers": req.speakers }),
     ))

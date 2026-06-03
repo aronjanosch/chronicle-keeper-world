@@ -1,7 +1,9 @@
 //! 0.X → 1.0 one-time migration (Phase 1.7-F): reads the legacy DB read-only
-//! (never written — the old app can still open it), writes world folders +
-//! session files, fills the v1 cache DB. Idempotent (OR IGNORE inserts,
-//! overwriting file writes), so a partially failed run is simply re-run.
+//! (never written — the old app can still open it) and writes world folders +
+//! session files. Files are truth; no campaign/session/artifact rows land in
+//! the v1 DB. Idempotent (existing file values win), so a partially failed run
+//! is simply re-run. Legacy codex/codex_notes are NOT migrated — Phase 5
+//! import reads them from the legacy DB instead.
 
 use std::collections::HashSet;
 use std::path::Path;
@@ -92,9 +94,20 @@ pub fn run_all(conn: &Connection, legacy_db: &Path) -> AppResult<MigrationResult
     copy_settings(&legacy, conn)?;
 
     for c in legacy_campaigns(&legacy)? {
-        insert_campaign(conn, &c)?;
-        if let Err(e) = campaigns::provision_vault(conn, &c.campaign_id, &c.name, None, false) {
+        if let Err(e) = campaigns::create_campaign(
+            conn,
+            &c.campaign_id,
+            &c.name,
+            c.next_session_number,
+            None,
+            false,
+            false,
+        ) {
             errors.push(format!("{}: provision world failed: {e}", c.name));
+            continue;
+        }
+        if let Err(e) = carry_campaign_into_config(conn, &c) {
+            errors.push(format!("{}: write config.toml failed: {e}", c.name));
             continue;
         }
         let vault_codex = match campaigns::get_campaign(conn, &c.campaign_id) {
@@ -118,7 +131,7 @@ pub fn run_all(conn: &Connection, legacy_db: &Path) -> AppResult<MigrationResult
             let Some(new_path) = session_files::vault_session_path(&vault_codex, number) else {
                 continue;
             };
-            match migrate_session(&legacy, conn, &c, &s, &new_path) {
+            match migrate_session(&legacy, &c, &s, &new_path) {
                 Ok(_) => sessions_done += 1,
                 Err(e) => {
                     errors.push(format!("{} session {number}: {e}", c.name));
@@ -172,8 +185,6 @@ struct LegacyCampaign {
     default_language: Option<String>,
     players_json: String,
     extra_info: Option<String>,
-    codex: Option<String>,
-    codex_notes: Option<String>,
     recap: Option<String>,
     recap_updated_at: Option<String>,
     gm_pronouns: Option<String>,
@@ -182,7 +193,7 @@ struct LegacyCampaign {
 fn legacy_campaigns(legacy: &Connection) -> AppResult<Vec<LegacyCampaign>> {
     let mut stmt = legacy.prepare(
         "SELECT campaign_id, name, next_session_number, system, gm, setting, \
-                default_language, players_json, extra_info, codex, codex_notes, \
+                default_language, players_json, extra_info, \
                 recap, recap_updated_at, gm_pronouns \
          FROM campaigns WHERE deleted = 0 ORDER BY name",
     )?;
@@ -198,11 +209,9 @@ fn legacy_campaigns(legacy: &Connection) -> AppResult<Vec<LegacyCampaign>> {
                 default_language: r.get(6)?,
                 players_json: r.get(7)?,
                 extra_info: r.get(8)?,
-                codex: r.get(9)?,
-                codex_notes: r.get(10)?,
-                recap: r.get(11)?,
-                recap_updated_at: r.get(12)?,
-                gm_pronouns: r.get(13)?,
+                recap: r.get(9)?,
+                recap_updated_at: r.get(10)?,
+                gm_pronouns: r.get(11)?,
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -247,32 +256,10 @@ fn legacy_sessions(legacy: &Connection, campaign_id: &str) -> AppResult<Vec<Lega
 }
 
 struct LegacyArtifact {
-    artifact_id: String,
-    kind: String,
     provider: String,
     model: String,
     content: String,
     created_at: String,
-}
-
-fn legacy_artifacts(legacy: &Connection, session_id: &str) -> AppResult<Vec<LegacyArtifact>> {
-    let mut stmt = legacy.prepare(
-        "SELECT artifact_id, kind, provider, model, content, created_at \
-         FROM artifacts WHERE session_id = ?1 ORDER BY created_at",
-    )?;
-    let rows = stmt
-        .query_map(params![session_id], |r| {
-            Ok(LegacyArtifact {
-                artifact_id: r.get(0)?,
-                kind: r.get(1)?,
-                provider: r.get(2)?,
-                model: r.get(3)?,
-                content: r.get(4)?,
-                created_at: r.get(5)?,
-            })
-        })?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
-    Ok(rows)
 }
 
 // ── v1 writes ─────────────────────────────────────────────────────
@@ -329,29 +316,27 @@ fn copy_settings(legacy: &Connection, conn: &Connection) -> AppResult<()> {
     Ok(())
 }
 
-fn insert_campaign(conn: &Connection, c: &LegacyCampaign) -> AppResult<()> {
-    conn.execute(
-        "INSERT OR IGNORE INTO campaigns \
-         (campaign_id, name, next_session_number, system, gm, setting, default_language, \
-          players_json, extra_info, codex, codex_notes, recap, recap_updated_at, gm_pronouns) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
-        params![
-            c.campaign_id,
-            c.name,
-            c.next_session_number,
-            c.system,
-            c.gm,
-            c.setting,
-            c.default_language,
-            c.players_json,
-            c.extra_info,
-            c.codex.as_deref().unwrap_or(""),
-            c.codex_notes.as_deref().unwrap_or(""),
-            c.recap.as_deref().unwrap_or(""),
-            c.recap_updated_at.as_deref().unwrap_or(""),
-            c.gm_pronouns.as_deref().unwrap_or(""),
-        ],
-    )?;
+/// Carry the legacy campaign identity into the freshly provisioned world's
+/// `.ck/config.toml` (+ recap into `.ck/recap.md`).
+fn carry_campaign_into_config(conn: &Connection, c: &LegacyCampaign) -> AppResult<()> {
+    let players: Value = serde_json::from_str(&c.players_json).unwrap_or(Value::Array(vec![]));
+    let req = crate::models::CampaignUpdateRequest {
+        system: c.system.clone(),
+        gm: c.gm.clone(),
+        gm_pronouns: c.gm_pronouns.clone(),
+        setting: c.setting.clone(),
+        default_language: c.default_language.clone(),
+        extra_info: c.extra_info.clone(),
+        players: Some(players),
+        ..Default::default()
+    };
+    campaigns::update_campaign(conn, &c.campaign_id, &req)?;
+    if let Some(recap) = c.recap.as_deref().filter(|r| !r.trim().is_empty()) {
+        let root = campaigns::world_root_for_id(conn, &c.campaign_id)?
+            .ok_or_else(|| AppError::NotFound(format!("world vanished: {}", c.campaign_id)))?;
+        let ts = c.recap_updated_at.as_deref().unwrap_or("");
+        crate::world_config::write_recap(&root, recap, ts)?;
+    }
     Ok(())
 }
 
@@ -361,16 +346,15 @@ fn io_err(what: &str, e: std::io::Error) -> AppError {
 
 fn migrate_session(
     legacy: &Connection,
-    conn: &Connection,
     campaign: &LegacyCampaign,
     s: &LegacySession,
     new_path: &Path,
 ) -> AppResult<()> {
     std::fs::create_dir_all(new_path).map_err(|e| io_err("create session folder", e))?;
 
-    // Audio failures abort before the v1 row exists, so a re-run picks the
-    // session up again. Fork-interim sessions already at the target path are
-    // only registered — copying would nest audio/audio/.
+    // Audio failures abort before session.toml is written, so a re-run picks
+    // the session up again. Fork-interim sessions already at the target path
+    // are only registered — copying would nest audio/audio/.
     let old_path = Path::new(&s.session_path);
     let already_in_place = old_path.canonicalize().ok() == new_path.canonicalize().ok();
     if !already_in_place {
@@ -381,20 +365,34 @@ fn migrate_session(
     let language = campaign.default_language.as_deref().unwrap_or("en");
     let tracks = serde_json::from_str(&s.tracks_json).unwrap_or(Value::Array(vec![]));
     let speakers = serde_json::from_str(&s.speakers_json).unwrap_or(Value::Array(vec![]));
-    session_files::write_session_toml(
-        new_path,
+    let mut st = session_files::SessionToml::from_json_parts(
         s.number,
         s.title.as_deref(),
         s.date.as_deref(),
         language,
         &tracks,
         &speakers,
-    )
-    .map_err(|e| io_err("write session.toml", e))?;
-
-    if let Some(notes) = s.notes.as_deref().filter(|n| !n.trim().is_empty()) {
-        session_files::write_notes_md(new_path, notes).map_err(|e| io_err("write notes.md", e))?;
+    );
+    st.id = Some(s.session_id.clone());
+    let metadata: Value = serde_json::from_str(&s.metadata_json).unwrap_or(Value::Null);
+    st.metadata = crate::store::sessions::metadata_from_value(&crate::normalize::normalize_metadata(&metadata));
+    st.notes = s.notes.clone().unwrap_or_default();
+    // Fork-interim sessions may carry post-0.X edits in their session.toml —
+    // existing file values win over the legacy DB.
+    if let Ok(Some(existing)) = session_files::read_session_toml(new_path) {
+        if existing.id.is_some() {
+            st.id = existing.id;
+        }
+        if !existing.metadata.is_empty() {
+            st.metadata = existing.metadata;
+        }
+        if !existing.notes.is_empty() {
+            st.notes = existing.notes;
+        }
+        st.transcript = existing.transcript;
     }
+    session_files::write_session_toml_file(new_path, &st)
+        .map_err(|e| io_err("write session.toml", e))?;
 
     if let Some(a) = latest_artifact(legacy, &s.session_id, "transcript")? {
         session_files::write_transcript_md(new_path, &a.content)
@@ -414,41 +412,6 @@ fn migrate_session(
         .map_err(|e| io_err("write summary.md", e))?;
     }
 
-    conn.execute(
-        "INSERT OR IGNORE INTO sessions \
-         (session_id, campaign_id, session_number, title, date, metadata_json, notes, \
-          session_path, tracks_json, speakers_json) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
-        params![
-            s.session_id,
-            campaign.campaign_id,
-            s.number,
-            s.title,
-            s.date,
-            s.metadata_json,
-            s.notes,
-            new_path.to_string_lossy(),
-            s.tracks_json,
-            s.speakers_json,
-        ],
-    )?;
-
-    for a in legacy_artifacts(legacy, &s.session_id)? {
-        // Pre-backfill legacy rows can have an empty artifact_id; the v1 unique
-        // index needs one.
-        let artifact_id = if a.artifact_id.is_empty() {
-            uuid::Uuid::new_v4().to_string()
-        } else {
-            a.artifact_id
-        };
-        conn.execute(
-            "INSERT OR IGNORE INTO artifacts \
-             (artifact_id, session_id, kind, provider, model, file_path, content, created_at) \
-             VALUES (?1, ?2, ?3, ?4, ?5, '', ?6, ?7)",
-            params![artifact_id, s.session_id, a.kind, a.provider, a.model, a.content, a.created_at],
-        )?;
-    }
-
     Ok(())
 }
 
@@ -459,18 +422,16 @@ fn latest_artifact(
 ) -> AppResult<Option<LegacyArtifact>> {
     let row = legacy
         .query_row(
-            "SELECT artifact_id, kind, provider, model, content, created_at \
+            "SELECT provider, model, content, created_at \
              FROM artifacts WHERE session_id = ?1 AND kind = ?2 \
              ORDER BY created_at DESC LIMIT 1",
             params![session_id, kind],
             |r| {
                 Ok(LegacyArtifact {
-                    artifact_id: r.get(0)?,
-                    kind: r.get(1)?,
-                    provider: r.get(2)?,
-                    model: r.get(3)?,
-                    content: r.get(4)?,
-                    created_at: r.get(5)?,
+                    provider: r.get(0)?,
+                    model: r.get(1)?,
+                    content: r.get(2)?,
+                    created_at: r.get(3)?,
                 })
             },
         )
@@ -535,7 +496,11 @@ mod tests {
         )
         .unwrap();
         conn.execute(
-            "INSERT INTO campaigns (campaign_id, name, default_language) VALUES ('c1', 'Ashfall', 'de')",
+            "INSERT INTO campaigns (campaign_id, name, default_language, system, gm, setting, \
+                                    players_json, recap, recap_updated_at) \
+             VALUES ('c1', 'Ashfall', 'de', 'D&D 5e', 'The Keeper', 'A frontier of ash.', \
+                     '[{\"player_name\":\"Sam\",\"character_name\":\"Lyra\"}]', \
+                     'Previously…', '2025-01-16T10:00:00')",
             [],
         )
         .unwrap();
@@ -544,8 +509,8 @@ mod tests {
         std::fs::create_dir_all(&old_session).unwrap();
         std::fs::write(old_session.join("track-aria.flac"), b"FLACDATA").unwrap();
         conn.execute(
-            "INSERT INTO sessions (session_id, campaign_id, session_number, title, date, notes, session_path, tracks_json) \
-             VALUES ('s1', 'c1', 1, 'The Iron Crown', '2025-01-15', 'my notes', ?1, '[{\"id\":\"aria\",\"filename\":\"track-aria.flac\"}]')",
+            "INSERT INTO sessions (session_id, campaign_id, session_number, title, date, notes, metadata_json, session_path, tracks_json) \
+             VALUES ('s1', 'c1', 1, 'The Iron Crown', '2025-01-15', 'my notes', '{\"tags\":[\"Kampf\"],\"characters\":[\"Lyra\"]}', ?1, '[{\"id\":\"aria\",\"filename\":\"track-aria.flac\"}]')",
             params![old_session.to_string_lossy()],
         )
         .unwrap();
@@ -587,35 +552,46 @@ mod tests {
         assert_eq!(res.sessions_migrated, 1);
         assert_eq!(res.sessions_skipped, 1);
 
-        // Files are truth.
+        // Files are truth: campaign identity in config.toml + recap.md…
         let world = dir.join("out").join("Ashfall");
-        assert!(world.join(".ck").join("config.toml").is_file());
+        let cfg = crate::world_config::read(&world).unwrap().unwrap();
+        assert_eq!(cfg.system, "D&D 5e");
+        assert_eq!(cfg.gm, "The Keeper");
+        assert_eq!(cfg.default_language, "de");
+        assert_eq!(cfg.players[0].character_name, "Lyra");
+        let (recap, recap_at) = crate::world_config::read_recap(&world);
+        assert_eq!(recap, "Previously…");
+        assert_eq!(recap_at, "2025-01-16T10:00:00");
         assert!(world.join("Codex").is_dir());
+
+        // …session identity/metadata/notes in session.toml.
         let session = world.join("Sessions").join("001");
         assert!(session.join("audio").join("track-aria.flac").is_file());
-        assert!(session.join("session.toml").is_file());
-        assert!(session.join("notes.md").is_file());
+        let st = session_files::read_session_toml(&session).unwrap().unwrap();
+        assert_eq!(st.id.as_deref(), Some("s1"));
+        assert_eq!(st.notes, "my notes");
+        assert_eq!(st.metadata.tags, vec!["Kampf"]);
+        assert_eq!(st.metadata.characters, vec!["Lyra"]);
         let summary = std::fs::read_to_string(session.join("summary.md")).unwrap();
         assert!(summary.contains("provider: ollama"));
         assert!(summary.contains("It began at dusk."));
 
-        let path: String = conn
-            .query_row("SELECT session_path FROM sessions WHERE session_id = 's1'", [], |r| r.get(0))
+        // No campaign/session/artifact data lands in the v1 DB (FK shim aside).
+        let n: i64 = conn
+            .query_row("SELECT COUNT(*) FROM sessions", [], |r| r.get(0))
             .unwrap();
-        assert!(path.ends_with("Sessions/001"));
+        assert_eq!(n, 0);
         let n: i64 = conn
             .query_row("SELECT COUNT(*) FROM artifacts", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(n, 1);
+        assert_eq!(n, 0);
 
         // Done flag set; status flips off. Re-run stays idempotent.
         assert!(!status(&conn, &legacy_path).unwrap().needs_migration);
         let res2 = run_all(&conn, &legacy_path).unwrap();
         assert!(res2.ok);
-        let n2: i64 = conn
-            .query_row("SELECT COUNT(*) FROM sessions", [], |r| r.get(0))
-            .unwrap();
-        assert_eq!(n2, 1);
+        let again = session_files::read_session_toml(&session).unwrap().unwrap();
+        assert_eq!(again.id.as_deref(), Some("s1"));
 
         // Legacy DB untouched: still has its rows, no new columns flipped.
         let legacy = open_legacy(&legacy_path).unwrap();

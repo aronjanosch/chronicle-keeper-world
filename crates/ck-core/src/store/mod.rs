@@ -1,6 +1,7 @@
 pub mod artifacts;
 pub mod campaigns;
 pub mod codex;
+pub mod index;
 pub mod migration;
 pub mod prompts;
 pub mod sessions;

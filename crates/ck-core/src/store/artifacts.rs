@@ -1,13 +1,99 @@
-use chrono::Local;
-use rusqlite::{params, Connection, OptionalExtension};
-use uuid::Uuid;
+//! Artifacts — files are truth. One `transcript.md` + one `summary.md` per
+//! session folder; the old DB row history collapsed to "the current file".
+//! Synthetic stable ids (transcript = 1, summary = 2, scoped to the session
+//! routes) keep the HTTP contract intact. Provenance: transcript meta lives in
+//! `session.toml [transcript]`, summary meta in summary.md frontmatter.
 
-use crate::error::AppResult;
+use std::path::{Path, PathBuf};
+
+use rusqlite::Connection;
+
+use crate::error::{AppError, AppResult};
 use crate::models::ArtifactInfo;
+use crate::session_files::{self, ArtifactMeta};
+use crate::store::sessions;
 
-/// Insert an artifact. Content is stored inline in the DB (core principle #1:
-/// everything in SQLite, no loose files). A stable `artifact_id` UUID
-/// identifies the row across DBs (the 0.X→1.0 migration keys on it).
+pub const TRANSCRIPT_ID: i64 = 1;
+pub const SUMMARY_ID: i64 = 2;
+
+fn id_of(kind: &str) -> i64 {
+    if kind == "summary" { SUMMARY_ID } else { TRANSCRIPT_ID }
+}
+
+fn kind_of(id: i64) -> Option<&'static str> {
+    match id {
+        TRANSCRIPT_ID => Some("transcript"),
+        SUMMARY_ID => Some("summary"),
+        _ => None,
+    }
+}
+
+fn file_of(dir: &Path, kind: &str) -> PathBuf {
+    if kind == "summary" {
+        session_files::summary_md_path(dir)
+    } else {
+        session_files::transcript_md_path(dir)
+    }
+}
+
+fn session_dir(conn: &Connection, session_id: &str) -> AppResult<PathBuf> {
+    sessions::session_path_of(conn, session_id)?
+        .map(PathBuf::from)
+        .ok_or_else(|| AppError::NotFound(format!("Session not found: {session_id}")))
+}
+
+fn mtime_stamp(p: &Path) -> String {
+    p.metadata()
+        .and_then(|m| m.modified())
+        .ok()
+        .map(|t| {
+            chrono::DateTime::<chrono::Local>::from(t)
+                .naive_local()
+                .format("%Y-%m-%dT%H:%M:%S%.6f")
+                .to_string()
+        })
+        .unwrap_or_default()
+}
+
+// Provenance for one kind: transcript from session.toml, summary from
+// summary.md frontmatter.
+fn meta_for(dir: &Path, kind: &str) -> ArtifactMeta {
+    if kind == "transcript" {
+        return session_files::read_session_toml(dir)
+            .ok()
+            .flatten()
+            .map(|st| st.transcript)
+            .unwrap_or_default();
+    }
+    let Ok(raw) = std::fs::read_to_string(file_of(dir, kind)) else {
+        return ArtifactMeta::default();
+    };
+    let (fm, _) = crate::vault::split_frontmatter(&raw);
+    ArtifactMeta {
+        provider: crate::vault::fm_get(&fm, "provider").unwrap_or("").to_string(),
+        model: crate::vault::fm_get(&fm, "model").unwrap_or("").to_string(),
+        generated_at: crate::vault::fm_get(&fm, "generated_at").unwrap_or("").to_string(),
+    }
+}
+
+fn info_for(dir: &Path, session_id: &str, kind: &str) -> Option<ArtifactInfo> {
+    let path = file_of(dir, kind);
+    if !path.metadata().map(|m| m.len() > 0).unwrap_or(false) {
+        return None;
+    }
+    let meta = meta_for(dir, kind);
+    Some(ArtifactInfo {
+        id: id_of(kind),
+        artifact_id: format!("{session_id}:{kind}"),
+        session_id: session_id.to_string(),
+        kind: kind.to_string(),
+        provider: meta.provider,
+        model: meta.model,
+        created_at: if meta.generated_at.is_empty() { mtime_stamp(&path) } else { meta.generated_at },
+    })
+}
+
+/// Write the artifact file (+ provenance). Returns the synthetic info.
 pub fn insert_artifact(
     conn: &Connection,
     session_id: &str,
@@ -16,144 +102,118 @@ pub fn insert_artifact(
     model: &str,
     content: &str,
 ) -> AppResult<ArtifactInfo> {
-    let created_at = Local::now()
+    let dir = session_dir(conn, session_id)?;
+    let generated_at = chrono::Local::now()
         .naive_local()
         .format("%Y-%m-%dT%H:%M:%S%.6f")
         .to_string();
-    let artifact_id = Uuid::new_v4().to_string();
-    conn.execute(
-        // file_path is dead legacy (content is inline now) but is NOT NULL with no
-        // default on DBs created before the schema added one — write '' explicitly.
-        "INSERT INTO artifacts (artifact_id, session_id, kind, provider, model, file_path, content, created_at) \
-         VALUES (?1, ?2, ?3, ?4, ?5, '', ?6, ?7)",
-        params![artifact_id, session_id, kind, provider, model, content, created_at],
-    )?;
-    let id = conn.last_insert_rowid();
+    if kind == "summary" {
+        let st = session_files::read_session_toml(&dir).ok().flatten().unwrap_or_default();
+        session_files::write_summary_md(
+            &dir,
+            content,
+            st.number,
+            st.date.as_deref(),
+            st.title.as_deref(),
+            provider,
+            model,
+            &generated_at,
+        )
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("write summary.md: {e}")))?;
+    } else {
+        session_files::write_transcript_md(&dir, content)
+            .map_err(|e| AppError::Internal(anyhow::anyhow!("write transcript.md: {e}")))?;
+        if let Ok(Some(mut st)) = session_files::read_session_toml(&dir) {
+            st.transcript = ArtifactMeta {
+                provider: provider.to_string(),
+                model: model.to_string(),
+                generated_at: generated_at.clone(),
+            };
+            let _ = session_files::write_session_toml_file(&dir, &st);
+        }
+    }
     Ok(ArtifactInfo {
-        id,
-        artifact_id,
+        id: id_of(kind),
+        artifact_id: format!("{session_id}:{kind}"),
         session_id: session_id.to_string(),
         kind: kind.to_string(),
         provider: provider.to_string(),
         model: model.to_string(),
-        created_at,
+        created_at: generated_at,
     })
 }
 
-fn row_to_artifact(row: &rusqlite::Row) -> rusqlite::Result<ArtifactInfo> {
-    Ok(ArtifactInfo {
-        id: row.get("id")?,
-        artifact_id: row.get("artifact_id")?,
-        session_id: row.get("session_id")?,
-        kind: row.get("kind")?,
-        provider: row.get("provider")?,
-        model: row.get("model")?,
-        created_at: row.get("created_at")?,
-    })
-}
-
-const COLS: &str = "id, artifact_id, session_id, kind, provider, model, created_at";
-
+/// 0 or 1 synthetic artifacts per kind (the file either exists or doesn't).
 pub fn list_artifacts(
     conn: &Connection,
     session_id: &str,
     kind: Option<&str>,
 ) -> AppResult<Vec<ArtifactInfo>> {
-    let mut out = Vec::new();
-    match kind {
-        Some(k) => {
-            let mut stmt = conn.prepare(&format!(
-                "SELECT {COLS} FROM artifacts WHERE session_id = ?1 AND kind = ?2 ORDER BY created_at DESC",
-            ))?;
-            let rows = stmt.query_map(params![session_id, k], row_to_artifact)?;
-            for r in rows {
-                out.push(r?);
-            }
-        }
-        None => {
-            let mut stmt = conn.prepare(&format!(
-                "SELECT {COLS} FROM artifacts WHERE session_id = ?1 ORDER BY created_at DESC",
-            ))?;
-            let rows = stmt.query_map(params![session_id], row_to_artifact)?;
-            for r in rows {
-                out.push(r?);
-            }
-        }
+    let dir = session_dir(conn, session_id)?;
+    let kinds: &[&str] = match kind {
+        Some(k) => if k == "summary" { &["summary"] } else { &["transcript"] },
+        None => &["transcript", "summary"],
+    };
+    Ok(kinds.iter().filter_map(|k| info_for(&dir, session_id, k)).collect())
+}
+
+pub fn get_artifact(
+    conn: &Connection,
+    session_id: &str,
+    id: i64,
+) -> AppResult<Option<ArtifactInfo>> {
+    let Some(kind) = kind_of(id) else {
+        return Ok(None);
+    };
+    let dir = session_dir(conn, session_id)?;
+    Ok(info_for(&dir, session_id, kind))
+}
+
+/// Artifact text by synthetic id. Summary content is the body below the
+/// frontmatter (the DB rows never carried frontmatter either).
+pub fn get_content(conn: &Connection, session_id: &str, id: i64) -> AppResult<Option<String>> {
+    match kind_of(id) {
+        Some(kind) => content_of(&session_dir(conn, session_id)?, kind),
+        None => Ok(None),
     }
-    Ok(out)
 }
 
-pub fn get_artifact(conn: &Connection, id: i64) -> AppResult<Option<ArtifactInfo>> {
-    let art = conn
-        .query_row(
-            &format!("SELECT {COLS} FROM artifacts WHERE id = ?1"),
-            params![id],
-            row_to_artifact,
-        )
-        .optional()?;
-    Ok(art)
+fn content_of(dir: &Path, kind: &str) -> AppResult<Option<String>> {
+    let raw = match std::fs::read_to_string(file_of(dir, kind)) {
+        Ok(r) if !r.is_empty() => r,
+        _ => return Ok(None),
+    };
+    if kind == "summary" {
+        let (_, body) = crate::vault::split_frontmatter(&raw);
+        Ok(Some(body.trim_end().to_string()))
+    } else {
+        Ok(Some(raw))
+    }
 }
 
-/// Inline content for a single artifact by row id.
-pub fn get_content(conn: &Connection, id: i64) -> AppResult<Option<String>> {
-    let content = conn
-        .query_row(
-            "SELECT content FROM artifacts WHERE id = ?1",
-            params![id],
-            |r| r.get::<_, String>(0),
-        )
-        .optional()?;
-    Ok(content)
-}
-
-pub fn delete_artifact(conn: &Connection, id: i64) -> AppResult<()> {
-    conn.execute("DELETE FROM artifacts WHERE id = ?1", params![id])?;
-    Ok(())
-}
-
-pub fn delete_artifacts_for_session(conn: &Connection, session_id: &str) -> AppResult<()> {
-    conn.execute(
-        "DELETE FROM artifacts WHERE session_id = ?1",
-        params![session_id],
-    )?;
-    Ok(())
-}
-
-/// Inline content of the latest artifact of a kind, if any.
+/// Latest (= the one) artifact text of a kind.
 pub fn latest_content(
     conn: &Connection,
     session_id: &str,
     kind: &str,
 ) -> AppResult<Option<String>> {
-    let content = conn
-        .query_row(
-            "SELECT content FROM artifacts WHERE session_id = ?1 AND kind = ?2 ORDER BY created_at DESC LIMIT 1",
-            params![session_id, kind],
-            |r| r.get::<_, String>(0),
-        )
-        .optional()?;
-    Ok(content)
+    content_of(&session_dir(conn, session_id)?, kind)
+}
+
+/// Delete an artifact: the file moves to the OS trash.
+pub fn delete_artifact(conn: &Connection, session_id: &str, id: i64) -> AppResult<()> {
+    let Some(kind) = kind_of(id) else {
+        return Err(AppError::NotFound(format!("Artifact not found: {id}")));
+    };
+    let path = file_of(&session_dir(conn, session_id)?, kind);
+    if !path.is_file() {
+        return Err(AppError::NotFound(format!("Artifact not found: {id}")));
+    }
+    crate::paths::move_to_trash(&path)
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("move artifact to trash: {e}")))
 }
 
 pub fn has_kind(conn: &Connection, session_id: &str, kind: &str) -> AppResult<bool> {
-    let n: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM artifacts WHERE session_id = ?1 AND kind = ?2",
-        params![session_id, kind],
-        |r| r.get(0),
-    )?;
-    Ok(n > 0)
-}
-
-/// Every session id that has at least one artifact of `kind`. Lets list views
-/// resolve has-transcript / has-summary in one query instead of a COUNT per
-/// session (avoids an N+1 over the session list).
-pub fn session_ids_with_kind(
-    conn: &Connection,
-    kind: &str,
-) -> AppResult<std::collections::HashSet<String>> {
-    let mut stmt = conn.prepare("SELECT DISTINCT session_id FROM artifacts WHERE kind = ?1")?;
-    let ids = stmt
-        .query_map(params![kind], |r| r.get::<_, String>(0))?
-        .collect::<rusqlite::Result<std::collections::HashSet<_>>>()?;
-    Ok(ids)
+    let dir = session_dir(conn, session_id)?;
+    Ok(file_of(&dir, kind).metadata().map(|m| m.len() > 0).unwrap_or(false))
 }

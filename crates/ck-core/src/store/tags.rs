@@ -1,7 +1,8 @@
 //! Campaign tag vocabulary. Tags have no table of their own — they live as the
-//! `tags` array inside each session's `metadata_json`. This module is the single
-//! place that reads, normalizes and rewrites them across a campaign so the
-//! vocabulary stays one consistent set instead of a per-session free-for-all:
+//! `tags` list inside each session's `session.toml [metadata]` (files are
+//! truth). This module is the single place that reads, normalizes and rewrites
+//! them across a campaign so the vocabulary stays one consistent set instead
+//! of a per-session free-for-all:
 //!
 //! - the summarizer injects [`distinct_tags`] into the metadata prompt (reuse,
 //!   don't reinvent),
@@ -12,10 +13,12 @@
 
 use std::collections::{HashMap, HashSet};
 
-use rusqlite::{params, Connection};
-use serde_json::{json, Value};
+use rusqlite::Connection;
+use serde_json::Value;
 
 use crate::error::AppResult;
+use crate::session_files;
+use crate::store::{campaigns, sessions};
 
 /// Normalize one tag: trim and collapse internal whitespace. Blank → None.
 pub fn normalize_tag(raw: &str) -> Option<String> {
@@ -29,9 +32,9 @@ pub fn normalize_tag(raw: &str) -> Option<String> {
 pub fn tag_counts(conn: &Connection, campaign_id: &str) -> AppResult<Vec<(String, usize)>> {
     let mut counts: HashMap<String, usize> = HashMap::new();
     let mut spelling: HashMap<String, String> = HashMap::new();
-    for meta in session_metas(conn, campaign_id)? {
-        for raw in tags_of(&meta) {
-            let Some(tag) = normalize_tag(raw) else {
+    for tags in session_tag_lists(conn, campaign_id)? {
+        for raw in tags {
+            let Some(tag) = normalize_tag(&raw) else {
                 continue;
             };
             let key = tag.to_lowercase();
@@ -138,59 +141,46 @@ pub fn delete(conn: &Connection, campaign_id: &str, tag: &str) -> AppResult<usiz
 
 // --- internals ---------------------------------------------------------------
 
-fn session_metas(conn: &Connection, campaign_id: &str) -> AppResult<Vec<Value>> {
-    Ok(session_rows(conn, campaign_id)?
-        .into_iter()
-        .filter_map(|(_, mj)| serde_json::from_str(&mj).ok())
+fn world_session_dirs(conn: &Connection, campaign_id: &str) -> AppResult<Vec<std::path::PathBuf>> {
+    Ok(campaigns::world_root_for_id(conn, campaign_id)?
+        .map(|root| sessions::session_dirs(&root))
+        .unwrap_or_default())
+}
+
+fn session_tag_lists(conn: &Connection, campaign_id: &str) -> AppResult<Vec<Vec<String>>> {
+    Ok(world_session_dirs(conn, campaign_id)?
+        .iter()
+        .filter_map(|dir| session_files::read_session_toml(dir).ok().flatten())
+        .map(|st| st.metadata.tags)
         .collect())
 }
 
-fn session_rows(conn: &Connection, campaign_id: &str) -> AppResult<Vec<(String, String)>> {
-    let mut stmt = conn.prepare(
-        "SELECT session_id, metadata_json FROM sessions WHERE campaign_id = ?1",
-    )?;
-    let rows = stmt
-        .query_map(params![campaign_id], |r| {
-            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
-        })?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
-    Ok(rows)
-}
-
-fn tags_of(meta: &Value) -> Vec<&str> {
-    meta.get("tags")
-        .and_then(Value::as_array)
-        .map(|a| a.iter().filter_map(Value::as_str).collect())
-        .unwrap_or_default()
-}
-
-/// Apply `f` to each session's normalized tag list; persist only the sessions
-/// whose tags actually changed. Returns sessions changed.
+/// Apply `f` to each session's normalized tag list; persist (session.toml)
+/// only the sessions whose tags actually changed. Returns sessions changed.
 fn rewrite_each(
     conn: &Connection,
     campaign_id: &str,
     f: impl Fn(&[String]) -> Vec<String>,
 ) -> AppResult<usize> {
     let mut changed = 0;
-    for (sid, mj) in session_rows(conn, campaign_id)? {
-        let mut meta: Value = match serde_json::from_str(&mj) {
-            Ok(v) => v,
-            Err(_) => continue,
+    for dir in world_session_dirs(conn, campaign_id)? {
+        let Some(mut st) = session_files::read_session_toml(&dir).ok().flatten() else {
+            continue;
         };
-        let old: Vec<String> = tags_of(&meta)
-            .into_iter()
-            .filter_map(normalize_tag)
+        let old: Vec<String> = st
+            .metadata
+            .tags
+            .iter()
+            .filter_map(|t| normalize_tag(t))
             .collect();
         let new = f(&old);
         if new == old {
             continue;
         }
-        meta["tags"] = json!(new);
-        conn.execute(
-            "UPDATE sessions SET metadata_json = ?1 WHERE session_id = ?2",
-            params![meta.to_string(), sid],
-        )?;
-        changed += 1;
+        st.metadata.tags = new;
+        if session_files::write_session_toml_file(&dir, &st).is_ok() {
+            changed += 1;
+        }
     }
     Ok(changed)
 }
@@ -198,39 +188,45 @@ fn rewrite_each(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::session_files::{SessionMetadata, SessionToml};
     use crate::store::campaigns;
+    use serde_json::json;
 
-    fn seed(conn: &Connection) {
-        campaigns::create_campaign(conn, "c1", "Camp", 1).unwrap();
+    fn world(tag: &str) -> (Connection, std::path::PathBuf) {
+        let conn = crate::db::open_in_memory().unwrap();
+        let tmp = std::env::temp_dir().join(format!("ck-tags-{tag}-{}", std::process::id()));
+        std::fs::remove_dir_all(&tmp).ok();
+        std::fs::create_dir_all(&tmp).unwrap();
+        crate::config::set_value(&conn, "output_root", &tmp.to_string_lossy()).unwrap();
+        campaigns::create_campaign(&conn, "c1", "Camp", 1, None, false, false).unwrap();
+        (conn, tmp)
     }
-    fn add_session(conn: &Connection, id: &str, tags: &[&str]) {
-        let meta = json!({ "tags": tags });
-        conn.execute(
-            "INSERT INTO sessions (session_id, campaign_id, metadata_json) VALUES (?1, 'c1', ?2)",
-            params![id, meta.to_string()],
-        )
-        .unwrap();
+    fn add_session(conn: &Connection, n: i64, tags: &[&str]) {
+        crate::store::sessions::create_campaign_session(conn, "c1", Some(n), None, None).unwrap();
+        let root = campaigns::world_root_for_id(conn, "c1").unwrap().unwrap();
+        let dir = root.join("Sessions").join(crate::session_files::padded_number(n));
+        let mut st: SessionToml =
+            crate::session_files::read_session_toml(&dir).unwrap().unwrap();
+        st.metadata = SessionMetadata {
+            tags: tags.iter().map(|s| s.to_string()).collect(),
+            ..Default::default()
+        };
+        crate::session_files::write_session_toml_file(&dir, &st).unwrap();
     }
-    fn tags_for(conn: &Connection, id: &str) -> Vec<String> {
-        let mj: String = conn
-            .query_row(
-                "SELECT metadata_json FROM sessions WHERE session_id = ?1",
-                params![id],
-                |r| r.get(0),
-            )
-            .unwrap();
-        let meta: Value = serde_json::from_str(&mj).unwrap();
-        tags_of(&meta).into_iter().map(str::to_string).collect()
+    fn tags_for(conn: &Connection, n: i64) -> Vec<String> {
+        let root = campaigns::world_root_for_id(conn, "c1").unwrap().unwrap();
+        let dir = root.join("Sessions").join(crate::session_files::padded_number(n));
+        crate::session_files::read_session_toml(&dir).unwrap().unwrap().metadata.tags
     }
 
     #[test]
     fn counts_fold_case_and_space_variants() {
-        let conn = crate::db::open_in_memory().unwrap();
-        seed(&conn);
-        add_session(&conn, "s1", &["Kampf", "Mysterium"]);
-        add_session(&conn, "s2", &["kampf", " Mysterium "]);
+        let (conn, tmp) = world("counts");
+        add_session(&conn, 1, &["Kampf", "Mysterium"]);
+        add_session(&conn, 2, &["kampf", " Mysterium "]);
         let counts = tag_counts(&conn, "c1").unwrap();
         assert_eq!(counts, vec![("Kampf".into(), 2), ("Mysterium".into(), 2)]);
+        std::fs::remove_dir_all(&tmp).ok();
     }
 
     #[test]
@@ -247,34 +243,34 @@ mod tests {
 
     #[test]
     fn rename_merges_across_sessions() {
-        let conn = crate::db::open_in_memory().unwrap();
-        seed(&conn);
-        add_session(&conn, "s1", &["Combat", "Mystery"]);
-        add_session(&conn, "s2", &["Kampf"]);
+        let (conn, tmp) = world("rename");
+        add_session(&conn, 1, &["Combat", "Mystery"]);
+        add_session(&conn, 2, &["Kampf"]);
         let n = rename(&conn, "c1", "Combat", "Kampf").unwrap();
-        assert_eq!(n, 1, "only s1 changed");
-        assert_eq!(tags_for(&conn, "s1"), vec!["Kampf", "Mystery"]);
-        assert_eq!(tags_for(&conn, "s2"), vec!["Kampf"]);
+        assert_eq!(n, 1, "only session 1 changed");
+        assert_eq!(tags_for(&conn, 1), vec!["Kampf", "Mystery"]);
+        assert_eq!(tags_for(&conn, 2), vec!["Kampf"]);
+        std::fs::remove_dir_all(&tmp).ok();
     }
 
     #[test]
     fn rename_dedupes_when_target_present() {
-        let conn = crate::db::open_in_memory().unwrap();
-        seed(&conn);
-        add_session(&conn, "s1", &["Combat", "Kampf"]);
+        let (conn, tmp) = world("dedupe");
+        add_session(&conn, 1, &["Combat", "Kampf"]);
         rename(&conn, "c1", "Combat", "Kampf").unwrap();
-        assert_eq!(tags_for(&conn, "s1"), vec!["Kampf"]);
+        assert_eq!(tags_for(&conn, 1), vec!["Kampf"]);
+        std::fs::remove_dir_all(&tmp).ok();
     }
 
     #[test]
     fn delete_removes_across_sessions() {
-        let conn = crate::db::open_in_memory().unwrap();
-        seed(&conn);
-        add_session(&conn, "s1", &["ttrpg", "Kampf"]);
-        add_session(&conn, "s2", &["TTRPG"]);
+        let (conn, tmp) = world("delete");
+        add_session(&conn, 1, &["ttrpg", "Kampf"]);
+        add_session(&conn, 2, &["TTRPG"]);
         let n = delete(&conn, "c1", "ttrpg").unwrap();
         assert_eq!(n, 2);
-        assert_eq!(tags_for(&conn, "s1"), vec!["Kampf"]);
-        assert_eq!(tags_for(&conn, "s2"), Vec::<String>::new());
+        assert_eq!(tags_for(&conn, 1), vec!["Kampf"]);
+        assert_eq!(tags_for(&conn, 2), Vec::<String>::new());
+        std::fs::remove_dir_all(&tmp).ok();
     }
 }

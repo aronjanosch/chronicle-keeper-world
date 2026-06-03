@@ -1,11 +1,11 @@
-use serde_json::{json, Map, Value};
+use serde_json::{json, Value};
 
 use crate::error::{AppError, AppResult};
 use crate::llm;
 use crate::models::{RecapRequest, RecapResponse, SummarizeRequest, SummarizeResponse};
 use crate::prompts::{build_metadata_prompt, build_recap_prompt, build_summary_prompt};
 use crate::state::AppState;
-use crate::store::{artifacts, campaigns, codex, sessions, tags};
+use crate::store::{artifacts, campaigns, sessions, tags};
 
 /// Progress signal for a streaming summarize run. The prose summary streams
 /// token by token (`Token`); the JSON metadata pass never streams (partial JSON
@@ -50,7 +50,7 @@ async fn run_summarize(
         let cfg = crate::config::get_config_map(conn)?;
 
         let transcript_text = match req.transcript_id {
-            Some(id) => artifacts::get_content(conn, id)?,
+            Some(id) => artifacts::get_content(conn, &req.session_id, id)?,
             None => artifacts::latest_content(conn, &req.session_id, "transcript")?,
         }
         .ok_or_else(|| AppError::BadRequest("Transcript not found for session.".into()))?;
@@ -67,9 +67,8 @@ async fn run_summarize(
             .get("default_language")
             .cloned()
             .unwrap_or_else(|| "en".into());
-        // Campaign codex glossary: Phase 1 freeform paste + Phase 2 structured entries.
-        // Both pass into the prompt verbatim so the LLM can recognize and correctly
-        // spell NPCs/places/items the ASR mangled.
+        // Campaign codex glossary, passed into the prompt verbatim so the LLM can
+        // recognize and correctly spell NPCs/places/items the ASR mangled.
         let campaign_id = session
             .get("campaign")
             .and_then(|c| c.get("campaign_id"))
@@ -78,35 +77,32 @@ async fn run_summarize(
         let campaign = campaign_id
             .as_deref()
             .and_then(|cid| campaigns::get_campaign(conn, cid).ok().flatten());
-        let codex_text = campaign
-            .as_ref()
-            .map(campaigns::codex_freeform_text)
-            .unwrap_or_default();
+        // Codex freeform notes retired (Phase 2) — page `summary:` frontmatter
+        // is the context source; richer injection lands with Phase 4.
+        let codex_text = String::new();
         let gm = campaign.as_ref().map(|c| c.gm.clone()).unwrap_or_default();
-        // Files-as-truth: read the glossary one-liners from vault page `summary:`
-        // frontmatter. Fall back to the legacy codex_entries table when a campaign
-        // has no vault yet (un-migrated session-notes-only).
-        let codex_entries = match campaign.as_ref().and_then(|c| c.vault_path.as_deref()) {
-            Some(vp) => crate::vault::list_pages(std::path::Path::new(vp))
-                .unwrap_or_default()
-                .into_iter()
-                .map(|p| crate::models::CodexEntry {
-                    entry_id: String::new(),
-                    campaign_id: campaign_id.clone().unwrap_or_default(),
-                    name: p.title,
-                    kind: p.kind.unwrap_or_else(|| "lore".into()),
-                    body: p.summary,
-                    detail: String::new(),
-                    source: String::new(),
-                    updated_at: String::new(),
-                })
-                .collect(),
-            None => campaign_id
-                .as_deref()
-                .map(|cid| codex::list_entries(conn, cid))
-                .transpose()?
-                .unwrap_or_default(),
-        };
+        // Files-as-truth: the glossary one-liners come from vault page `summary:`
+        // frontmatter (every world has a vault by construction).
+        let codex_entries: Vec<crate::models::CodexEntry> = campaign
+            .as_ref()
+            .and_then(|c| c.vault_path.as_deref())
+            .map(|vp| {
+                crate::vault::list_pages(std::path::Path::new(vp))
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|p| crate::models::CodexEntry {
+                        entry_id: String::new(),
+                        campaign_id: campaign_id.clone().unwrap_or_default(),
+                        name: p.title,
+                        kind: p.kind.unwrap_or_else(|| "lore".into()),
+                        body: p.summary,
+                        detail: String::new(),
+                        source: String::new(),
+                        updated_at: String::new(),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
         // Campaign tag vocabulary so metadata extraction reuses canonical tags
         // instead of inventing a fresh (differently-cased / English) set.
         let known_tags = campaign_id
@@ -378,97 +374,57 @@ fn parse_metadata(text: &str) -> Option<Value> {
     serde_json::from_str(t).ok()
 }
 
-/// Replace the session's metadata with the LLM-extracted lists, then
-/// materialize the names/locations/items as auto-extracted codex entries on the
-/// parent campaign.
+/// Replace the session's metadata (session.toml) with the LLM-extracted lists.
 ///
 /// Each re-summary is a fresh take on the same session, so its lists *replace*
 /// the previous ones per category — they don't accumulate. Without this, trying
 /// a second model just appends a reworded copy of every event, character, etc.,
 /// and the lists grow without bound. Re-summary wins over manual edits; the
 /// inline editor in the session view is the place to curate afterwards.
+/// No auto-stub Codex pages (Phase 1.7-E) — the Codex is authored by the user
+/// or Phase 5 AI proposals.
 fn replace_metadata(
     conn: &rusqlite::Connection,
     session_id: &str,
     metadata: &Value,
 ) -> AppResult<()> {
-    use rusqlite::{params, OptionalExtension};
-    let row: Option<(String, Option<String>)> = conn
-        .query_row(
-            "SELECT metadata_json, campaign_id FROM sessions WHERE session_id = ?1",
-            params![session_id],
-            |r| Ok((r.get(0)?, r.get(1)?)),
-        )
-        .optional()?;
-    let Some((existing_json, campaign_id)) = row else {
+    let Some(loc) = sessions::locate(conn, session_id)? else {
         return Ok(());
     };
-    let mut existing: Map<String, Value> = serde_json::from_str(&existing_json).unwrap_or_default();
+    let mut st = loc.st;
 
     // Tags fold through the campaign vocabulary so case/language variants collapse
     // onto the established spelling (a freshly extracted `combat` becomes `Kampf`).
-    let tag_vocab = campaign_id
-        .as_deref()
-        .filter(|s| !s.is_empty())
-        .map(|cid| tags::vocab(conn, cid))
+    let tag_vocab = loc
+        .world
+        .as_ref()
+        .map(|(_, cfg)| tags::vocab(conn, &cfg.id))
         .transpose()?
         .unwrap_or_default();
 
-    if let Value::Object(new_map) = metadata {
-        for (key, values) in new_map {
-            let Some(new_list) = values.as_array() else {
-                continue;
-            };
-            if key == "tags" {
-                // Fold the fresh tags through the campaign vocabulary so
-                // case/language variants land on the established spelling, then
-                // replace — no carry-over of the previous run's tags.
-                existing.insert(
-                    key.clone(),
-                    json!(tags::merge_into(&[], new_list, &tag_vocab)),
-                );
-                continue;
-            }
-            let cleaned: Vec<Value> = new_list.iter().filter(|v| !v.is_null()).cloned().collect();
-            existing.insert(key.clone(), Value::Array(cleaned));
-        }
+    let names = |key: &str| {
+        metadata
+            .get(key)
+            .and_then(Value::as_array)
+            .map(|list| list.iter().filter_map(extract_name).collect::<Vec<_>>())
+    };
+    if let Some(v) = names("characters") {
+        st.metadata.characters = v;
     }
-    conn.execute(
-        "UPDATE sessions SET metadata_json = ?1 WHERE session_id = ?2",
-        params![Value::Object(existing).to_string(), session_id],
-    )?;
-
-    // Promote extracted names into the campaign codex (auto-extract; never
-    // overwrites what the user already has). Files-as-truth: write a stub page
-    // when the campaign has a vault; otherwise the legacy upsert_auto row.
-    // Phase 1.7-E: vault worlds → no auto-stubs; Codex is authored by the user
-    // (or Phase 4 AI proposals). Legacy session-notes campaigns without a vault
-    // still get upsert_auto rows for summary context injection.
-    if let Some(cid) = campaign_id.as_deref().filter(|s| !s.is_empty()) {
-        let has_vault = campaigns::get_campaign(conn, cid)
-            .ok()
-            .flatten()
-            .and_then(|c| c.vault_path)
-            .is_some();
-        if !has_vault {
-            if let Value::Object(map) = metadata {
-                for (key, kind) in [
-                    ("characters", "npc"),
-                    ("locations", "place"),
-                    ("items", "item"),
-                ] {
-                    let Some(list) = map.get(key).and_then(Value::as_array) else {
-                        continue;
-                    };
-                    for v in list {
-                        if let Some(name) = extract_name(v) {
-                            let _ = codex::upsert_auto(conn, cid, &name, kind);
-                        }
-                    }
-                }
-            }
-        }
+    if let Some(v) = names("locations") {
+        st.metadata.locations = v;
     }
+    if let Some(v) = names("events") {
+        st.metadata.events = v;
+    }
+    if let Some(v) = names("items") {
+        st.metadata.items = v;
+    }
+    if let Some(list) = metadata.get("tags").and_then(Value::as_array) {
+        st.metadata.tags = tags::merge_into(&[], list, &tag_vocab);
+    }
+    crate::session_files::write_session_toml_file(&loc.dir, &st)
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("write session.toml: {e}")))?;
     Ok(())
 }
 
@@ -494,105 +450,55 @@ fn extract_name(v: &Value) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::store::campaigns;
 
-    #[test]
-    fn replace_metadata_extracts_codex_entries() {
+    fn world_with_session(tag: &str) -> (rusqlite::Connection, std::path::PathBuf, String) {
         let conn = crate::db::open_in_memory().unwrap();
-        campaigns::create_campaign(&conn, "c1", "Camp", 1).unwrap();
-        conn.execute(
-            "INSERT INTO sessions (session_id, campaign_id) VALUES ('s1', 'c1')",
-            [],
-        )
-        .unwrap();
-        let metadata = json!({
-            "characters": ["Aragorn", { "name": "Gandalf" }],
-            "locations": ["Bree"],
-            "items": ["Andúril"],
-            "events": ["Battle"],   // ignored: not a codex kind
-            "tags": ["combat"],     // ignored
-        });
-        replace_metadata(&conn, "s1", &metadata).unwrap();
-        let entries = codex::list_entries(&conn, "c1").unwrap();
-        let names: std::collections::BTreeSet<String> =
-            entries.iter().map(|e| e.name.clone()).collect();
-        assert!(names.contains("Aragorn"));
-        assert!(names.contains("Gandalf"));
-        assert!(names.contains("Bree"));
-        assert!(names.contains("Andúril"));
-        assert_eq!(entries.iter().filter(|e| e.kind == "npc").count(), 2);
-        assert_eq!(entries.iter().filter(|e| e.kind == "place").count(), 1);
-        assert_eq!(entries.iter().filter(|e| e.kind == "item").count(), 1);
-        assert!(entries.iter().all(|e| e.source == "auto"));
+        let tmp = std::env::temp_dir().join(format!("ck-sum-{tag}-{}", std::process::id()));
+        std::fs::remove_dir_all(&tmp).ok();
+        std::fs::create_dir_all(&tmp).unwrap();
+        crate::config::set_value(&conn, "output_root", &tmp.to_string_lossy()).unwrap();
+        campaigns::create_campaign(&conn, "c1", "Camp", 1, None, false, false).unwrap();
+        let s = sessions::create_campaign_session(&conn, "c1", Some(1), None, None).unwrap();
+        (conn, tmp, s.session_id)
     }
 
     #[test]
-    fn replace_metadata_skips_user_edited_entry() {
-        let conn = crate::db::open_in_memory().unwrap();
-        campaigns::create_campaign(&conn, "c1", "Camp", 1).unwrap();
-        conn.execute(
-            "INSERT INTO sessions (session_id, campaign_id) VALUES ('s1', 'c1')",
-            [],
-        )
-        .unwrap();
-        // Pre-existing user entry with a corrected spelling and a body.
-        codex::create_entry(
-            &conn,
-            "c1",
-            &crate::models::CodexEntryCreate {
-                name: "Aragorn".into(),
-                kind: "npc".into(),
-                body: "Heir of Isildur".into(),
-                detail: String::new(),
-            },
-        )
-        .unwrap();
-        // LLM emits a different casing — must be treated as the same row, not overwritten.
-        replace_metadata(&conn, "s1", &json!({ "characters": ["aragorn"] })).unwrap();
-        let entries = codex::list_entries(&conn, "c1").unwrap();
-        assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].name, "Aragorn");
-        assert_eq!(entries[0].body, "Heir of Isildur");
-        assert_eq!(entries[0].source, "manual");
+    fn replace_metadata_replaces_and_accepts_name_objects() {
+        let (conn, tmp, sid) = world_with_session("names");
+        let metadata = json!({
+            "characters": ["Aragorn", { "name": "Gandalf" }],
+            "locations": ["Bree"],
+            "tags": ["combat"],
+        });
+        replace_metadata(&conn, &sid, &metadata).unwrap();
+        let loc = sessions::locate(&conn, &sid).unwrap().unwrap();
+        assert_eq!(loc.st.metadata.characters, vec!["Aragorn", "Gandalf"]);
+        assert_eq!(loc.st.metadata.locations, vec!["Bree"]);
+        assert_eq!(loc.st.metadata.tags, vec!["combat"]);
+        std::fs::remove_dir_all(&tmp).ok();
     }
 
     #[test]
     fn replace_metadata_does_not_accumulate_across_resummaries() {
-        let conn = crate::db::open_in_memory().unwrap();
-        campaigns::create_campaign(&conn, "c1", "Camp", 1).unwrap();
-        conn.execute(
-            "INSERT INTO sessions (session_id, campaign_id) VALUES ('s1', 'c1')",
-            [],
-        )
-        .unwrap();
-
+        let (conn, tmp, sid) = world_with_session("resummary");
         // First model's take.
         replace_metadata(
             &conn,
-            "s1",
+            &sid,
             &json!({ "events": ["The party crossed the bridge"], "tags": ["combat"] }),
         )
         .unwrap();
         // A second model rewords the same beat — must replace, not append.
         replace_metadata(
             &conn,
-            "s1",
+            &sid,
             &json!({ "events": ["Party fought their way over the bridge"], "tags": ["combat"] }),
         )
         .unwrap();
 
-        let md: String = conn
-            .query_row(
-                "SELECT metadata_json FROM sessions WHERE session_id = 's1'",
-                [],
-                |r| r.get(0),
-            )
-            .unwrap();
-        let md: Value = serde_json::from_str(&md).unwrap();
-        assert_eq!(
-            md["events"].as_array().unwrap(),
-            &vec![json!("Party fought their way over the bridge")],
-        );
-        assert_eq!(md["tags"].as_array().unwrap().len(), 1);
+        let loc = sessions::locate(&conn, &sid).unwrap().unwrap();
+        assert_eq!(loc.st.metadata.events, vec!["Party fought their way over the bridge"]);
+        assert_eq!(loc.st.metadata.tags, vec!["combat"]);
+        std::fs::remove_dir_all(&tmp).ok();
     }
 }

@@ -20,9 +20,6 @@ pub struct CampaignDetail {
     pub default_language: String,
     pub players: Value,
     pub extra_info: String,
-    pub codex: String,
-    /// Freeform notes as a JSON array [{title, body}], all fed verbatim into summaries.
-    pub codex_notes: Value,
     /// LLM-generated "story so far" narrative rollup (read-only, regenerate on demand).
     pub recap: String,
     /// When `recap` was last generated (local naive timestamp; empty if never).
@@ -201,6 +198,10 @@ pub struct CreateCampaignRequest {
     /// Scaffold starter folders under Codex/ (NPCs, Places, …).
     #[serde(default)]
     pub scaffold: bool,
+    /// Open-existing: adopt the folder in place (additive artifacts only; a
+    /// foreign vault of .md pages gets `codex_root = "."`).
+    #[serde(default)]
+    pub adopt: bool,
 }
 
 fn one() -> i64 {
@@ -217,8 +218,6 @@ pub struct CampaignUpdateRequest {
     pub default_language: Option<String>,
     pub players: Option<Value>,
     pub extra_info: Option<String>,
-    pub codex: Option<String>,
-    pub codex_notes: Option<Value>,
     pub next_session_number: Option<i64>,
 }
 

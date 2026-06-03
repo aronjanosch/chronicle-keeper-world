@@ -301,10 +301,9 @@ pub fn delete_entry(conn: &Connection, entry_id: &str) -> AppResult<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::store::campaigns;
 
     fn seed_campaign(conn: &Connection) -> String {
-        campaigns::create_campaign(conn, "c1", "Camp", 1).unwrap();
+        conn.execute("INSERT INTO campaigns (campaign_id, name) VALUES ('c1', 'Camp')", []).unwrap(); // FK shim
         "c1".into()
     }
 

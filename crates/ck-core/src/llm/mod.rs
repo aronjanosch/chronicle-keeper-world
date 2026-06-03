@@ -411,7 +411,15 @@ pub async fn chat(req: &ChatRequest<'_>, json_mode: bool) -> Result<String, LlmE
             if json_mode {
                 body["format"] = json!("json");
             }
-            let num_ctx = num_ctx_max.map(|max| fit_num_ctx(prompt.len(), max));
+            // num_ctx is a local-inference parameter — cloud-backed Ollama models
+            // (e.g. "gemma4:31b-cloud") proxy to an upstream API that ignores or
+            // rejects it, so skip for any model whose name contains "cloud".
+            let is_local = !model.to_lowercase().contains("cloud");
+            let num_ctx = if is_local {
+                num_ctx_max.map(|max| fit_num_ctx(prompt.len(), max))
+            } else {
+                None
+            };
             if let Some(n) = num_ctx {
                 body["options"] = json!({ "num_ctx": n });
             }
@@ -637,9 +645,13 @@ pub async fn chat_stream<F: FnMut(&str)>(
         .map_err(|e| LlmError(e.to_string()))?;
 
     // Build the per-transport streaming request.
-    let num_ctx = (*transport == Transport::Ollama)
-        .then(|| num_ctx_max.map(|max| fit_num_ctx(prompt.len(), max)))
-        .flatten();
+    let is_local_ollama = *transport == Transport::Ollama
+        && !model.to_lowercase().contains("cloud");
+    let num_ctx = if is_local_ollama {
+        num_ctx_max.map(|max| fit_num_ctx(prompt.len(), max))
+    } else {
+        None
+    };
     let req = match transport {
         Transport::Ollama => {
             let mut body = json!({
@@ -761,6 +773,52 @@ pub async fn ping(
     let resp = req.send().await.map_err(|e| LlmError(e.to_string()))?;
     error_for_status(resp).await?;
     Ok(())
+}
+
+/// Installed models, live from the provider. Only Ollama exposes a keyless
+/// listing (`/api/tags`); other transports return empty and the UI falls back
+/// to the static suggestions.
+pub async fn list_models(
+    transport: Transport,
+    api_base: &str,
+    api_key: &str,
+    timeout_secs: u64,
+) -> Result<Vec<String>, LlmError> {
+    if transport != Transport::Ollama {
+        return Ok(Vec::new());
+    }
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(timeout_secs))
+        .build()
+        .map_err(|e| LlmError(e.to_string()))?;
+    let base = if api_base.is_empty() {
+        "http://localhost:11434"
+    } else {
+        api_base
+    };
+    let url = format!("{}/api/tags", base.trim_end_matches('/'));
+    let mut req = client.get(url);
+    if !api_key.is_empty() {
+        req = req.bearer_auth(api_key);
+    }
+    let resp = req.send().await.map_err(|e| LlmError(e.to_string()))?;
+    let v: Value = error_for_status(resp)
+        .await?
+        .json()
+        .await
+        .map_err(|e| LlmError(e.to_string()))?;
+    let mut models: Vec<String> = v
+        .get("models")
+        .and_then(Value::as_array)
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|m| m.get("name").and_then(Value::as_str))
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default();
+    models.sort();
+    Ok(models)
 }
 
 async fn error_for_status(resp: reqwest::Response) -> Result<reqwest::Response, LlmError> {

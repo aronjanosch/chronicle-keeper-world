@@ -40,7 +40,7 @@ pub async fn transcribe(
     // Gather session inputs. Language comes from the session's campaign — it's
     // fixed per campaign (a multilingual GM uses one campaign per language), so
     // there's no per-transcription language choice.
-    let (tracks_val, speakers_val, session_path, default_lang, accelerator) =
+    let (tracks_val, speakers_val, _session_path, default_lang, accelerator) =
         state.with_db(|conn| {
             let tracks = sessions::get_tracks(conn, &req.session_id)?;
             let speakers = sessions::get_speakers(conn, &req.session_id)?;
@@ -163,6 +163,7 @@ pub async fn transcribe(
 
     let transcript_text = segments_to_plain_text(&segments);
 
+    // Writes transcript.md + provenance into session.toml (files are truth).
     state.with_db(|conn| {
         crate::store::artifacts::insert_artifact(
             conn,
@@ -173,14 +174,6 @@ pub async fn transcribe(
             &transcript_text,
         )
     })?;
-
-    // Write transcript.md for vault sessions (best-effort; doesn't surface errors).
-    if crate::session_files::is_vault_session_path(&session_path) {
-        let _ = crate::session_files::write_transcript_md(
-            std::path::Path::new(&session_path),
-            &transcript_text,
-        );
-    }
 
     Ok(Json(TranscribeResponse {
         language,

@@ -17,21 +17,13 @@ async fn list(
 }
 
 async fn content(state: &AppState, session_id: &str, artifact_id: i64) -> AppResult<String> {
-    let art = state
-        .with_db(|conn| artifacts::get_artifact(conn, artifact_id))?
-        .filter(|a| a.session_id == session_id)
-        .ok_or_else(|| AppError::NotFound(format!("Artifact not found: {artifact_id}")))?;
     state
-        .with_db(|conn| artifacts::get_content(conn, art.id))?
+        .with_db(|conn| artifacts::get_content(conn, session_id, artifact_id))?
         .ok_or_else(|| AppError::NotFound(format!("Artifact not found: {artifact_id}")))
 }
 
 async fn delete(state: &AppState, session_id: &str, artifact_id: i64) -> AppResult<Json<Value>> {
-    let _art = state
-        .with_db(|conn| artifacts::get_artifact(conn, artifact_id))?
-        .filter(|a| a.session_id == session_id)
-        .ok_or_else(|| AppError::NotFound(format!("Artifact not found: {artifact_id}")))?;
-    state.with_db(|conn| artifacts::delete_artifact(conn, artifact_id))?;
+    state.with_db(|conn| artifacts::delete_artifact(conn, session_id, artifact_id))?;
     Ok(Json(
         json!({ "status": "deleted", "artifact_id": artifact_id }),
     ))

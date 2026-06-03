@@ -1,6 +1,7 @@
 mod artifacts;
 mod campaigns;
 mod codex;
+mod index;
 mod llm;
 mod migration;
 mod prompts;
@@ -37,6 +38,7 @@ pub fn router(state: AppState) -> Router {
         .route("/config", get(read_config).put(write_config))
         // campaigns
         .route("/campaigns", get(campaigns::list).post(campaigns::create))
+        .route("/seed-example", post(campaigns::seed_example))
         .route(
             "/campaigns/:id",
             get(campaigns::detail)
@@ -65,7 +67,10 @@ pub fn router(state: AppState) -> Router {
         .route("/campaigns/:id/codex/import", post(codex::import))
         .route("/campaigns/:id/codex/import/commit", post(codex::commit))
         // vault pages
+        .route("/vault/sniff", post(vault::sniff))
         .route("/campaigns/:id/vault", axum::routing::put(vault::attach))
+        .route("/campaigns/:id/vault/import", post(vault::import_notes))
+        .route("/campaigns/:id/vault/enhance", post(vault::enhance_pages))
         .route("/campaigns/:id/vault/tree", get(vault::list_tree))
         .route("/campaigns/:id/vault/folders", post(vault::create_folder))
         .route(
@@ -73,6 +78,7 @@ pub fn router(state: AppState) -> Router {
             axum::routing::delete(vault::delete_folder),
         )
         .route("/campaigns/:id/vault/move", post(vault::move_entry))
+        .route("/campaigns/:id/vault/kinds", get(vault::kind_schemas))
         .route(
             "/campaigns/:id/vault/pages",
             get(vault::list_pages).post(vault::create_page),
@@ -83,6 +89,11 @@ pub fn router(state: AppState) -> Router {
                 .put(vault::write_page)
                 .delete(vault::delete_page),
         )
+        // vault index (links/backlinks, search, page tags, change counter)
+        .route("/campaigns/:id/vault/seq", get(index::seq))
+        .route("/campaigns/:id/vault/index/links", get(index::links))
+        .route("/campaigns/:id/vault/index/tags", get(index::tags))
+        .route("/campaigns/:id/vault/search", get(index::search))
         // sessions
         .route("/sessions", get(sessions::list))
         .route("/session/:id", get(sessions::detail))
@@ -120,6 +131,7 @@ pub fn router(state: AppState) -> Router {
         .route("/llm-providers/:id", axum::routing::put(llm::put_provider))
         .route("/llm-providers/:id/test", post(llm::test_provider))
         .route("/llm-providers/:id/ping", get(llm::ping_provider))
+        .route("/llm-providers/:id/models", get(llm::list_provider_models))
         // artifacts
         .route(
             "/sessions/:id/transcripts",

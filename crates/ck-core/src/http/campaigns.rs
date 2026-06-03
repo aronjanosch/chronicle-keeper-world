@@ -31,17 +31,19 @@ pub async fn create(
             &req.campaign_id,
             &req.name,
             req.start_session_number,
-        )?;
-        campaigns::set_current_campaign_id(conn, &req.campaign_id)?;
-        let _ = campaigns::provision_vault(
-            conn,
-            &req.campaign_id,
-            &req.name,
             req.vault_path.as_deref(),
             req.scaffold,
-        );
-        let campaign = campaigns::get_campaign(conn, &req.campaign_id)?.unwrap_or(campaign);
+            req.adopt,
+        )?;
         Ok(Json(json!({ "status": "success", "campaign": campaign })))
+    })
+}
+
+/// Re-add the example world (New-World screen). 409 when it already exists.
+pub async fn seed_example(State(state): State<AppState>) -> AppResult<Json<Value>> {
+    state.with_db(|conn| {
+        let campaign = crate::seed::seed_example(conn)?;
+        Ok(Json(serde_json::to_value(campaign).unwrap()))
     })
 }
 
@@ -71,6 +73,10 @@ pub async fn delete(
     State(state): State<AppState>,
     Path(campaign_id): Path<String>,
 ) -> AppResult<Json<Value>> {
+    // Stop the watcher + drop the index connection before the folder moves to trash.
+    if let Ok(root) = super::vault::vault_root(&state, &campaign_id) {
+        state.evict_index(&root);
+    }
     state.with_db(|conn| {
         campaigns::delete_campaign(conn, &campaign_id)?;
         Ok(Json(

@@ -1,14 +1,21 @@
-use std::path::PathBuf;
+//! Sessions — files are truth. A session is a `Sessions/<NNN>/` folder inside
+//! its world (audio/ + transcript.md + summary.md + session.toml); bare
+//! uploads live under `<data-root>/_sessions/<id>/` until assigned to a world.
+//! The global DB is not consulted; lookups scan the (small) world list.
 
-use rusqlite::{params, Connection, OptionalExtension};
+use std::path::{Path, PathBuf};
+
+use rusqlite::Connection;
 use serde_json::{json, Value};
 use uuid::Uuid;
 
 use crate::config::get_config_map;
 use crate::error::{AppError, AppResult};
 use crate::models::{CampaignSessionInfo, SessionInfo, SessionMetadataRequest};
-use crate::normalize::{normalize_metadata, sanitize_folder_name};
-use crate::store::{artifacts, campaigns};
+use crate::normalize::normalize_metadata;
+use crate::session_files::{self, SessionMetadata, SessionToml};
+use crate::store::campaigns;
+use crate::world_config::WorldConfig;
 
 pub(crate) fn output_root(conn: &Connection) -> AppResult<PathBuf> {
     let map = get_config_map(conn)?;
@@ -26,248 +33,268 @@ fn shellexpand_home(path: &str) -> PathBuf {
     PathBuf::from(path)
 }
 
-fn campaign_name(conn: &Connection, campaign_id: &str) -> Option<String> {
-    campaigns::get_campaign(conn, campaign_id)
-        .ok()
-        .flatten()
-        .map(|c| c.name)
+// ── Locating sessions on disk ─────────────────────────────────────
+
+pub(crate) struct SessionLoc {
+    pub dir: PathBuf,
+    pub st: SessionToml,
+    /// The owning world; `None` for bare (campaign-less) upload sessions.
+    pub world: Option<(PathBuf, WorldConfig)>,
 }
 
-fn number_in_use(conn: &Connection, campaign_id: &str, number: i64) -> AppResult<bool> {
-    let n: Option<i64> = conn
-        .query_row(
-            "SELECT 1 FROM sessions WHERE campaign_id = ?1 AND session_number = ?2 LIMIT 1",
-            params![campaign_id, number],
-            |r| r.get(0),
-        )
-        .optional()?;
-    Ok(n.is_some())
+pub(crate) fn session_dirs(world_root: &Path) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(world_root.join("Sessions")) {
+        for entry in entries.flatten() {
+            let p = entry.path();
+            if p.is_dir() && !entry.file_name().to_string_lossy().starts_with('.') {
+                out.push(p);
+            }
+        }
+    }
+    out
 }
 
-pub fn create_campaign_session(
-    conn: &Connection,
-    campaign_id: &str,
-    session_number: Option<i64>,
-    title: Option<&str>,
-    date: Option<&str>,
-) -> AppResult<CampaignSessionInfo> {
-    let Some(campaign) = campaigns::get_campaign(conn, campaign_id)? else {
-        return Err(AppError::NotFound(format!(
-            "Campaign not found: {campaign_id}"
-        )));
-    };
-    let current_next = campaign.next_session_number;
+/// session.toml of a dir; tolerates a missing file (bare upload before any write).
+fn toml_of(dir: &Path) -> SessionToml {
+    session_files::read_session_toml(dir).ok().flatten().unwrap_or_default()
+}
 
-    let number = match session_number {
-        Some(n) => {
-            if number_in_use(conn, campaign_id, n)? {
-                return Err(AppError::Conflict(format!(
-                    "Session number already exists for campaign {campaign_id}: {n}"
-                )));
-            }
-            n
+/// Back-fill a missing `id` (pre-Phase-2 session.toml) so the session is addressable.
+fn ensure_id(dir: &Path, st: &mut SessionToml) {
+    if st.id.is_none() {
+        st.id = Some(Uuid::new_v4().to_string());
+        let _ = session_files::write_session_toml_file(dir, st);
+    }
+}
+
+pub(crate) fn locate(conn: &Connection, session_id: &str) -> AppResult<Option<SessionLoc>> {
+    if session_id.is_empty() || session_id.contains(['/', '\\', '.']) && session_id.contains("..") {
+        return Ok(None);
+    }
+    // Bare uploads: dir name == session id.
+    let bare = output_root(conn)?.join("_sessions").join(session_id);
+    if bare.is_dir() {
+        let mut st = toml_of(&bare);
+        if st.id.is_none() {
+            st.id = Some(session_id.to_string());
+            let _ = session_files::write_session_toml_file(&bare, &st);
         }
-        None => {
-            let mut n = current_next;
-            while number_in_use(conn, campaign_id, n)? {
-                n += 1;
+        return Ok(Some(SessionLoc { dir: bare, st, world: None }));
+    }
+    for (root, cfg) in campaigns::worlds(conn)? {
+        for dir in session_dirs(&root) {
+            let mut st = toml_of(&dir);
+            ensure_id(&dir, &mut st);
+            if st.id.as_deref() == Some(session_id) {
+                return Ok(Some(SessionLoc { dir, st, world: Some((root, cfg)) }));
             }
-            n
         }
-    };
-
-    let session_id = Uuid::new_v4().to_string();
-    let session_path = if let Some(vault_codex) = &campaign.vault_path {
-        // Vault layout: <world_root>/Sessions/<NNN>/
-        crate::session_files::vault_session_path(vault_codex, number)
-            .ok_or_else(|| AppError::Internal(anyhow::anyhow!("invalid vault_path")))?
-    } else {
-        let safe = sanitize_folder_name(&campaign.name);
-        output_root(conn)?.join(safe).join(number.to_string())
-    };
-    std::fs::create_dir_all(&session_path)
-        .map_err(|e| AppError::Internal(anyhow::anyhow!("create session dir: {e}")))?;
-    if campaign.vault_path.is_some() {
-        // Provision audio subdirectory up front so uploads land in the right place.
-        std::fs::create_dir_all(crate::session_files::audio_dir(&session_path))
-            .map_err(|e| AppError::Internal(anyhow::anyhow!("create audio dir: {e}")))?;
     }
+    Ok(None)
+}
 
-    let metadata = normalize_metadata(&Value::Null);
-    conn.execute(
-        "INSERT INTO sessions \
-         (session_id, campaign_id, session_number, title, date, metadata_json, notes, session_path, tracks_json, speakers_json) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, '', ?7, '[]', '[]')",
-        params![
-            session_id,
-            campaign_id,
-            number,
-            title,
-            date,
-            metadata.to_string(),
-            session_path.to_string_lossy(),
-        ],
-    )?;
+fn require(conn: &Connection, session_id: &str) -> AppResult<SessionLoc> {
+    locate(conn, session_id)?
+        .ok_or_else(|| AppError::NotFound(format!("Session not found: {session_id}")))
+}
 
-    if number >= current_next {
-        conn.execute(
-            "UPDATE campaigns SET next_session_number = ?1 WHERE campaign_id = ?2",
-            params![number + 1, campaign_id],
-        )?;
+// ── session.toml ↔ DTO shapes ─────────────────────────────────────
+
+// Recursively find an audio file by name under `audio/` (Craig zips can nest).
+fn find_audio(dir: &Path, filename: &str) -> Option<PathBuf> {
+    fn walk(dir: &Path, filename: &str) -> Option<PathBuf> {
+        for entry in std::fs::read_dir(dir).ok()?.flatten() {
+            let p = entry.path();
+            if p.is_dir() {
+                if let Some(found) = walk(&p, filename) {
+                    return Some(found);
+                }
+            } else if entry.file_name().to_string_lossy() == filename {
+                return Some(p);
+            }
+        }
+        None
     }
+    walk(&session_files::audio_dir(dir), filename)
+}
 
-    if campaign.vault_path.is_some() {
-        let _ = crate::session_files::write_session_toml(
-            &session_path,
-            Some(number),
-            title,
-            date,
-            &campaign.default_language,
-            &Value::Array(vec![]),
-            &Value::Array(vec![]),
-        );
-    }
+fn stem_of(filename: &str) -> String {
+    Path::new(filename)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or(filename)
+        .to_string()
+}
 
-    Ok(CampaignSessionInfo {
-        session_id,
-        session_number: Some(number),
-        title: title.map(str::to_string),
-        date: date.map(str::to_string),
-        metadata,
-        has_tracks: false,
-        has_transcription: false,
-        has_summary: false,
+fn tracks_value(dir: &Path, st: &SessionToml) -> Value {
+    json!(st
+        .tracks
+        .iter()
+        .map(|t| {
+            let file_path = find_audio(dir, &t.filename)
+                .unwrap_or_else(|| session_files::audio_dir(dir).join(&t.filename));
+            json!({
+                "id": stem_of(&t.filename),
+                "filename": t.filename,
+                "file_path": file_path.to_string_lossy(),
+                "duration": Value::Null,
+            })
+        })
+        .collect::<Vec<_>>())
+}
+
+fn speakers_value(st: &SessionToml) -> Value {
+    json!(st
+        .tracks
+        .iter()
+        .filter(|t| !t.speaker.is_empty() || !t.character.is_empty() || !t.pronouns.is_empty())
+        .map(|t| {
+            json!({
+                "track_id": stem_of(&t.filename),
+                "player_name": t.speaker,
+                "character_name": t.character,
+                "pronouns": t.pronouns,
+            })
+        })
+        .collect::<Vec<_>>())
+}
+
+fn metadata_value(st: &SessionToml) -> Value {
+    json!({
+        "characters": st.metadata.characters,
+        "locations": st.metadata.locations,
+        "events": st.metadata.events,
+        "items": st.metadata.items,
+        "tags": st.metadata.tags,
     })
 }
 
-pub fn set_campaign_metadata(conn: &Connection, req: &SessionMetadataRequest) -> AppResult<Value> {
-    if !session_exists(conn, &req.session_id)? {
-        return Err(AppError::NotFound(format!(
-            "Session not found: {}",
-            req.session_id
-        )));
+pub(crate) fn metadata_from_value(v: &Value) -> SessionMetadata {
+    let list = |key: &str| {
+        v.get(key)
+            .and_then(Value::as_array)
+            .map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect())
+            .unwrap_or_default()
+    };
+    SessionMetadata {
+        characters: list("characters"),
+        locations: list("locations"),
+        events: list("events"),
+        items: list("items"),
+        tags: list("tags"),
     }
-
-    let mut session_number = req.session_number;
-    let mut should_increment = false;
-    if let Some(cid) = &req.campaign_id {
-        if session_number.is_none() {
-            session_number = Some(campaigns::next_session_number(conn, Some(cid))?);
-            should_increment = true;
-        }
-    }
-
-    let metadata = normalize_metadata(req.metadata.as_ref().unwrap_or(&Value::Null));
-    let notes = req.notes.clone().unwrap_or_default();
-    conn.execute(
-        "UPDATE sessions SET campaign_id = ?1, session_number = ?2, title = ?3, date = ?4, \
-         metadata_json = ?5, notes = ?6 WHERE session_id = ?7",
-        params![
-            req.campaign_id,
-            session_number,
-            req.title,
-            req.date,
-            metadata.to_string(),
-            notes,
-            req.session_id
-        ],
-    )?;
-
-    if should_increment {
-        if let Some(cid) = &req.campaign_id {
-            conn.execute(
-                "UPDATE campaigns SET next_session_number = next_session_number + 1 WHERE campaign_id = ?1",
-                params![cid],
-            )?;
-        }
-    }
-
-    let campaign_name = req
-        .campaign_id
-        .as_deref()
-        .and_then(|c| campaign_name(conn, c));
-    Ok(json!({
-        "campaign_id": req.campaign_id,
-        "campaign_name": campaign_name,
-        "session_number": session_number,
-        "title": req.title,
-        "date": req.date,
-        "notes": notes,
-        "metadata": metadata,
-    }))
 }
 
-fn session_exists(conn: &Connection, session_id: &str) -> AppResult<bool> {
-    let n: Option<i64> = conn
-        .query_row(
-            "SELECT 1 FROM sessions WHERE session_id = ?1",
-            params![session_id],
-            |r| r.get(0),
-        )
-        .optional()?;
-    Ok(n.is_some())
+fn has_tracks(st: &SessionToml) -> bool {
+    !st.tracks.is_empty()
+}
+
+fn file_nonempty(p: &Path) -> bool {
+    p.metadata().map(|m| m.len() > 0).unwrap_or(false)
+}
+
+pub(crate) fn has_transcript(dir: &Path) -> bool {
+    file_nonempty(&session_files::transcript_md_path(dir))
+}
+
+pub(crate) fn has_summary(dir: &Path) -> bool {
+    file_nonempty(&session_files::summary_md_path(dir))
+}
+
+fn campaign_session_info(dir: &Path, st: &SessionToml) -> CampaignSessionInfo {
+    CampaignSessionInfo {
+        session_id: st.id.clone().unwrap_or_default(),
+        session_number: st.number,
+        title: st.title.clone(),
+        date: st.date.clone(),
+        metadata: metadata_value(st),
+        has_tracks: has_tracks(st),
+        has_transcription: has_transcript(dir),
+        has_summary: has_summary(dir),
+    }
+}
+
+// ── Reads ─────────────────────────────────────────────────────────
+
+pub fn list_campaign_sessions(
+    conn: &Connection,
+    campaign_id: &str,
+) -> AppResult<Vec<CampaignSessionInfo>> {
+    let Some(root) = campaigns::world_root_for_id(conn, campaign_id)? else {
+        return Ok(Vec::new());
+    };
+    let mut out: Vec<CampaignSessionInfo> = session_dirs(&root)
+        .iter()
+        .map(|dir| {
+            let mut st = toml_of(dir);
+            ensure_id(dir, &mut st);
+            campaign_session_info(dir, &st)
+        })
+        .collect();
+    out.sort_by(|a, b| b.session_number.cmp(&a.session_number));
+    Ok(out)
+}
+
+pub fn list_sessions(conn: &Connection) -> AppResult<Vec<SessionInfo>> {
+    let mut out = Vec::new();
+    let mut push = |dir: &Path, st: &SessionToml| {
+        out.push(SessionInfo {
+            session_id: st.id.clone().unwrap_or_default(),
+            session_path: dir.to_string_lossy().to_string(),
+            has_tracks: has_tracks(st),
+            has_transcription: has_transcript(dir),
+            has_summary: has_summary(dir),
+            transcript_path: None,
+            summary_path: None,
+        });
+    };
+    for (root, _) in campaigns::worlds(conn)? {
+        for dir in session_dirs(&root) {
+            let mut st = toml_of(&dir);
+            ensure_id(&dir, &mut st);
+            push(&dir, &st);
+        }
+    }
+    // Bare uploads (not yet assigned to a world).
+    if let Ok(entries) = std::fs::read_dir(output_root(conn)?.join("_sessions")) {
+        for entry in entries.flatten() {
+            let dir = entry.path();
+            if !dir.is_dir() {
+                continue;
+            }
+            let mut st = toml_of(&dir);
+            if st.id.is_none() {
+                st.id = Some(entry.file_name().to_string_lossy().to_string());
+            }
+            push(&dir, &st);
+        }
+    }
+    Ok(out)
 }
 
 /// Full `/session/{id}` object the frontend consumes.
 pub fn get_session_object(conn: &Connection, session_id: &str) -> AppResult<Value> {
-    let row = conn
-        .query_row(
-            "SELECT campaign_id, session_number, title, date, metadata_json, notes, session_path, \
-             tracks_json, speakers_json FROM sessions WHERE session_id = ?1",
-            params![session_id],
-            |r| {
-                Ok((
-                    r.get::<_, Option<String>>(0)?,
-                    r.get::<_, Option<i64>>(1)?,
-                    r.get::<_, Option<String>>(2)?,
-                    r.get::<_, Option<String>>(3)?,
-                    r.get::<_, String>(4)?,
-                    r.get::<_, Option<String>>(5)?,
-                    r.get::<_, String>(6)?,
-                    r.get::<_, String>(7)?,
-                    r.get::<_, String>(8)?,
-                ))
-            },
-        )
-        .optional()?;
-    let Some((
-        campaign_id,
-        number,
-        title,
-        date,
-        metadata_json,
-        notes,
-        session_path,
-        tracks_json,
-        speakers_json,
-    )) = row
-    else {
-        return Err(AppError::NotFound(format!(
-            "Session not found: {session_id}"
-        )));
+    let loc = require(conn, session_id)?;
+    let (campaign_id, campaign_name) = match &loc.world {
+        Some((_, cfg)) => (Some(cfg.id.clone()), Some(cfg.name.clone())),
+        None => (None, None),
     };
-
-    let campaign_name = campaign_id.as_deref().and_then(|c| campaign_name(conn, c));
-    let metadata: Value =
-        serde_json::from_str(&metadata_json).unwrap_or_else(|_| normalize_metadata(&Value::Null));
-    let tracks: Value = serde_json::from_str(&tracks_json).unwrap_or_else(|_| json!([]));
-    let speakers: Value = serde_json::from_str(&speakers_json).unwrap_or_else(|_| json!([]));
-
     Ok(json!({
         "session_id": session_id,
-        "session_path": session_path,
-        "tracks": tracks,
-        "speakers": speakers,
-        "metadata": metadata,
+        "session_path": loc.dir.to_string_lossy(),
+        "tracks": tracks_value(&loc.dir, &loc.st),
+        "speakers": speakers_value(&loc.st),
+        "metadata": metadata_value(&loc.st),
         "transcription": {},
         "summary": {},
         "campaign": {
             "campaign_id": campaign_id,
             "campaign_name": campaign_name,
-            "session_number": number,
-            "title": title,
-            "date": date,
-            "notes": notes.unwrap_or_default(),
+            "session_number": loc.st.number,
+            "title": loc.st.title,
+            "date": loc.st.date,
+            "notes": loc.st.notes,
         }
     }))
 }
@@ -286,193 +313,215 @@ pub fn get_campaign_metadata(conn: &Connection, session_id: &str) -> AppResult<V
     Ok(out)
 }
 
-/// True when the stored `tracks_json` holds at least one track.
-fn tracks_present(tracks_json: &str) -> bool {
-    serde_json::from_str::<Value>(tracks_json)
-        .ok()
-        .and_then(|v| v.as_array().map(|a| !a.is_empty()))
-        .unwrap_or(false)
+pub fn session_path_of(conn: &Connection, session_id: &str) -> AppResult<Option<String>> {
+    Ok(locate(conn, session_id)?.map(|l| l.dir.to_string_lossy().to_string()))
 }
 
-pub fn list_sessions(conn: &Connection) -> AppResult<Vec<SessionInfo>> {
-    let mut stmt = conn.prepare("SELECT session_id, session_path, tracks_json FROM sessions ORDER BY session_id DESC")?;
-    let rows = stmt
-        .query_map([], |r| {
-            Ok((
-                r.get::<_, String>(0)?,
-                r.get::<_, String>(1)?,
-                r.get::<_, String>(2)?,
-            ))
-        })?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
-    let with_transcript = artifacts::session_ids_with_kind(conn, "transcript")?;
-    let with_summary = artifacts::session_ids_with_kind(conn, "summary")?;
-    let out = rows
-        .into_iter()
-        .map(|(sid, path, tracks_json)| SessionInfo {
-            has_tracks: tracks_present(&tracks_json),
-            has_transcription: with_transcript.contains(&sid),
-            has_summary: with_summary.contains(&sid),
-            // Artifacts live inline in SQLite now; no file paths to surface.
-            transcript_path: None,
-            summary_path: None,
-            session_id: sid,
-            session_path: path,
-        })
-        .collect();
-    Ok(out)
+pub fn get_tracks(conn: &Connection, session_id: &str) -> AppResult<Value> {
+    let loc = require(conn, session_id)?;
+    Ok(tracks_value(&loc.dir, &loc.st))
 }
 
-pub fn list_campaign_sessions(
+pub fn get_speakers(conn: &Connection, session_id: &str) -> AppResult<Value> {
+    Ok(locate(conn, session_id)?
+        .map(|l| speakers_value(&l.st))
+        .unwrap_or_else(|| json!([])))
+}
+
+// ── Writes ────────────────────────────────────────────────────────
+
+fn number_dir(world_root: &Path, number: i64) -> PathBuf {
+    world_root.join("Sessions").join(session_files::padded_number(number))
+}
+
+pub fn create_campaign_session(
     conn: &Connection,
     campaign_id: &str,
-) -> AppResult<Vec<CampaignSessionInfo>> {
-    let mut stmt = conn.prepare(
-        "SELECT session_id, session_number, title, date, metadata_json, tracks_json FROM sessions \
-         WHERE campaign_id = ?1 ORDER BY session_number DESC",
-    )?;
-    let rows = stmt
-        .query_map(params![campaign_id], |r| {
-            Ok((
-                r.get::<_, String>(0)?,
-                r.get::<_, Option<i64>>(1)?,
-                r.get::<_, Option<String>>(2)?,
-                r.get::<_, Option<String>>(3)?,
-                r.get::<_, String>(4)?,
-                r.get::<_, String>(5)?,
-            ))
-        })?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
-    let with_transcript = artifacts::session_ids_with_kind(conn, "transcript")?;
-    let with_summary = artifacts::session_ids_with_kind(conn, "summary")?;
-    let out = rows
-        .into_iter()
-        .map(|(sid, number, title, date, metadata_json, tracks_json)| {
-            let metadata: Value = serde_json::from_str(&metadata_json)
-                .unwrap_or_else(|_| normalize_metadata(&Value::Null));
-            CampaignSessionInfo {
-                has_tracks: tracks_present(&tracks_json),
-                has_transcription: with_transcript.contains(&sid),
-                has_summary: with_summary.contains(&sid),
-                session_id: sid,
-                session_number: number,
-                title,
-                date,
-                metadata,
-            }
-        })
-        .collect();
-    Ok(out)
-}
+    session_number: Option<i64>,
+    title: Option<&str>,
+    date: Option<&str>,
+) -> AppResult<CampaignSessionInfo> {
+    let Some(campaign) = campaigns::get_campaign(conn, campaign_id)? else {
+        return Err(AppError::NotFound(format!("Campaign not found: {campaign_id}")));
+    };
+    let root = campaigns::world_root_for_id(conn, campaign_id)?
+        .ok_or_else(|| AppError::NotFound(format!("Campaign not found: {campaign_id}")))?;
 
-pub fn session_path_of(conn: &Connection, session_id: &str) -> AppResult<Option<String>> {
-    let p: Option<String> = conn
-        .query_row(
-            "SELECT session_path FROM sessions WHERE session_id = ?1",
-            params![session_id],
-            |r| r.get(0),
-        )
-        .optional()?;
-    Ok(p)
+    let number = match session_number {
+        Some(n) => {
+            if number_dir(&root, n).exists() {
+                return Err(AppError::Conflict(format!(
+                    "Session number already exists for campaign {campaign_id}: {n}"
+                )));
+            }
+            n
+        }
+        None => {
+            let mut n = campaign.next_session_number;
+            while number_dir(&root, n).exists() {
+                n += 1;
+            }
+            n
+        }
+    };
+
+    let dir = number_dir(&root, number);
+    std::fs::create_dir_all(session_files::audio_dir(&dir))
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("create session dir: {e}")))?;
+    let st = SessionToml {
+        id: Some(Uuid::new_v4().to_string()),
+        number: Some(number),
+        title: title.filter(|s| !s.is_empty()).map(str::to_string),
+        date: date.filter(|s| !s.is_empty()).map(str::to_string),
+        language: campaign.default_language.clone(),
+        ..Default::default()
+    };
+    session_files::write_session_toml_file(&dir, &st)
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("write session.toml: {e}")))?;
+    Ok(campaign_session_info(&dir, &st))
 }
 
 /// Resolve the session dir for an upload, creating a bare (campaign-less)
-/// session row if the id is unknown. Returns `(session_id, session_path)`.
+/// session folder if the id is unknown. Returns `(session_id, session_path)`.
 pub fn resolve_for_upload(
     conn: &Connection,
     session_id: Option<&str>,
 ) -> AppResult<(String, PathBuf)> {
     if let Some(sid) = session_id {
-        if let Some(path) = session_path_of(conn, sid)? {
-            return Ok((sid.to_string(), PathBuf::from(path)));
+        if let Some(loc) = locate(conn, sid)? {
+            return Ok((sid.to_string(), loc.dir));
         }
     }
     let sid = session_id
         .map(str::to_string)
         .unwrap_or_else(|| Uuid::new_v4().to_string());
-    let path = output_root(conn)?.join("_sessions").join(&sid);
-    std::fs::create_dir_all(&path)
+    let dir = output_root(conn)?.join("_sessions").join(&sid);
+    std::fs::create_dir_all(&dir)
         .map_err(|e| AppError::Internal(anyhow::anyhow!("create session dir: {e}")))?;
-    let metadata = normalize_metadata(&Value::Null);
-    conn.execute(
-        "INSERT INTO sessions (session_id, metadata_json, notes, session_path, tracks_json, speakers_json) \
-         VALUES (?1, ?2, '', ?3, '[]', '[]')",
-        params![sid, metadata.to_string(), path.to_string_lossy()],
-    )?;
-    Ok((sid, path))
+    let st = SessionToml { id: Some(sid.clone()), ..Default::default() };
+    let _ = session_files::write_session_toml_file(&dir, &st);
+    Ok((sid, dir))
 }
 
 pub fn set_tracks(conn: &Connection, session_id: &str, tracks: &Value) -> AppResult<()> {
-    conn.execute(
-        "UPDATE sessions SET tracks_json = ?1 WHERE session_id = ?2",
-        params![tracks.to_string(), session_id],
-    )?;
-    Ok(())
+    let loc = require(conn, session_id)?;
+    let mut st = loc.st;
+    // Rebuild the track list from the upload, carrying over speaker labels for
+    // filenames that survive.
+    let old = std::mem::take(&mut st.tracks);
+    st.tracks = tracks
+        .as_array()
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|t| {
+                    let filename = t.get("filename").and_then(Value::as_str)?.to_string();
+                    let prev = old.iter().find(|o| o.filename == filename);
+                    Some(crate::session_files::TrackEntry {
+                        filename,
+                        speaker: prev.map(|p| p.speaker.clone()).unwrap_or_default(),
+                        character: prev.map(|p| p.character.clone()).unwrap_or_default(),
+                        pronouns: prev.map(|p| p.pronouns.clone()).unwrap_or_default(),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    session_files::write_session_toml_file(&loc.dir, &st)
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("write session.toml: {e}")))
 }
 
 pub fn set_speakers(conn: &Connection, session_id: &str, speakers: &Value) -> AppResult<()> {
-    if !session_exists(conn, session_id)? {
-        return Err(AppError::NotFound(format!(
-            "Session not found: {session_id}"
-        )));
+    let loc = require(conn, session_id)?;
+    let mut st = loc.st;
+    let by_track: std::collections::HashMap<&str, &Value> = speakers
+        .as_array()
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|s| s.get("track_id").and_then(Value::as_str).map(|t| (t, s)))
+                .collect()
+        })
+        .unwrap_or_default();
+    for t in &mut st.tracks {
+        if let Some(s) = by_track.get(stem_of(&t.filename).as_str()) {
+            let field = |k: &str| s.get(k).and_then(Value::as_str).unwrap_or("").to_string();
+            t.speaker = field("player_name");
+            t.character = field("character_name");
+            t.pronouns = field("pronouns");
+        }
     }
-    conn.execute(
-        "UPDATE sessions SET speakers_json = ?1 WHERE session_id = ?2",
-        params![speakers.to_string(), session_id],
-    )?;
-    Ok(())
+    session_files::write_session_toml_file(&loc.dir, &st)
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("write session.toml: {e}")))
 }
 
-pub fn get_tracks(conn: &Connection, session_id: &str) -> AppResult<Value> {
-    let tj: Option<String> = conn
-        .query_row(
-            "SELECT tracks_json FROM sessions WHERE session_id = ?1",
-            params![session_id],
-            |r| r.get(0),
-        )
-        .optional()?;
-    match tj {
-        Some(s) => Ok(serde_json::from_str(&s).unwrap_or_else(|_| json!([]))),
-        None => Err(AppError::NotFound(format!(
-            "Session not found: {session_id}"
-        ))),
-    }
-}
+pub fn set_campaign_metadata(conn: &Connection, req: &SessionMetadataRequest) -> AppResult<Value> {
+    let loc = require(conn, &req.session_id)?;
+    let mut st = loc.st;
+    let mut dir = loc.dir;
 
-pub fn get_speakers(conn: &Connection, session_id: &str) -> AppResult<Value> {
-    let sj: Option<String> = conn
-        .query_row(
-            "SELECT speakers_json FROM sessions WHERE session_id = ?1",
-            params![session_id],
-            |r| r.get(0),
-        )
-        .optional()?;
-    Ok(sj
-        .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_else(|| json!([])))
-}
-
-pub fn delete_session(conn: &Connection, session_id: &str) -> AppResult<()> {
-    let path: Option<String> = conn
-        .query_row(
-            "SELECT session_path FROM sessions WHERE session_id = ?1",
-            params![session_id],
-            |r| r.get(0),
-        )
-        .optional()?;
-    let Some(path) = path else {
-        return Err(AppError::NotFound(format!(
-            "Session not found: {session_id}"
-        )));
+    // Resolve the target world: an explicit campaign assignment moves a bare
+    // session into that world's Sessions/.
+    let target_world = match &req.campaign_id {
+        Some(cid) => {
+            let root = campaigns::world_root_for_id(conn, cid)?
+                .ok_or_else(|| AppError::NotFound(format!("Campaign not found: {cid}")))?;
+            Some(root)
+        }
+        None => loc.world.as_ref().map(|(root, _)| root.clone()),
     };
-    artifacts::delete_artifacts_for_session(conn, session_id)?;
-    conn.execute(
-        "DELETE FROM sessions WHERE session_id = ?1",
-        params![session_id],
-    )?;
-    // Audio is device-local and now orphaned — reclaim the disk.
-    if !path.is_empty() {
-        let _ = std::fs::remove_dir_all(&path);
+
+    let mut number = req.session_number.or(st.number);
+    if number.is_none() {
+        if let Some(cid) = &req.campaign_id {
+            number = Some(campaigns::next_session_number(conn, Some(cid))?);
+        }
     }
+
+    // Move/renumber the folder when its canonical location changed.
+    if let (Some(root), Some(n)) = (&target_world, number) {
+        let want = number_dir(root, n);
+        if want != dir {
+            if want.exists() {
+                return Err(AppError::Conflict(format!("Session number already exists: {n}")));
+            }
+            if let Some(parent) = want.parent() {
+                std::fs::create_dir_all(parent)
+                    .map_err(|e| AppError::Internal(anyhow::anyhow!("create Sessions/: {e}")))?;
+            }
+            std::fs::rename(&dir, &want)
+                .map_err(|e| AppError::Internal(anyhow::anyhow!("move session dir: {e}")))?;
+            dir = want;
+        }
+    }
+
+    st.number = number;
+    st.title = req.title.clone().filter(|s| !s.is_empty());
+    st.date = req.date.clone().filter(|s| !s.is_empty());
+    let metadata = normalize_metadata(req.metadata.as_ref().unwrap_or(&Value::Null));
+    st.metadata = metadata_from_value(&metadata);
+    st.notes = req.notes.clone().unwrap_or_default();
+    session_files::write_session_toml_file(&dir, &st)
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("write session.toml: {e}")))?;
+
+    let campaign_name = req
+        .campaign_id
+        .as_deref()
+        .and_then(|c| campaigns::get_campaign(conn, c).ok().flatten())
+        .map(|c| c.name);
+    Ok(json!({
+        "campaign_id": req.campaign_id,
+        "campaign_name": campaign_name,
+        "session_number": number,
+        "title": req.title,
+        "date": req.date,
+        "notes": st.notes,
+        "metadata": metadata,
+    }))
+}
+
+/// Delete a session: its folder (audio included) moves to the OS trash.
+pub fn delete_session(conn: &Connection, session_id: &str) -> AppResult<()> {
+    let loc = require(conn, session_id)?;
+    crate::paths::move_to_trash(&loc.dir)
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("move session to trash: {e}")))?;
     Ok(())
 }

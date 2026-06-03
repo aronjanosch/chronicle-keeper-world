@@ -79,17 +79,15 @@ fn resolve_summary_text(
     summary_id: Option<i64>,
 ) -> AppResult<String> {
     if let Some(id) = summary_id {
-        let art = artifacts::get_artifact(conn, id)?
-            .filter(|a| a.session_id == session_id)
-            .ok_or_else(|| {
-                AppError::BadRequest("Selected summary was not found for this session.".into())
-            })?;
+        let art = artifacts::get_artifact(conn, session_id, id)?.ok_or_else(|| {
+            AppError::BadRequest("Selected summary was not found for this session.".into())
+        })?;
         if art.kind != "summary" {
             return Err(AppError::BadRequest(
                 "Selected artifact is not a summary.".into(),
             ));
         }
-        return artifacts::get_content(conn, art.id)?.ok_or_else(|| {
+        return artifacts::get_content(conn, session_id, art.id)?.ok_or_else(|| {
             AppError::BadRequest("Selected summary was not found for this session.".into())
         });
     }

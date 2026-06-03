@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use directories::{ProjectDirs, UserDirs};
@@ -40,6 +40,24 @@ impl Paths {
             Some(v) => PathBuf::from(v),
             None => self.data_dir.join("models"),
         }
+    }
+}
+
+/// Move a file or folder to the OS trash. In unit tests this hard-deletes
+/// instead, so `cargo test` never fills the user's real trash.
+pub fn move_to_trash(path: &Path) -> Result<()> {
+    #[cfg(test)]
+    {
+        if path.is_dir() {
+            std::fs::remove_dir_all(path)?;
+        } else {
+            std::fs::remove_file(path)?;
+        }
+        Ok(())
+    }
+    #[cfg(not(test))]
+    {
+        trash::delete(path).map_err(|e| anyhow::anyhow!(e))
     }
 }
 

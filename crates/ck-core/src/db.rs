@@ -3,6 +3,12 @@ use std::path::Path;
 use anyhow::{Context, Result};
 use rusqlite::Connection;
 
+// Global DB = settings only (config, provider_keys, prompt_templates). The
+// campaigns/sessions/artifacts/codex_entries tables below are kept physically
+// for upstream merge-compat; nothing reads or writes them anymore (campaigns
+// has an inert FK-shim row per world). Files are truth — see
+// docs/internal/vault-and-session-storage-spec.md. Legacy 0.X codex/notes
+// content survives in the untouched 0.X DB for Phase 5 import.
 const SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS config (
     key   TEXT PRIMARY KEY,
@@ -73,11 +79,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_codex_entries_dedup
     ON codex_entries(campaign_id, lower(name), kind);
 ";
 
-/// Open the database and ensure the schema exists.
-///
-/// Storage is simplified vs. the Python backend: the `sessions` table is the
-/// source of truth (tracks/speakers/metadata live in columns here), so there
-/// is no scattered `session.json` discovery or campaign-folder relocation.
+/// Open the global settings database and ensure the schema exists.
 pub fn open(path: &Path) -> Result<Connection> {
     let conn = Connection::open(path).with_context(|| format!("open db {}", path.display()))?;
     conn.pragma_update(None, "journal_mode", "WAL")?;
@@ -200,6 +202,13 @@ fn migrate(conn: &Connection) -> Result<()> {
          ON codex_entries(campaign_id, lower(name), kind)",
         [],
     )?;
+
+    // Files are truth (Phase 2): sessions/artifacts are merge-compat shells —
+    // nothing reads or writes them. Clear rows left behind by pre-Phase-2 code
+    // so the settings DB stays settings-only. codex_entries is NOT cleared:
+    // legacy content there feeds the Phase 5 import.
+    conn.execute("DELETE FROM artifacts", [])?;
+    conn.execute("DELETE FROM sessions", [])?;
 
     // Summary prompt templates: the user-managed library of system prompts shown
     // in the Summarize template picker. Two builtins (EN/DE) are seeded on first

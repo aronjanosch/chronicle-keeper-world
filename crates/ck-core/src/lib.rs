@@ -4,6 +4,7 @@ pub mod db;
 pub mod error;
 pub mod export;
 pub mod http;
+pub mod index_watch;
 pub mod llm;
 pub mod models;
 pub mod normalize;
@@ -18,6 +19,7 @@ pub mod transcript_format;
 #[cfg(feature = "transcription")]
 pub mod transcription;
 pub mod vault;
+pub mod world_config;
 
 use std::net::SocketAddr;
 

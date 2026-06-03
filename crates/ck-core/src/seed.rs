@@ -11,13 +11,16 @@
 //! config never sets it. Once seeded the flag stays set forever, so deleting the
 //! example never makes it reappear — the user owns it from then on.
 
+use std::path::PathBuf;
+
 use rusqlite::Connection;
 use serde_json::json;
 
 use crate::config;
-use crate::error::AppResult;
-use crate::models::{CampaignUpdateRequest, CodexEntryCreate};
-use crate::store::{artifacts, campaigns, codex, sessions};
+use crate::error::{AppError, AppResult};
+use crate::models::CampaignUpdateRequest;
+use crate::store::{artifacts, campaigns, sessions};
+use crate::vault;
 
 const FLAG_KEY: &str = "example_seeded";
 const CAMPAIGN_ID: &str = "example-ashfall";
@@ -30,16 +33,26 @@ pub fn seed_example_if_first(conn: &Connection) -> AppResult<()> {
     if config::get_value(conn, FLAG_KEY)?.is_some() {
         return Ok(());
     }
+    seed_example(conn).map(|_| ())
+}
 
+/// Seed (or re-add) the example world, regardless of the first-run flag —
+/// the New-World screen's "Add the example world" button. Conflict when it
+/// already exists.
+pub fn seed_example(conn: &Connection) -> AppResult<crate::models::CampaignDetail> {
+    if campaigns::get_campaign(conn, CAMPAIGN_ID)?.is_some() {
+        return Err(AppError::Conflict("The example world already exists".into()));
+    }
     let tx = conn.unchecked_transaction()?;
     seed_inner(&tx)?;
     config::set_value(&tx, FLAG_KEY, "true")?;
     tx.commit()?;
-    Ok(())
+    campaigns::get_campaign(conn, CAMPAIGN_ID)?
+        .ok_or_else(|| AppError::Internal(anyhow::anyhow!("example world missing after seed")))
 }
 
 fn seed_inner(conn: &Connection) -> AppResult<()> {
-    campaigns::create_campaign(conn, CAMPAIGN_ID, "The Ashfall Compact", 1)?;
+    campaigns::create_campaign(conn, CAMPAIGN_ID, "The Ashfall Compact", 1, None, false, false)?;
 
     // Setting + party. Passing `players` makes update_campaign auto-create the
     // `pc` codex entries via codex::sync_pc_entries, so we don't add them here.
@@ -60,31 +73,14 @@ fn seed_inner(conn: &Connection) -> AppResult<()> {
     };
     campaigns::update_campaign(conn, CAMPAIGN_ID, &update)?;
 
-    // A small codex — the summarizer's memory. These are the named entities the
-    // LLM would otherwise mangle from audio; here they're filled in for the demo.
-    let entries = [
-        ("Mayor Teller Oren", "npc", "Anxious mayor of Cinderhold who hired the party.",
-         "The elected head of Cinderhold, a soft-handed merchant out of his depth. He hired the Compact to find out why the warding stones along the rim have gone cold, and he is hiding how little coin the town actually has left."),
-        ("Cinderhold", "place", "Walled frontier town built into a dead caldera.",
-         "The last settled town before the ash plains. Its homes are cut into the inner wall of an extinct volcano; warding stones ring the rim to keep the deep fire asleep. Trade has dried up since the eastern road closed."),
-        ("The Ember Wardens", "faction", "Old order sworn to keep the fire below bound.",
-         "A dwindling order that maintains the warding stones and remembers the original Compact. Most townsfolk think they're harmless relics. They are not — and they know the stones are failing."),
-        ("The Ashfall Compact", "lore", "The ancient pact that bound the fire beneath Embermarch.",
-         "A centuries-old binding between the first settlers and something deep underground. Its terms are half-forgotten and its anchors — the warding stones — are now going dark one by one."),
-        ("Brannik's Tuning Hammer", "item", "Dwarven hammer that rings true near live ward-stone.",
-         "A family heirloom. When struck near an active warding stone it hums a clear note; near a dead one it falls silent. The party used it to map which stones have failed."),
-    ];
-    for (name, kind, body, detail) in entries {
-        codex::create_entry(
-            conn,
-            CAMPAIGN_ID,
-            &CodexEntryCreate {
-                name: name.into(),
-                kind: kind.into(),
-                body: body.into(),
-                detail: detail.into(),
-            },
-        )?;
+    // A small codex of vault pages — the summarizer's memory and the link-layer
+    // demo in one: summary frontmatter, aliases, tags and [[wikilinks]].
+    let vault_path = campaigns::get_campaign(conn, CAMPAIGN_ID)?
+        .and_then(|c| c.vault_path)
+        .map(PathBuf::from)
+        .ok_or_else(|| AppError::Internal(anyhow::anyhow!("example world has no vault")))?;
+    for (rel, content) in DEMO_PAGES {
+        vault::write_page(&vault_path, rel, content)?;
     }
 
     // One session, already recorded, transcribed and summarized so the user sees
@@ -130,6 +126,71 @@ fn seed_inner(conn: &Connection) -> AppResult<()> {
     )?;
     Ok(())
 }
+
+// Demo Codex pages (files-as-truth): each shows the page model — `summary:`
+// is what the summarizer remembers, aliases/tags feed the index, [[wikilinks]]
+// light up the backlinks panel.
+const DEMO_PAGES: [(&str, &str); 5] = [
+    (
+        "Mayor Teller Oren.md",
+        r#"---
+kind: npc
+summary: Anxious mayor of Cinderhold who hired the party.
+aliases: [Oren, the Mayor]
+tags: [npc/cinderhold]
+---
+The elected head of [[Cinderhold]], a soft-handed merchant out of his depth. He hired the party to find out why the warding stones along the rim have gone cold.
+
+## Secrets
+He is hiding how little coin the town actually has left — [[Vesh]] caught the lie in session one.
+"#,
+    ),
+    (
+        "Cinderhold.md",
+        r#"---
+kind: place
+summary: Walled frontier town built into a dead caldera.
+tags: [place/embermarch]
+---
+The last settled town before the ash plains. Its homes are cut into the inner wall of an extinct volcano; warding stones ring the rim to keep the deep fire asleep.
+
+## History
+Founded by the first settlers of [[The Ashfall Compact|the Compact]]. Trade has dried up since the eastern road closed. [[The Ember Wardens]] still walk the rim, mostly ignored.
+"#,
+    ),
+    (
+        "The Ember Wardens.md",
+        r#"---
+kind: faction
+summary: Old order sworn to keep the fire below bound.
+aliases: [Wardens]
+tags: [faction]
+---
+A dwindling order that maintains the warding stones around [[Cinderhold]] and remembers the original [[The Ashfall Compact|Compact]]. Most townsfolk think they're harmless relics. They are not — and they know the stones are failing.
+"#,
+    ),
+    (
+        "The Ashfall Compact.md",
+        r#"---
+kind: lore
+summary: The ancient pact that bound the fire beneath Embermarch.
+aliases: [the Compact]
+tags: [lore]
+---
+A centuries-old binding between the first settlers and something deep underground. Its terms are half-forgotten and its anchors — the warding stones — are now going dark one by one. Only [[The Ember Wardens]] still know fragments of the original terms.
+"#,
+    ),
+    (
+        "Brannik's Tuning Hammer.md",
+        r#"---
+kind: item
+summary: Dwarven hammer that rings true near live ward-stone.
+tags: [item]
+---
+A family heirloom of Brannik Stonebellow. When struck near an active warding stone it hums a clear note; near a dead one it falls silent. The party used it to map which stones around [[Cinderhold]] have failed.
+"#,
+    ),
+];
 
 // Matches the real on-device transcript format (transcript_format.rs):
 // a `[Character (Player)]` header line per speaker block, then their lines,
@@ -182,30 +243,36 @@ The Ashfall Compact gathered in Cinderhold at the request of **Mayor Teller Oren
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::store::{artifacts, codex};
+    use crate::store::artifacts;
 
-    fn fresh_db() -> Connection {
+    fn fresh_db(tag: &str) -> Connection {
         let conn = crate::db::open_in_memory().unwrap();
         // Keep create_campaign_session's mkdir out of the real app-data dir.
-        let tmp = std::env::temp_dir().join("ck-seed-test");
+        // Unique per test — worlds are discovered by folder scan, so a shared
+        // dir would leak one test's world into the other.
+        let tmp = std::env::temp_dir().join(format!("ck-seed-{tag}-{}", std::process::id()));
+        std::fs::remove_dir_all(&tmp).ok();
+        std::fs::create_dir_all(&tmp).unwrap();
         config::set_value(&conn, "output_root", &tmp.to_string_lossy()).unwrap();
         conn
     }
 
     #[test]
     fn seeds_once_and_is_idempotent() {
-        let conn = fresh_db();
+        let conn = fresh_db("once");
         seed_example_if_first(&conn).unwrap();
 
-        // Campaign + codex (3 PCs auto + 5 explicit = 8) + a session with both artifacts.
+        // Campaign + 5 codex pages + a session with both artifacts.
         let campaign = campaigns::get_campaign(&conn, CAMPAIGN_ID)
             .unwrap()
             .unwrap();
         assert_eq!(campaign.name, "The Ashfall Compact");
-        let entries = codex::list_entries(&conn, CAMPAIGN_ID).unwrap();
-        assert_eq!(entries.len(), 8);
-        let pcs = entries.iter().filter(|e| e.kind == "pc").count();
-        assert_eq!(pcs, 3);
+        let vault = PathBuf::from(campaign.vault_path.unwrap());
+        let pages = vault::list_pages(&vault).unwrap();
+        assert_eq!(pages.len(), 5);
+        let oren = vault::read_page(&vault, "Mayor Teller Oren.md").unwrap();
+        assert_eq!(oren.summary, "Anxious mayor of Cinderhold who hired the party.");
+        assert!(oren.content.contains("[[Cinderhold]]"));
 
         let sessions = crate::store::sessions::list_campaign_sessions(&conn, CAMPAIGN_ID).unwrap();
         assert_eq!(sessions.len(), 1);
@@ -227,13 +294,18 @@ mod tests {
 
     #[test]
     fn does_not_reseed_after_user_deletes() {
-        let conn = fresh_db();
+        let conn = fresh_db("del");
         seed_example_if_first(&conn).unwrap();
+        // Explicit re-add conflicts while the example exists.
+        assert!(seed_example(&conn).is_err());
         campaigns::delete_campaign(&conn, CAMPAIGN_ID).unwrap();
-        // Flag persists, so the deleted example never comes back.
+        // Flag persists, so the deleted example never comes back on its own…
         seed_example_if_first(&conn).unwrap();
         assert!(campaigns::get_campaign(&conn, CAMPAIGN_ID)
             .unwrap()
             .is_none());
+        // …but the New-World button brings it back on demand.
+        let c = seed_example(&conn).unwrap();
+        assert_eq!(c.campaign_id, CAMPAIGN_ID);
     }
 }
