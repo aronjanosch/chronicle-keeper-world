@@ -403,15 +403,12 @@ export function PageScreen() {
   ];
 
   if (missing) {
-    return html`<${Shell} topbar=${html`<${Topbar} crumbs=${crumbs} />`} bodyStyle=${{ padding: 0 }}>
-      <div style=${{ display: 'flex', height: '100%', minHeight: 0 }}>
-        <${FileTree} campaign=${c} tree=${tree} active=${null} onOpen=${(p) => navigate('page', { path: p.path })} act=${act} />
-        <div style=${{ flex: 1, padding: 40 }}>
-          <${Empty} icon="scroll" title="Page not found">
-            <a onClick=${() => navigate('codex', { id: c.campaign_id })} style=${{ color: 'var(--burgundy)', cursor: 'pointer' }}>Back to the codex</a>.
-          </${Empty}>
-        </div>
-      </div>
+    return html`<${Shell}
+      sidebar=${html`<${FileTree} campaign=${c} tree=${tree} active=${null} onOpen=${(p) => navigate('page', { path: p.path })} act=${act} />`}
+      topbar=${html`<${Topbar} crumbs=${crumbs} />`} bodyStyle=${{ padding: 40 }}>
+      <${Empty} icon="scroll" title="Page not found">
+        <a onClick=${() => navigate('codex', { id: c.campaign_id })} style=${{ color: 'var(--burgundy)', cursor: 'pointer' }}>Back to the codex</a>.
+      </${Empty}>
     </${Shell}>`;
   }
 
@@ -436,9 +433,10 @@ export function PageScreen() {
 
   const doSave = async (content) => { const updated = await saveVaultPage(path, content); setPage(updated); return updated; };
 
-  return html`<${Shell} topbar=${topbar} bodyStyle=${{ padding: 0 }}>
+  return html`<${Shell}
+    sidebar=${html`<${FileTree} campaign=${c} tree=${tree} active=${(page && page.title) || null} onOpen=${(p) => navigate('page', { path: p.path })} act=${act} />`}
+    topbar=${topbar} bodyStyle=${{ padding: 0 }}>
     <div style=${{ display: 'flex', height: '100%', minHeight: 0 }}>
-      <${FileTree} campaign=${c} tree=${tree} active=${(page && page.title) || null} onOpen=${(p) => navigate('page', { path: p.path })} act=${act} />
       ${page === null
         ? html`<div style=${{ flex: 1, padding: 40, color: 'var(--ink-faint)', fontStyle: 'italic' }}>Loading…</div>`
         : mode === 'read'

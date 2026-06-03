@@ -571,9 +571,11 @@ function VaultView({ campaign }) {
   const recent = [...pages].sort((a, b) => (b.modified || 0) - (a.modified || 0));
   const crumbs = sel ? sel.split('/') : [];
 
-  return html`<div style=${{ display: 'flex', height: '100%', minHeight: 0 }}>
-    <${FileTree} campaign=${campaign} tree=${tree} active=${null} onOpen=${openPage} act=${act} />
-    <div style=${{ flex: 1, overflow: 'auto', padding: '22px 26px', minWidth: 0 }}>
+  const topbar = html`<${Topbar} crumbs=${[{ label: campaign.name, onClick: () => openCampaign(campaign.campaign_id) }, 'Codex']} />`;
+  return html`<${Shell}
+    sidebar=${html`<${FileTree} campaign=${campaign} tree=${tree} active=${null} onOpen=${openPage} act=${act} />`}
+    topbar=${topbar} bodyStyle=${{ padding: 0 }}>
+    <div style=${{ height: '100%', overflow: 'auto', padding: '22px 26px', minWidth: 0 }}>
       <div style=${{ display: 'flex', alignItems: 'flex-end', gap: 12, marginBottom: 4 }}>
         <div style=${{ maxWidth: 560 }}>
           <div style=${{ fontSize: 10.5, fontWeight: 600, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--burgundy)' }}>The world wiki</div>
@@ -619,7 +621,7 @@ function VaultView({ campaign }) {
               </div>`}
             </div>`}
     </div>
-  </div>`;
+  </${Shell}>`;
 }
 
 export function CodexScreen() {
@@ -636,12 +638,7 @@ export function CodexScreen() {
 
   if (!c) { navigate('library'); return null; }
 
-  if (c.vault_path) {
-    const topbar = html`<${Topbar} crumbs=${[{ label: c.name, onClick: () => openCampaign(c.campaign_id) }, 'Codex']} />`;
-    return html`<${Shell} topbar=${topbar} bodyStyle=${{ padding: 0 }}>
-      <${VaultView} campaign=${c} />
-    </${Shell}>`;
-  }
+  if (c.vault_path) return html`<${VaultView} campaign=${c} />`;
 
   const entries = store.codexEntries || [];
   const notesCount = effectiveNotes(c).length;
