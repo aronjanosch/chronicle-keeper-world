@@ -22,14 +22,19 @@ export async function openCampaign(id) {
   setState({ loading: true, error: null });
   try {
     const campaign = decorateCampaign(await apiFetch(`/campaigns/${id}`));
-    const [sessions, codexEntries] = await Promise.all([
+    const [sessions, codexEntries, vaultTree] = await Promise.all([
       apiFetch(`/campaigns/${id}/sessions`).catch(() => []),
       apiFetch(`/campaigns/${id}/codex/entries`).catch(() => []),
+      campaign.vault_path
+        ? apiFetch(`/campaigns/${id}/vault/tree`).catch(() => ({ folders: [], pages: [] }))
+        : Promise.resolve({ folders: [], pages: [] }),
     ]);
     setState({
       campaign,
       campaignSessions: sessions || [],
       codexEntries: codexEntries || [],
+      vaultPages: vaultTree.pages || [],
+      vaultFolders: vaultTree.folders || [],
       loading: false,
     });
     navigate('campaign', { id });
@@ -54,7 +59,13 @@ export function generateCampaignId(name) {
 
 export async function createCampaign(form) {
   const id = generateCampaignId(form.name);
-  await apiJson('/campaigns', 'POST', { campaign_id: id, name: form.name, start_session_number: Number(form.start) || 1 });
+  await apiJson('/campaigns', 'POST', {
+    campaign_id: id,
+    name: form.name,
+    start_session_number: Number(form.start) || 1,
+    vault_path: form.vault_path || null,
+    scaffold: form.scaffold || false,
+  });
   await apiJson(`/campaigns/${id}`, 'PUT', {
     name: form.name, system: form.system, setting: form.setting,
     default_language: form.default_language, gm: form.gm, gm_pronouns: form.gm_pronouns,
@@ -486,6 +497,33 @@ export async function runExport(summaryId) {
   } catch (e) { setOp(e.message, 'err'); }
 }
 
+// ── Migration ─────────────────────────────────────────────────────
+export async function checkMigration() {
+  try {
+    const status = await apiFetch('/migrations/status');
+    setState({ migrationStatus: status });
+  } catch (e) {
+    // Non-fatal — if status check fails, don't block the app.
+    console.warn('checkMigration failed:', e);
+  }
+}
+
+export async function runMigration() {
+  setState({ migrationRunning: true, migrationResult: null });
+  try {
+    const result = await apiJson('/migrations/run', 'POST', {});
+    setState({ migrationRunning: false, migrationResult: result, migrationStatus: { needs_migration: false, campaigns: [] } });
+    return result;
+  } catch (e) {
+    setState({ migrationRunning: false, migrationResult: { ok: false, errors: [e.message] } });
+    throw e;
+  } finally {
+    // Boot loads ran against an empty DB — refetch what migration changed.
+    loadCampaigns().catch(() => {});
+    loadConfig().then(() => refreshProviderStatus()).catch(() => {});
+  }
+}
+
 // ── Config + LLM providers ────────────────────────────────────────
 export async function loadConfig() {
   const config = await apiFetch('/config');
@@ -503,12 +541,6 @@ export async function saveConfig(payload, apiBaseValue) {
   setState({ config: updated });
   refreshProviderStatus();
   return updated;
-}
-
-// Make the server an exact copy of this device. Destructive; confirm first.
-export async function forceMirrorSync() {
-  await apiJson('/sync/force-mirror', 'POST', {});
-  return loadConfig();
 }
 
 export async function loadLlmProviders(force) {

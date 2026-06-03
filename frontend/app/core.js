@@ -31,6 +31,11 @@ export const store = {
   providerStatus: null,   // { ok, reason } for the active summary provider (null = unknown)
   promptTemplates: null,  // user-managed summary prompt templates [{id, label, text, builtin}]
 
+  // migration
+  migrationStatus: null,  // { needs_migration, campaigns } — null = not checked yet
+  migrationRunning: false,
+  migrationResult: null,  // { ok, campaigns_migrated, sessions_migrated, errors } after run
+
   // transient UI
   op: null,               // { msg, state: ''|'done'|'err' } global op banner
   modal: null,            // { kind, props } overlay

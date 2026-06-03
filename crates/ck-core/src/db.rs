@@ -66,13 +66,11 @@ CREATE TABLE IF NOT EXISTS codex_entries (
     body        TEXT NOT NULL DEFAULT '',
     source      TEXT NOT NULL DEFAULT 'manual',
     updated_at  TEXT NOT NULL DEFAULT '',
-    deleted     INTEGER NOT NULL DEFAULT 0,
-    dirty       INTEGER NOT NULL DEFAULT 1,
     FOREIGN KEY (campaign_id) REFERENCES campaigns(campaign_id)
 );
 CREATE INDEX IF NOT EXISTS idx_codex_entries_campaign ON codex_entries(campaign_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_codex_entries_dedup
-    ON codex_entries(campaign_id, lower(name), kind) WHERE deleted = 0;
+    ON codex_entries(campaign_id, lower(name), kind);
 ";
 
 /// Open the database and ensure the schema exists.
@@ -103,20 +101,10 @@ pub fn open_in_memory() -> Result<Connection> {
 /// `ADD COLUMN IF NOT EXISTS`, so each ALTER is best-effort: a "duplicate
 /// column" error means the column is already there, which is fine.
 fn migrate(conn: &Connection) -> Result<()> {
-    // Sync columns (Sprint 2): last-write tracking + soft-delete propagation.
     let add_columns = [
-        "ALTER TABLE campaigns ADD COLUMN updated_at TEXT NOT NULL DEFAULT ''",
-        "ALTER TABLE campaigns ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0",
-        // `dirty` = local change not yet pushed to the sync server (clock-free
-        // tracking — set on every write, cleared after a successful push).
-        "ALTER TABLE campaigns ADD COLUMN dirty INTEGER NOT NULL DEFAULT 1",
-        "ALTER TABLE sessions  ADD COLUMN updated_at TEXT NOT NULL DEFAULT ''",
-        "ALTER TABLE sessions  ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0",
-        "ALTER TABLE sessions  ADD COLUMN dirty INTEGER NOT NULL DEFAULT 1",
         // Artifacts move from loose files to inline DB content (core principle #1).
         "ALTER TABLE artifacts ADD COLUMN artifact_id TEXT NOT NULL DEFAULT ''",
         "ALTER TABLE artifacts ADD COLUMN content TEXT NOT NULL DEFAULT ''",
-        "ALTER TABLE artifacts ADD COLUMN dirty INTEGER NOT NULL DEFAULT 1",
         // Codex (Phase 1): a per-campaign freeform glossary of known names & lore,
         // injected verbatim into every summary's prompt context.
         "ALTER TABLE campaigns ADD COLUMN codex TEXT NOT NULL DEFAULT ''",
@@ -128,14 +116,13 @@ fn migrate(conn: &Connection) -> Result<()> {
         // (kept for back-compat; shown as the first note until the user saves).
         "ALTER TABLE campaigns ADD COLUMN codex_notes TEXT NOT NULL DEFAULT ''",
         // "Story so far" recap: an LLM-generated narrative rollup of every session
-        // summary, regenerated on demand. Read-only for the GM. Synced as part of
-        // the campaign row (last-write-wins, like every other campaign field) so
-        // devices stay consistent. NOT fed back into per-session summaries (codex
-        // covers that; a recursive recap would compound drift — see ROADMAP).
+        // summary, regenerated on demand. Read-only for the GM. NOT fed back into
+        // per-session summaries (codex covers that; a recursive recap would
+        // compound drift — see ROADMAP).
         "ALTER TABLE campaigns ADD COLUMN recap TEXT NOT NULL DEFAULT ''",
         "ALTER TABLE campaigns ADD COLUMN recap_updated_at TEXT NOT NULL DEFAULT ''",
         "ALTER TABLE campaigns ADD COLUMN gm_pronouns TEXT NOT NULL DEFAULT ''",
-        // Vault folder path; local-only, never synced.
+        // Vault folder path.
         "ALTER TABLE campaigns ADD COLUMN vault_path TEXT",
     ];
     for sql in add_columns {
@@ -166,7 +153,7 @@ fn migrate(conn: &Connection) -> Result<()> {
         }
     }
 
-    // Give existing artifacts a stable sync UUID if they lack one.
+    // Give existing artifacts a stable UUID if they lack one.
     let mut stmt = conn.prepare("SELECT id FROM artifacts WHERE artifact_id = ''")?;
     let ids: Vec<i64> = stmt
         .query_map([], |r| r.get::<_, i64>(0))?
@@ -181,20 +168,10 @@ fn migrate(conn: &Connection) -> Result<()> {
         )?;
     }
 
-    // Sync relies on `artifact_id` being unique (push-once / INSERT OR IGNORE).
-    // Created after the backfill above so every row already has a UUID.
+    // The 0.X→1.0 migration's INSERT OR IGNORE keys on `artifact_id` being
+    // unique. Created after the backfill above so every row already has a UUID.
     conn.execute(
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_artifacts_artifact_id ON artifacts(artifact_id)",
-        [],
-    )?;
-
-    // Tombstones for locally hard-deleted artifacts, so the deletion propagates
-    // to other devices on the next sync. `dirty` = not yet pushed.
-    conn.execute(
-        "CREATE TABLE IF NOT EXISTS deleted_artifacts (
-            artifact_id TEXT PRIMARY KEY,
-            dirty       INTEGER NOT NULL DEFAULT 1
-        )",
         [],
     )?;
 
@@ -210,8 +187,6 @@ fn migrate(conn: &Connection) -> Result<()> {
             body        TEXT NOT NULL DEFAULT '',
             source      TEXT NOT NULL DEFAULT 'manual',
             updated_at  TEXT NOT NULL DEFAULT '',
-            deleted     INTEGER NOT NULL DEFAULT 0,
-            dirty       INTEGER NOT NULL DEFAULT 1,
             FOREIGN KEY (campaign_id) REFERENCES campaigns(campaign_id)
         )",
         [],
@@ -222,14 +197,14 @@ fn migrate(conn: &Connection) -> Result<()> {
     )?;
     conn.execute(
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_codex_entries_dedup \
-         ON codex_entries(campaign_id, lower(name), kind) WHERE deleted = 0",
+         ON codex_entries(campaign_id, lower(name), kind)",
         [],
     )?;
 
     // Summary prompt templates: the user-managed library of system prompts shown
     // in the Summarize template picker. Two builtins (EN/DE) are seeded on first
     // run by `store::prompts` (guarded by a config flag so a deleted builtin
-    // stays deleted). Local-only — not synced, like config and provider keys.
+    // stays deleted).
     conn.execute(
         "CREATE TABLE IF NOT EXISTS prompt_templates (
             id         TEXT PRIMARY KEY,

@@ -315,10 +315,42 @@ pub fn create_page(vault: &Path, title: &str, kind: &str, folder: Option<&str>) 
     write_page(vault, &rel, &page_file_content(title, kind, "", ""))
 }
 
+/// `.ck/config.toml` — its presence marks a folder as a world (discovery
+/// scans for it). Never overwrites an existing one.
+pub fn write_world_config(world_root: &Path, id: &str, name: &str) -> AppResult<()> {
+    let path = world_root.join(".ck").join("config.toml");
+    if path.exists() {
+        return Ok(());
+    }
+    let esc = |s: &str| s.replace('\\', "\\\\").replace('"', "\\\"");
+    let body = format!("id = \"{}\"\nname = \"{}\"\n", esc(id), esc(name));
+    std::fs::write(&path, body)
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("write world config.toml: {e}")))
+}
+
 pub fn default_vault_path(output_root: &Path, campaign_name: &str) -> PathBuf {
     output_root
         .join(crate::normalize::sanitize_folder_name(campaign_name))
-        .join("world")
+        .join("Codex")
+}
+
+/// Create the canonical 1.0 world layout: `Codex/`, `Sessions/`, `.ck/` under
+/// `world_root`. Idempotent — safe to call on an existing folder. If `scaffold`
+/// is true, also creates `Codex/NPCs`, `Places`, `Factions`, `Items`, `Lore`.
+pub fn provision_vault_layout(world_root: &Path, scaffold: bool) -> AppResult<()> {
+    let codex = world_root.join("Codex");
+    let sessions = world_root.join("Sessions");
+    std::fs::create_dir_all(&codex)
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("create Codex/: {e}")))?;
+    std::fs::create_dir_all(&sessions)
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("create Sessions/: {e}")))?;
+    ensure_ck_dir(world_root)?;
+    if scaffold {
+        for sub in ["NPCs", "Places", "Factions", "Items", "Lore"] {
+            let _ = std::fs::create_dir_all(codex.join(sub));
+        }
+    }
+    Ok(())
 }
 
 pub fn has_pages(vault: &Path) -> bool {

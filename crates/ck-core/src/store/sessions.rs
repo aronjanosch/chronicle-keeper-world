@@ -8,7 +8,7 @@ use crate::config::get_config_map;
 use crate::error::{AppError, AppResult};
 use crate::models::{CampaignSessionInfo, SessionInfo, SessionMetadataRequest};
 use crate::normalize::{normalize_metadata, sanitize_folder_name};
-use crate::store::{artifacts, campaigns, now};
+use crate::store::{artifacts, campaigns};
 
 pub(crate) fn output_root(conn: &Connection) -> AppResult<PathBuf> {
     let map = get_config_map(conn)?;
@@ -77,16 +77,27 @@ pub fn create_campaign_session(
     };
 
     let session_id = Uuid::new_v4().to_string();
-    let safe = sanitize_folder_name(&campaign.name);
-    let session_path = output_root(conn)?.join(safe).join(number.to_string());
+    let session_path = if let Some(vault_codex) = &campaign.vault_path {
+        // Vault layout: <world_root>/Sessions/<NNN>/
+        crate::session_files::vault_session_path(vault_codex, number)
+            .ok_or_else(|| AppError::Internal(anyhow::anyhow!("invalid vault_path")))?
+    } else {
+        let safe = sanitize_folder_name(&campaign.name);
+        output_root(conn)?.join(safe).join(number.to_string())
+    };
     std::fs::create_dir_all(&session_path)
         .map_err(|e| AppError::Internal(anyhow::anyhow!("create session dir: {e}")))?;
+    if campaign.vault_path.is_some() {
+        // Provision audio subdirectory up front so uploads land in the right place.
+        std::fs::create_dir_all(crate::session_files::audio_dir(&session_path))
+            .map_err(|e| AppError::Internal(anyhow::anyhow!("create audio dir: {e}")))?;
+    }
 
     let metadata = normalize_metadata(&Value::Null);
     conn.execute(
         "INSERT INTO sessions \
-         (session_id, campaign_id, session_number, title, date, metadata_json, notes, session_path, tracks_json, speakers_json, updated_at, dirty) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, '', ?7, '[]', '[]', ?8, 1)",
+         (session_id, campaign_id, session_number, title, date, metadata_json, notes, session_path, tracks_json, speakers_json) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, '', ?7, '[]', '[]')",
         params![
             session_id,
             campaign_id,
@@ -95,7 +106,6 @@ pub fn create_campaign_session(
             date,
             metadata.to_string(),
             session_path.to_string_lossy(),
-            now()
         ],
     )?;
 
@@ -104,6 +114,18 @@ pub fn create_campaign_session(
             "UPDATE campaigns SET next_session_number = ?1 WHERE campaign_id = ?2",
             params![number + 1, campaign_id],
         )?;
+    }
+
+    if campaign.vault_path.is_some() {
+        let _ = crate::session_files::write_session_toml(
+            &session_path,
+            Some(number),
+            title,
+            date,
+            &campaign.default_language,
+            &Value::Array(vec![]),
+            &Value::Array(vec![]),
+        );
     }
 
     Ok(CampaignSessionInfo {
@@ -139,7 +161,7 @@ pub fn set_campaign_metadata(conn: &Connection, req: &SessionMetadataRequest) ->
     let notes = req.notes.clone().unwrap_or_default();
     conn.execute(
         "UPDATE sessions SET campaign_id = ?1, session_number = ?2, title = ?3, date = ?4, \
-         metadata_json = ?5, notes = ?6, updated_at = ?7, dirty = 1 WHERE session_id = ?8",
+         metadata_json = ?5, notes = ?6 WHERE session_id = ?7",
         params![
             req.campaign_id,
             session_number,
@@ -147,7 +169,6 @@ pub fn set_campaign_metadata(conn: &Connection, req: &SessionMetadataRequest) ->
             req.date,
             metadata.to_string(),
             notes,
-            now(),
             req.session_id
         ],
     )?;
@@ -274,7 +295,7 @@ fn tracks_present(tracks_json: &str) -> bool {
 }
 
 pub fn list_sessions(conn: &Connection) -> AppResult<Vec<SessionInfo>> {
-    let mut stmt = conn.prepare("SELECT session_id, session_path, tracks_json FROM sessions WHERE deleted = 0 ORDER BY session_id DESC")?;
+    let mut stmt = conn.prepare("SELECT session_id, session_path, tracks_json FROM sessions ORDER BY session_id DESC")?;
     let rows = stmt
         .query_map([], |r| {
             Ok((
@@ -308,7 +329,7 @@ pub fn list_campaign_sessions(
 ) -> AppResult<Vec<CampaignSessionInfo>> {
     let mut stmt = conn.prepare(
         "SELECT session_id, session_number, title, date, metadata_json, tracks_json FROM sessions \
-         WHERE campaign_id = ?1 AND deleted = 0 ORDER BY session_number DESC",
+         WHERE campaign_id = ?1 ORDER BY session_number DESC",
     )?;
     let rows = stmt
         .query_map(params![campaign_id], |r| {
@@ -374,17 +395,17 @@ pub fn resolve_for_upload(
         .map_err(|e| AppError::Internal(anyhow::anyhow!("create session dir: {e}")))?;
     let metadata = normalize_metadata(&Value::Null);
     conn.execute(
-        "INSERT INTO sessions (session_id, metadata_json, notes, session_path, tracks_json, speakers_json, updated_at, dirty) \
-         VALUES (?1, ?2, '', ?3, '[]', '[]', ?4, 1)",
-        params![sid, metadata.to_string(), path.to_string_lossy(), now()],
+        "INSERT INTO sessions (session_id, metadata_json, notes, session_path, tracks_json, speakers_json) \
+         VALUES (?1, ?2, '', ?3, '[]', '[]')",
+        params![sid, metadata.to_string(), path.to_string_lossy()],
     )?;
     Ok((sid, path))
 }
 
 pub fn set_tracks(conn: &Connection, session_id: &str, tracks: &Value) -> AppResult<()> {
     conn.execute(
-        "UPDATE sessions SET tracks_json = ?1, updated_at = ?2, dirty = 1 WHERE session_id = ?3",
-        params![tracks.to_string(), now(), session_id],
+        "UPDATE sessions SET tracks_json = ?1 WHERE session_id = ?2",
+        params![tracks.to_string(), session_id],
     )?;
     Ok(())
 }
@@ -396,8 +417,8 @@ pub fn set_speakers(conn: &Connection, session_id: &str, speakers: &Value) -> Ap
         )));
     }
     conn.execute(
-        "UPDATE sessions SET speakers_json = ?1, updated_at = ?2, dirty = 1 WHERE session_id = ?3",
-        params![speakers.to_string(), now(), session_id],
+        "UPDATE sessions SET speakers_json = ?1 WHERE session_id = ?2",
+        params![speakers.to_string(), session_id],
     )?;
     Ok(())
 }
@@ -444,13 +465,10 @@ pub fn delete_session(conn: &Connection, session_id: &str) -> AppResult<()> {
             "Session not found: {session_id}"
         )));
     };
-    // Artifacts are hard-deleted + tombstoned (so the deletion syncs). The
-    // session row is *soft*-deleted: kept with deleted=1 + dirty=1 so the
-    // tombstone propagates to other devices; list queries filter it out.
     artifacts::delete_artifacts_for_session(conn, session_id)?;
     conn.execute(
-        "UPDATE sessions SET deleted = 1, dirty = 1, updated_at = ?1 WHERE session_id = ?2",
-        params![now(), session_id],
+        "DELETE FROM sessions WHERE session_id = ?1",
+        params![session_id],
     )?;
     // Audio is device-local and now orphaned — reclaim the disk.
     if !path.is_empty() {

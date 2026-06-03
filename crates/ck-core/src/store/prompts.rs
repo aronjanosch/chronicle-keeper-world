@@ -1,8 +1,7 @@
 //! Summary prompt templates: the user-managed library of system prompts shown in
 //! the Summarize screen's template picker and managed in Settings. Two builtins
 //! (EN/DE) are seeded on first run; the user can add, edit, delete (including the
-//! builtins) and restore the builtins. Local-only — not synced, like provider
-//! keys and config.
+//! builtins) and restore the builtins.
 
 use rusqlite::{params, Connection, OptionalExtension};
 use uuid::Uuid;

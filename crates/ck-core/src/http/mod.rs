@@ -2,6 +2,7 @@ mod artifacts;
 mod campaigns;
 mod codex;
 mod llm;
+mod migration;
 mod prompts;
 mod sessions;
 mod transcribe;
@@ -34,7 +35,6 @@ pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/health", get(health))
         .route("/config", get(read_config).put(write_config))
-        .route("/sync/force-mirror", post(force_mirror))
         // campaigns
         .route("/campaigns", get(campaigns::list).post(campaigns::create))
         .route(
@@ -109,6 +109,9 @@ pub fn router(state: AppState) -> Router {
             "/prompt-templates/:id",
             axum::routing::put(prompts::update).delete(prompts::delete),
         )
+        // migration (0.X → 1.0 world format)
+        .route("/migrations/status", get(migration::status))
+        .route("/migrations/run", post(migration::run))
         // summarization + export + llm providers
         .route("/summarize", post(llm::summarize))
         .route("/summarize/stream", post(llm::summarize_stream))
@@ -197,18 +200,7 @@ async fn write_config(
         apply_update(conn, &req)?;
         get_config_map(conn)
     })?;
-    // Trigger an immediate sync so credentials take effect without a restart.
-    let sync_state = state.clone();
-    tokio::spawn(async move {
-        crate::sync::sync_once_recording_error(&sync_state).await;
-    });
     Ok(Json(to_response(&map)))
-}
-
-/// Make the server an exact copy of this device. Destructive; UI-confirmed.
-async fn force_mirror(State(state): State<AppState>) -> AppResult<Json<Value>> {
-    crate::sync::force_mirror_sync(&state).await?;
-    Ok(Json(json!({ "status": "ok" })))
 }
 
 fn validate_output_root(path: &str) -> AppResult<()> {

@@ -1,7 +1,7 @@
 // Entry: boot, router, global op banner + modal host.
 import { html, render, useEffect } from '../vendor/htm-preact-standalone.mjs';
-import { useStore, loadApiBase, setOp } from './core.js';
-import { loadCampaigns, loadConfig, refreshProviderStatus } from './actions.js';
+import { useStore, loadApiBase, setOp, setState } from './core.js';
+import { loadCampaigns, loadConfig, refreshProviderStatus, checkMigration } from './actions.js';
 import { Icon, Spinner } from './ui.js';
 import { ModalHost } from './modals.js';
 import { LibraryScreen } from './screens/library.js';
@@ -14,6 +14,8 @@ import { CodexScreen } from './screens/codex.js';
 import { CodexEntryScreen } from './screens/codexEntry.js';
 import { PageScreen } from './screens/page.js';
 import { SessionsScreen } from './screens/sessions.js';
+import { NewWorldScreen } from './screens/newWorld.js';
+import { MigrationScreen } from './screens/migration.js';
 
 function OpBanner({ op }) {
   if (!op) return null;
@@ -33,7 +35,21 @@ function App() {
   // Kick off boot loads here (not at module scope): guarantees the store
   // listener is registered before the local server's near-instant responses
   // resolve, so the first paint after data lands actually repaints.
-  useEffect(() => { loadCampaigns(); loadConfig().then(() => refreshProviderStatus()).catch(() => {}); }, []);
+  useEffect(() => {
+    loadCampaigns();
+    loadConfig().then(() => refreshProviderStatus()).catch(() => {});
+    checkMigration();
+  }, []);
+  // Show migration screen if unmigrated sessions detected. Result view stays
+  // until user dismisses it (onSkip clears migrationStatus).
+  const needsMigration = store.migrationStatus?.needs_migration || store.migrationResult != null;
+  if (needsMigration) {
+    const dismiss = () => setState({ migrationStatus: null, migrationResult: null });
+    return html`<div style=${{ height: '100%' }}>
+      <${MigrationScreen} store=${store} onSkip=${dismiss} />
+    </div>`;
+  }
+
   const r = store.route.name;
   let screen;
   switch (r) {
@@ -47,6 +63,7 @@ function App() {
     case 'sessions': screen = html`<${SessionsScreen} store=${store} />`; break;
     case 'codexEntry': screen = html`<${CodexEntryScreen} store=${store} />`; break;
     case 'page': screen = html`<${PageScreen} store=${store} />`; break;
+    case 'newWorld': screen = html`<${NewWorldScreen} store=${store} />`; break;
     default: screen = html`<${LibraryScreen} store=${store} />`;
   }
   return html`<div style=${{ height: '100%' }}>

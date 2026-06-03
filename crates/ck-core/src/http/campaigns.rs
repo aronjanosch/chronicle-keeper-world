@@ -33,7 +33,13 @@ pub async fn create(
             req.start_session_number,
         )?;
         campaigns::set_current_campaign_id(conn, &req.campaign_id)?;
-        let _ = campaigns::ensure_vault(conn, &req.campaign_id);
+        let _ = campaigns::provision_vault(
+            conn,
+            &req.campaign_id,
+            &req.name,
+            req.vault_path.as_deref(),
+            req.scaffold,
+        );
         let campaign = campaigns::get_campaign(conn, &req.campaign_id)?.unwrap_or(campaign);
         Ok(Json(json!({ "status": "success", "campaign": campaign })))
     })
@@ -44,7 +50,6 @@ pub async fn detail(
     Path(campaign_id): Path<String>,
 ) -> AppResult<Json<Value>> {
     state.with_db(|conn| {
-        let _ = campaigns::ensure_vault(conn, &campaign_id);
         let campaign = campaigns::get_campaign(conn, &campaign_id)?
             .ok_or_else(|| AppError::NotFound(format!("Campaign not found: {campaign_id}")))?;
         Ok(Json(serde_json::to_value(campaign).unwrap()))

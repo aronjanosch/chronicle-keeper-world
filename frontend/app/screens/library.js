@@ -1,7 +1,7 @@
 // Screen 01 — Campaign Library. Real data: each campaign is a "tome" card.
 import { html } from '../../vendor/htm-preact-standalone.mjs';
 import { useState } from '../../vendor/htm-preact-standalone.mjs';
-import { openModal } from '../core.js';
+import { navigate } from '../core.js';
 import { openCampaign } from '../actions.js';
 import { Shell, Sidebar, Topbar } from '../shell.js';
 import { Icon, Sigil, Btn, Spinner, Empty } from '../ui.js';
@@ -67,7 +67,7 @@ function CampaignCard({ c }) {
 export function LibraryScreen({ store }) {
   const [q, setQ] = useState('');
   const campaigns = store.campaigns.filter((c) => !q || (c.name || '').toLowerCase().includes(q.toLowerCase()));
-  const newBtn = html`<${Btn} kind="primary" icon="plus" onClick=${() => openModal('campaign', {})}>New world</${Btn}>`;
+  const newBtn = html`<${Btn} kind="primary" icon="plus" onClick=${() => navigate('newWorld')}>New world</${Btn}>`;
 
   return html`<${Shell}
     sidebar=${html`<${Sidebar} variant="library" active="worlds" />`}
@@ -97,7 +97,7 @@ export function LibraryScreen({ store }) {
       ? html`<div style=${{ display: 'flex', justifyContent: 'center', padding: 60 }}><${Spinner} size=${22} /></div>`
       : html`<div style=${{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 16 }}>
           ${campaigns.map((c) => html`<${CampaignCard} key=${c.campaign_id} c=${c} />`)}
-          <div onClick=${() => openModal('campaign', {})} style=${{
+          <div onClick=${() => navigate('newWorld')} style=${{
             background: 'transparent', border: '1.5px dashed var(--rule-strong)', borderRadius: 8, padding: 24,
             display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10,
             minHeight: 160, color: 'var(--ink-muted)', cursor: 'pointer',

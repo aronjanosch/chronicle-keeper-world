@@ -214,6 +214,26 @@ async fn run_summarize(
         Ok(())
     })?;
 
+    // Write summary.md for vault sessions (best-effort).
+    let session_path = session.get("session_path").and_then(Value::as_str).unwrap_or_default();
+    if crate::session_files::is_vault_session_path(session_path) {
+        let campaign = session.get("campaign").cloned().unwrap_or_default();
+        let number = campaign.get("session_number").and_then(Value::as_i64);
+        let date = campaign.get("date").and_then(Value::as_str);
+        let title = campaign.get("title").and_then(Value::as_str);
+        let generated_at = crate::store::now();
+        let _ = crate::session_files::write_summary_md(
+            std::path::Path::new(session_path),
+            &summary_text,
+            number,
+            date,
+            title,
+            &resolved.provider,
+            &resolved.model,
+            &generated_at,
+        );
+    }
+
     Ok(SummarizeResponse {
         summary: summary_text,
         provider: resolved.provider,
@@ -421,29 +441,28 @@ fn replace_metadata(
     // Promote extracted names into the campaign codex (auto-extract; never
     // overwrites what the user already has). Files-as-truth: write a stub page
     // when the campaign has a vault; otherwise the legacy upsert_auto row.
+    // Phase 1.7-E: vault worlds → no auto-stubs; Codex is authored by the user
+    // (or Phase 4 AI proposals). Legacy session-notes campaigns without a vault
+    // still get upsert_auto rows for summary context injection.
     if let Some(cid) = campaign_id.as_deref().filter(|s| !s.is_empty()) {
-        let vault = campaigns::get_campaign(conn, cid)
+        let has_vault = campaigns::get_campaign(conn, cid)
             .ok()
             .flatten()
-            .and_then(|c| c.vault_path);
-        if let Value::Object(map) = metadata {
-            for (key, kind) in [
-                ("characters", "npc"),
-                ("locations", "place"),
-                ("items", "item"),
-            ] {
-                let Some(list) = map.get(key).and_then(Value::as_array) else {
-                    continue;
-                };
-                for v in list {
-                    if let Some(name) = extract_name(v) {
-                        match &vault {
-                            Some(vp) => {
-                                crate::vault::create_stub(std::path::Path::new(vp), &name, kind);
-                            }
-                            None => {
-                                let _ = codex::upsert_auto(conn, cid, &name, kind);
-                            }
+            .and_then(|c| c.vault_path)
+            .is_some();
+        if !has_vault {
+            if let Value::Object(map) = metadata {
+                for (key, kind) in [
+                    ("characters", "npc"),
+                    ("locations", "place"),
+                    ("items", "item"),
+                ] {
+                    let Some(list) = map.get(key).and_then(Value::as_array) else {
+                        continue;
+                    };
+                    for v in list {
+                        if let Some(name) = extract_name(v) {
+                            let _ = codex::upsert_auto(conn, cid, &name, kind);
                         }
                     }
                 }

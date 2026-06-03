@@ -5,7 +5,7 @@
 // `[[` opens a wikilink autocomplete at the caret. Auto-saves to the vault (800ms).
 import { html, useState, useEffect, useRef, useMemo } from '../../vendor/htm-preact-standalone.mjs';
 import { navigate, useStore } from '../core.js';
-import { Shell, Sidebar, Topbar } from '../shell.js';
+import { Shell, Topbar } from '../shell.js';
 import { Btn, Empty, Icon, PageBody, renderBlockHtml, splitDoc, joinDoc, parseProps } from '../ui.js';
 import { readVaultPage, saveVaultPage, openCampaign, loadVaultTree, createVaultPage } from '../actions.js';
 import { FileTree, buildTree, makeVaultActions, iconForKind, KINDS } from './codex.js';
@@ -395,7 +395,6 @@ export function PageScreen() {
 
   const openBroken = (name) => createVaultPage(name, 'lore', '').then((p) => navigate('page', { path: p.path })).catch(() => {});
 
-  const sidebar = html`<${Sidebar} variant="campaign" active="codex" campaign=${c} />`;
   const crumbs = [
     { label: 'Worlds', onClick: () => navigate('library') },
     { label: c.name, onClick: () => openCampaign(c.campaign_id) },
@@ -404,10 +403,15 @@ export function PageScreen() {
   ];
 
   if (missing) {
-    return html`<${Shell} sidebar=${sidebar} topbar=${html`<${Topbar} crumbs=${crumbs} />`}>
-      <${Empty} icon="scroll" title="Page not found">
-        <a onClick=${() => navigate('codex', { id: c.campaign_id })} style=${{ color: 'var(--burgundy)', cursor: 'pointer' }}>Back to the codex</a>.
-      </${Empty}>
+    return html`<${Shell} topbar=${html`<${Topbar} crumbs=${crumbs} />`} bodyStyle=${{ padding: 0 }}>
+      <div style=${{ display: 'flex', height: '100%', minHeight: 0 }}>
+        <${FileTree} campaign=${c} tree=${tree} active=${null} onOpen=${(p) => navigate('page', { path: p.path })} act=${act} />
+        <div style=${{ flex: 1, padding: 40 }}>
+          <${Empty} icon="scroll" title="Page not found">
+            <a onClick=${() => navigate('codex', { id: c.campaign_id })} style=${{ color: 'var(--burgundy)', cursor: 'pointer' }}>Back to the codex</a>.
+          </${Empty}>
+        </div>
+      </div>
     </${Shell}>`;
   }
 
@@ -432,7 +436,7 @@ export function PageScreen() {
 
   const doSave = async (content) => { const updated = await saveVaultPage(path, content); setPage(updated); return updated; };
 
-  return html`<${Shell} sidebar=${sidebar} topbar=${topbar} bodyStyle=${{ padding: 0 }}>
+  return html`<${Shell} topbar=${topbar} bodyStyle=${{ padding: 0 }}>
     <div style=${{ display: 'flex', height: '100%', minHeight: 0 }}>
       <${FileTree} campaign=${c} tree=${tree} active=${(page && page.title) || null} onOpen=${(p) => navigate('page', { path: p.path })} act=${act} />
       ${page === null

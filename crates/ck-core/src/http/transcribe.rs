@@ -161,7 +161,6 @@ pub async fn transcribe(
         }
     };
 
-    let _ = session_path; // session folder no longer holds transcript files
     let transcript_text = segments_to_plain_text(&segments);
 
     state.with_db(|conn| {
@@ -174,6 +173,14 @@ pub async fn transcribe(
             &transcript_text,
         )
     })?;
+
+    // Write transcript.md for vault sessions (best-effort; doesn't surface errors).
+    if crate::session_files::is_vault_session_path(&session_path) {
+        let _ = crate::session_files::write_transcript_md(
+            std::path::Path::new(&session_path),
+            &transcript_text,
+        );
+    }
 
     Ok(Json(TranscribeResponse {
         language,

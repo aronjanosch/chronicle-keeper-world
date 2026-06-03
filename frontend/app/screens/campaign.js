@@ -14,7 +14,8 @@ function StorySoFar({ campaign, sessions, codexEntries }) {
   const [expanded, setExpanded] = useState(false);
   const recap = (campaign.recap || '').trim();
   const canBuild = sessions.some((s) => s.has_summary);
-  const codexLinks = (codexEntries || []).map((e) => ({ name: e.name, entry_id: e.entry_id }));
+  // Vault worlds: wikilink linkify lands in Phase 2 — pass empty for now.
+  const codexLinks = campaign.vault_path ? [] : (codexEntries || []).map((e) => ({ name: e.name, entry_id: e.entry_id }));
   return html`<div style=${{ background: 'var(--surface)', border: '1px solid var(--rule)', borderRadius: 8, overflow: 'hidden', marginBottom: 24 }}>
     <div style=${{ padding: '14px 18px 12px', display: 'flex', alignItems: 'baseline', gap: 10, borderBottom: '1px solid var(--rule-soft)' }}>
       <h3 style=${{ fontFamily: 'var(--font-display)', fontSize: 17, fontWeight: 500, color: 'var(--ink)' }}>The Story So Far</h3>
@@ -69,26 +70,48 @@ function Stat({ value, label, italic }) {
   </div>`;
 }
 
-// Codex teaser on the overview — a glance at what the summarizer remembers.
-// Kind breakdown + the few most-recent entries; click through to the full codex.
-function CodexTeaser({ campaign, entries }) {
+// Codex teaser on the overview. For vault worlds: reads vault pages (kind from
+// `page.kind`, click → page editor). For legacy campaigns: reads codex entries.
+function CodexTeaser({ campaign, entries, vaultPages }) {
+  const hasVault = !!campaign.vault_path;
   const open = () => navigate('codex', { id: campaign.campaign_id });
-  const total = entries.length;
-  // Kinds that actually have entries, in the canonical KINDS order.
+
+  // Normalize to a common shape for group + recent rendering.
+  const items = hasVault
+    ? (vaultPages || []).map((p) => ({
+        id: p.path, kind: p.kind || 'lore', name: p.title,
+        body: p.summary, sortKey: p.modified || 0,
+        onClick: () => navigate('page', { page: p.path }),
+      }))
+    : (entries || []).map((e) => ({
+        id: e.entry_id, kind: e.kind, name: e.name,
+        body: e.body, sortKey: e.updated_at || '',
+        onClick: () => navigate('codexEntry', { entryId: e.entry_id }),
+      }));
+
+  const total = items.length;
   const groups = KINDS
-    .map((k) => ({ ...k, n: entries.filter((e) => e.kind === k.value).length }))
+    .map((k) => ({ ...k, n: items.filter((i) => i.kind === k.value).length }))
     .filter((g) => g.n);
-  // A handful of entries to preview, freshest first when we have timestamps.
-  const recent = [...entries]
-    .sort((a, b) => String(b.updated_at || '').localeCompare(String(a.updated_at || '')))
+  const recent = [...items]
+    .sort((a, b) => hasVault
+      ? (b.sortKey || 0) - (a.sortKey || 0)
+      : String(b.sortKey || '').localeCompare(String(a.sortKey || '')))
     .slice(0, 5);
+
+  const subtitle = hasVault
+    ? (total ? `${total} ${total === 1 ? 'page' : 'pages'}` : 'wiki pages')
+    : (total ? `${total} ${total === 1 ? 'entry' : 'entries'} the LLM remembers` : "the LLM's memory");
+  const emptyMsg = hasVault
+    ? 'Your Codex starts empty. Build pages for NPCs, places, factions — the AI will help keep them current in Phase 4.'
+    : 'What the summarizer remembers — NPCs, places, items, lore. Add entries, or run a summary and names get pulled in automatically.';
 
   return html`<div style=${{ background: 'var(--surface)', border: '1px solid var(--rule)', borderRadius: 8, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
     <div style=${{ padding: '14px 18px 10px', display: 'flex', alignItems: 'baseline', gap: 10, borderBottom: '1px solid var(--rule-soft)' }}>
       <h3 style=${{ fontFamily: 'var(--font-display)', fontSize: 17, fontWeight: 500, color: 'var(--ink)' }}>Codex</h3>
-      <span style=${{ fontSize: 12, color: 'var(--ink-muted)' }}>· ${total ? `${total} ${total === 1 ? 'entry' : 'entries'} the LLM remembers` : "the LLM's memory"}</span>
+      <span style=${{ fontSize: 12, color: 'var(--ink-muted)' }}>· ${subtitle}</span>
       <span style=${{ flex: 1 }} />
-      <${Btn} kind="ghost" size="sm" icon="chev-r" onClick=${open}>${total ? 'Open' : 'Build'}</${Btn}>
+      <${Btn} kind="ghost" size="sm" icon="chev-r" onClick=${open}>${total ? 'Open' : (hasVault ? 'Add pages' : 'Build')}</${Btn}>
     </div>
     ${total
       ? html`<div style=${{ padding: 14, display: 'flex', flexDirection: 'column', gap: 12, flex: 1 }}>
@@ -106,20 +129,18 @@ function CodexTeaser({ campaign, entries }) {
             })}
           </div>
           <div style=${{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-            ${recent.map((e) => html`<div key=${e.entry_id} onClick=${() => navigate('codexEntry', { entryId: e.entry_id })}
+            ${recent.map((item) => html`<div key=${item.id} onClick=${item.onClick}
               style=${{ display: 'flex', alignItems: 'center', gap: 9, padding: '6px 8px', borderRadius: 4, cursor: 'pointer' }}
               onMouseEnter=${(ev) => { ev.currentTarget.style.background = 'var(--paper)'; }}
               onMouseLeave=${(ev) => { ev.currentTarget.style.background = 'transparent'; }}>
-              <${Icon} name=${iconForKind(e.kind)} size=${13} className="ck-ink-muted" />
-              <span style=${{ fontFamily: 'var(--font-display)', fontSize: 14, color: 'var(--ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>${e.name}</span>
-              ${e.body && html`<span style=${{ flex: 1, minWidth: 0, fontSize: 12, color: 'var(--ink-faint)', fontStyle: 'italic', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>${e.body}</span>`}
+              <${Icon} name=${iconForKind(item.kind)} size=${13} className="ck-ink-muted" />
+              <span style=${{ fontFamily: 'var(--font-display)', fontSize: 14, color: 'var(--ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>${item.name}</span>
+              ${item.body && html`<span style=${{ flex: 1, minWidth: 0, fontSize: 12, color: 'var(--ink-faint)', fontStyle: 'italic', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>${item.body}</span>`}
             </div>`)}
           </div>
         </div>`
       : html`<div style=${{ flex: 1, display: 'flex' }}>
-          <${Empty} icon="book" title="Codex is empty">
-            What the summarizer remembers — NPCs, places, items, lore. Add entries, or just run a summary and names get pulled in automatically.
-          </${Empty}>
+          <${Empty} icon="book" title="Codex is empty">${emptyMsg}</${Empty}>
         </div>`}
   </div>`;
 }
@@ -131,6 +152,7 @@ export function CampaignScreen({ store }) {
   const players = c.players || [];
   const latest = sessions[0];
   const codexEntries = store.codexEntries || [];
+  const vaultPages = store.vaultPages || [];
 
   return html`<${Shell}
     sidebar=${html`<${Sidebar} variant="campaign" active="overview" campaign=${c} />`}
@@ -199,7 +221,7 @@ export function CampaignScreen({ store }) {
         </div>
       </div>
 
-      <${CodexTeaser} campaign=${c} entries=${codexEntries} />
+      <${CodexTeaser} campaign=${c} entries=${codexEntries} vaultPages=${vaultPages} />
     </div>
 
   </${Shell}>`;

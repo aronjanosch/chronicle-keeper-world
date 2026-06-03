@@ -196,6 +196,11 @@ pub struct CreateCampaignRequest {
     pub name: String,
     #[serde(default = "one")]
     pub start_session_number: i64,
+    /// World root folder. None/empty → computed default `<data-root>/<safe-name>/`.
+    pub vault_path: Option<String>,
+    /// Scaffold starter folders under Codex/ (NPCs, Places, …).
+    #[serde(default)]
+    pub scaffold: bool,
 }
 
 fn one() -> i64 {

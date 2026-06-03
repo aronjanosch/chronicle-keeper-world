@@ -16,7 +16,6 @@ use rusqlite::{params, Connection};
 use serde_json::{json, Value};
 
 use crate::error::AppResult;
-use crate::store::now;
 
 /// Normalize one tag: trim and collapse internal whitespace. Blank → None.
 pub fn normalize_tag(raw: &str) -> Option<String> {
@@ -148,7 +147,7 @@ fn session_metas(conn: &Connection, campaign_id: &str) -> AppResult<Vec<Value>> 
 
 fn session_rows(conn: &Connection, campaign_id: &str) -> AppResult<Vec<(String, String)>> {
     let mut stmt = conn.prepare(
-        "SELECT session_id, metadata_json FROM sessions WHERE campaign_id = ?1 AND deleted = 0",
+        "SELECT session_id, metadata_json FROM sessions WHERE campaign_id = ?1",
     )?;
     let rows = stmt
         .query_map(params![campaign_id], |r| {
@@ -165,8 +164,8 @@ fn tags_of(meta: &Value) -> Vec<&str> {
         .unwrap_or_default()
 }
 
-/// Apply `f` to each session's normalized tag list; persist (dirty + stamped)
-/// only the sessions whose tags actually changed. Returns sessions changed.
+/// Apply `f` to each session's normalized tag list; persist only the sessions
+/// whose tags actually changed. Returns sessions changed.
 fn rewrite_each(
     conn: &Connection,
     campaign_id: &str,
@@ -188,8 +187,8 @@ fn rewrite_each(
         }
         meta["tags"] = json!(new);
         conn.execute(
-            "UPDATE sessions SET metadata_json = ?1, updated_at = ?2, dirty = 1 WHERE session_id = ?3",
-            params![meta.to_string(), now(), sid],
+            "UPDATE sessions SET metadata_json = ?1 WHERE session_id = ?2",
+            params![meta.to_string(), sid],
         )?;
         changed += 1;
     }

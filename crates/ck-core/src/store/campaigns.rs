@@ -51,32 +51,33 @@ fn row_to_detail(row: &rusqlite::Row, fallback_lang: &str) -> rusqlite::Result<C
     })
 }
 
-// Idempotent: auto-create the campaign's vault (default location if unset),
-// then migrate codex_entries → files once (when the vault has no pages yet).
-// Best-effort caller-side — a filesystem error must not block opening a campaign.
-pub fn ensure_vault(conn: &Connection, campaign_id: &str) -> AppResult<()> {
-    let Some(campaign) = get_campaign(conn, campaign_id)? else {
-        return Ok(());
-    };
-    let root = crate::store::sessions::output_root(conn)?;
-    if root.as_os_str().is_empty() {
-        return Ok(());
-    }
-    let vault = match &campaign.vault_path {
-        Some(p) => std::path::PathBuf::from(p),
-        None => crate::vault::default_vault_path(&root, &campaign.name),
-    };
-    std::fs::create_dir_all(&vault)
-        .map_err(|e| AppError::Internal(anyhow::anyhow!("create vault: {e}")))?;
-    crate::vault::ensure_ck_dir(&vault)?;
-    if campaign.vault_path.is_none() {
-        set_vault_path(conn, campaign_id, Some(&vault.to_string_lossy()))?;
-    }
-    if !crate::vault::has_pages(&vault) {
-        for e in crate::store::codex::list_entries(conn, campaign_id)? {
-            let _ = crate::vault::write_migrated_entry(&vault, &e.name, &e.kind, &e.body, &e.detail);
+/// Provision the canonical 1.0 world layout for a campaign. Creates
+/// `Codex/`, `Sessions/`, `.ck/` under the world root and stores
+/// `<world_root>/Codex` as the campaign's `vault_path`.
+///
+/// `world_path`: caller-supplied world root folder (from the New-World screen).
+/// `None` or empty → compute `<data-root>/<safe-name>/`.
+/// Best-effort from the HTTP handler — a filesystem error must not block creation.
+pub fn provision_vault(
+    conn: &Connection,
+    campaign_id: &str,
+    campaign_name: &str,
+    world_path: Option<&str>,
+    scaffold: bool,
+) -> AppResult<()> {
+    let world_root = if let Some(p) = world_path.map(str::trim).filter(|s| !s.is_empty()) {
+        std::path::PathBuf::from(p)
+    } else {
+        let root = crate::store::sessions::output_root(conn)?;
+        if root.as_os_str().is_empty() {
+            return Ok(());
         }
-    }
+        root.join(crate::normalize::sanitize_folder_name(campaign_name))
+    };
+    crate::vault::provision_vault_layout(&world_root, scaffold)?;
+    crate::vault::write_world_config(&world_root, campaign_id, campaign_name)?;
+    let codex = world_root.join("Codex");
+    set_vault_path(conn, campaign_id, Some(&codex.to_string_lossy()))?;
     Ok(())
 }
 
@@ -93,14 +94,11 @@ pub fn set_vault_path(conn: &Connection, campaign_id: &str, path: Option<&str>) 
     Ok(())
 }
 
-/// Store a freshly generated recap. Stamps `recap_updated_at` and the sync
-/// columns (`updated_at`/`dirty`) so the next sync cycle pushes the new recap
-/// to the server and on to other devices.
+/// Store a freshly generated recap, stamping `recap_updated_at`.
 pub fn set_recap(conn: &Connection, campaign_id: &str, recap: &str) -> AppResult<String> {
     let ts = now();
     conn.execute(
-        "UPDATE campaigns SET recap = ?1, recap_updated_at = ?2, updated_at = ?2, dirty = 1 \
-         WHERE campaign_id = ?3",
+        "UPDATE campaigns SET recap = ?1, recap_updated_at = ?2 WHERE campaign_id = ?3",
         params![recap, ts, campaign_id],
     )?;
     Ok(ts)
@@ -133,7 +131,7 @@ pub fn codex_freeform_text(detail: &CampaignDetail) -> String {
 
 pub fn get_campaigns(conn: &Connection) -> AppResult<Vec<CampaignDetail>> {
     let lang = default_language(conn);
-    let mut stmt = conn.prepare("SELECT * FROM campaigns WHERE deleted = 0 ORDER BY name")?;
+    let mut stmt = conn.prepare("SELECT * FROM campaigns ORDER BY name")?;
     let mut out = stmt
         .query_map([], |r| row_to_detail(r, &lang))?
         .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -148,7 +146,7 @@ pub fn get_campaign(conn: &Connection, campaign_id: &str) -> AppResult<Option<Ca
     let lang = default_language(conn);
     let c = conn
         .query_row(
-            "SELECT * FROM campaigns WHERE campaign_id = ?1 AND deleted = 0",
+            "SELECT * FROM campaigns WHERE campaign_id = ?1",
             params![campaign_id],
             |r| row_to_detail(r, &lang),
         )
@@ -185,9 +183,9 @@ pub fn create_campaign(
     let lang = default_language(conn);
     conn.execute(
         "INSERT INTO campaigns \
-         (campaign_id, name, next_session_number, system, gm, setting, default_language, players_json, extra_info, updated_at, dirty) \
-         VALUES (?1, ?2, ?3, '', '', '', ?4, '[]', '', ?5, 1)",
-        params![campaign_id, name, start_session_number, lang, now()],
+         (campaign_id, name, next_session_number, system, gm, setting, default_language, players_json, extra_info) \
+         VALUES (?1, ?2, ?3, '', '', '', ?4, '[]', '')",
+        params![campaign_id, name, start_session_number, lang],
     )?;
     set_current_campaign_id(conn, campaign_id)?;
     get_campaign(conn, campaign_id)?
@@ -236,10 +234,10 @@ pub fn update_campaign(
         sets.push("players_json = ?".into());
         vals.push(Box::new(players.to_string()));
     }
-    // Always stamp the sync columns, even if no user-facing field changed.
-    sets.push("updated_at = ?".into());
-    vals.push(Box::new(now()));
-    sets.push("dirty = 1".into());
+    if sets.is_empty() {
+        return get_campaign(conn, campaign_id)?
+            .ok_or_else(|| AppError::NotFound(format!("Campaign not found: {campaign_id}")));
+    }
     vals.push(Box::new(campaign_id.to_string()));
     let sql = format!(
         "UPDATE campaigns SET {} WHERE campaign_id = ?",
@@ -256,17 +254,14 @@ pub fn update_campaign(
         .ok_or_else(|| AppError::NotFound(format!("Campaign not found: {campaign_id}")))
 }
 
-/// Delete a campaign and cascade to all its sessions. Mirrors session deletion:
-/// each session's artifacts are hard-deleted + tombstoned for sync, the session
-/// rows are soft-deleted, audio dirs reclaimed, and the campaign row itself is
-/// soft-deleted (deleted=1, dirty=1) so the tombstone propagates to other devices.
+/// Delete a campaign and cascade to all its sessions (artifacts + audio dirs
+/// included).
 pub fn delete_campaign(conn: &Connection, campaign_id: &str) -> AppResult<()> {
     if get_campaign(conn, campaign_id)?.is_none() {
         return Err(AppError::NotFound(format!(
             "Campaign not found: {campaign_id}"
         )));
     }
-    // All sessions (incl. already soft-deleted) so their artifacts are cleaned too.
     let mut stmt = conn.prepare("SELECT session_id FROM sessions WHERE campaign_id = ?1")?;
     let session_ids: Vec<String> = stmt
         .query_map(params![campaign_id], |r| r.get::<_, String>(0))?
@@ -277,8 +272,12 @@ pub fn delete_campaign(conn: &Connection, campaign_id: &str) -> AppResult<()> {
         crate::store::sessions::delete_session(conn, sid)?;
     }
     conn.execute(
-        "UPDATE campaigns SET deleted = 1, dirty = 1, updated_at = ?1 WHERE campaign_id = ?2",
-        params![now(), campaign_id],
+        "DELETE FROM codex_entries WHERE campaign_id = ?1",
+        params![campaign_id],
+    )?;
+    conn.execute(
+        "DELETE FROM campaigns WHERE campaign_id = ?1",
+        params![campaign_id],
     )?;
     // Drop the dangling "current campaign" pointer if it named this one.
     if current_campaign_id(conn)?.as_deref() == Some(campaign_id) {
@@ -297,7 +296,7 @@ pub fn next_session_number(conn: &Connection, campaign_id: Option<&str>) -> AppR
     };
     let Some(target) = target else { return Ok(1) };
     let max_used: Option<i64> = conn.query_row(
-        "SELECT MAX(session_number) FROM sessions WHERE campaign_id = ?1 AND deleted = 0",
+        "SELECT MAX(session_number) FROM sessions WHERE campaign_id = ?1",
         params![target],
         |r| r.get(0),
     )?;
@@ -337,40 +336,43 @@ pub fn set_current_campaign_id(conn: &Connection, campaign_id: &str) -> AppResul
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::store::codex;
 
     #[test]
-    fn ensure_vault_auto_creates_migrates_and_is_idempotent() {
+    fn provision_vault_creates_canonical_layout() {
         let conn = crate::db::open_in_memory().unwrap();
-        let tmp = std::env::temp_dir().join(format!("ck-ev-{}", std::process::id()));
+        let tmp = std::env::temp_dir().join(format!("ck-pv-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&tmp);
         crate::config::set_value(&conn, "output_root", &tmp.to_string_lossy()).unwrap();
         create_campaign(&conn, "c1", "My World", 1).unwrap();
-        codex::create_entry(
-            &conn,
-            "c1",
-            &crate::models::CodexEntryCreate {
-                name: "Aragorn".into(),
-                kind: "npc".into(),
-                body: "A ranger.".into(),
-                detail: "Heir of Isildur.".into(),
-            },
-        )
-        .unwrap();
 
-        ensure_vault(&conn, "c1").unwrap();
+        provision_vault(&conn, "c1", "My World", None, false).unwrap();
         let vp = get_campaign(&conn, "c1").unwrap().unwrap().vault_path.unwrap();
         let vault = std::path::Path::new(&vp);
-        assert!(crate::vault::page_exists(vault, "Aragorn"));
-        assert_eq!(crate::vault::read_page(vault, "Aragorn.md").unwrap().summary, "A ranger.");
+        assert!(vault.ends_with("Codex"), "vault_path should point to Codex/");
+        assert!(vault.is_dir());
+        assert!(vault.parent().unwrap().join("Sessions").is_dir());
+        assert!(vault.parent().unwrap().join(".ck").is_dir());
+        assert_eq!(crate::vault::list_pages(vault).unwrap().len(), 0, "starts empty");
 
-        ensure_vault(&conn, "c1").unwrap(); // no duplicate page on re-run
-        assert_eq!(crate::vault::list_pages(vault).unwrap().len(), 1);
+        // Idempotent
+        provision_vault(&conn, "c1", "My World", None, false).unwrap();
+        assert_eq!(crate::vault::list_pages(vault).unwrap().len(), 0);
 
-        assert!(crate::vault::create_stub(vault, "Bree", "place"));
-        assert!(!crate::vault::create_stub(vault, "aragorn", "npc")); // case-insensitive skip
-        assert_eq!(crate::vault::list_pages(vault).unwrap().len(), 2);
+        std::fs::remove_dir_all(&tmp).ok();
+    }
 
+    #[test]
+    fn provision_vault_scaffold_creates_subfolders() {
+        let conn = crate::db::open_in_memory().unwrap();
+        let tmp = std::env::temp_dir().join(format!("ck-pvs-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        crate::config::set_value(&conn, "output_root", &tmp.to_string_lossy()).unwrap();
+        create_campaign(&conn, "c2", "Scaffold World", 1).unwrap();
+        provision_vault(&conn, "c2", "Scaffold World", None, true).unwrap();
+        let vp = get_campaign(&conn, "c2").unwrap().unwrap().vault_path.unwrap();
+        let vault = std::path::Path::new(&vp);
+        assert!(vault.join("NPCs").is_dir());
+        assert!(vault.join("Places").is_dir());
         std::fs::remove_dir_all(&tmp).ok();
     }
 }

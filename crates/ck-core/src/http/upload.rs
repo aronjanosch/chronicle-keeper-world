@@ -47,7 +47,14 @@ pub async fn upload(
     let (sid, session_path) =
         state.with_db(|conn| sessions::resolve_for_upload(conn, session_id.as_deref()))?;
 
-    let tracks = extract_and_list(&zip_bytes, &session_path)?;
+    // Vault sessions keep audio in an `audio/` subdirectory.
+    let is_vault = crate::session_files::is_vault_session_path(&session_path.to_string_lossy());
+    let audio_target = if is_vault {
+        crate::session_files::audio_dir(&session_path)
+    } else {
+        session_path.clone()
+    };
+    let tracks = extract_and_list(&zip_bytes, &audio_target)?;
     if tracks.as_array().map(|a| a.is_empty()).unwrap_or(true) {
         return Err(AppError::BadRequest(
             "No audio files found in ZIP archive".into(),
@@ -257,7 +264,12 @@ pub async fn label_speakers(
     State(state): State<AppState>,
     Json(req): Json<LabelSpeakersRequest>,
 ) -> AppResult<Json<Value>> {
-    state.with_db(|conn| sessions::set_speakers(conn, &req.session_id, &req.speakers))?;
+    state.with_db(|conn| -> crate::error::AppResult<()> {
+        sessions::set_speakers(conn, &req.session_id, &req.speakers)?;
+        // Write session.toml with updated speaker map (vault sessions only).
+        let _ = crate::session_files::sync_session_toml(conn, &req.session_id);
+        Ok(())
+    })?;
     Ok(Json(
         json!({ "session_id": req.session_id, "speakers": req.speakers }),
     ))

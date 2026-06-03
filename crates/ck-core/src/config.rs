@@ -99,14 +99,6 @@ pub struct ConfigResponse {
     /// Hard cap (seconds) on a single transcription run before it's aborted.
     pub transcription_timeout_seconds: i64,
     pub has_litellm_key: bool,
-    /// Multi-device sync server base URL (empty = sync disabled).
-    pub sync_url: String,
-    /// Whether a sync bearer token is saved (the token itself is never echoed).
-    pub has_sync_token: bool,
-    /// ISO timestamp of the last successful sync (local time), empty if never synced.
-    pub last_sync_ts: String,
-    /// Error message from the most recent failed sync attempt, empty if last sync succeeded.
-    pub last_sync_error: String,
 }
 
 /// Partial update payload — mirrors the Python `UpdateConfigRequest`.
@@ -126,8 +118,6 @@ pub struct UpdateConfigRequest {
     pub transcription_provider: Option<String>,
     pub transcription_accelerator: Option<String>,
     pub transcription_timeout_seconds: Option<i64>,
-    pub sync_url: Option<String>,
-    pub sync_token: Option<String>,
 }
 
 fn ensure_defaults(conn: &Connection) -> AppResult<()> {
@@ -212,10 +202,6 @@ pub fn to_response(map: &HashMap<String, String>) -> ConfigResponse {
             }
         },
         has_litellm_key: !get_str(map, "litellm_api_key").is_empty(),
-        sync_url: get_str(map, "sync_url"),
-        has_sync_token: !get_str(map, "sync_token").is_empty(),
-        last_sync_ts: get_str(map, "last_sync_ts"),
-        last_sync_error: get_str(map, "last_sync_error"),
     }
 }
 
@@ -285,12 +271,5 @@ pub fn apply_update(conn: &Connection, req: &UpdateConfigRequest) -> AppResult<(
         "transcription_timeout_seconds",
         req.transcription_timeout_seconds.map(|n| n.to_string()),
     )?;
-    set(
-        "sync_url",
-        req.sync_url
-            .as_ref()
-            .map(|s| s.trim().trim_end_matches('/').to_string()),
-    )?;
-    set("sync_token", req.sync_token.clone())?;
     Ok(())
 }

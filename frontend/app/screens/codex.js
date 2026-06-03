@@ -5,7 +5,7 @@
 import { html, useState, useEffect } from '../../vendor/htm-preact-standalone.mjs';
 import { navigate, openModal, useStore } from '../core.js';
 import { Shell, Sidebar, Topbar } from '../shell.js';
-import { Btn, Empty, Icon, Markdown, Input, Textarea, Select } from '../ui.js';
+import { Btn, Empty, Icon, Markdown, Input, Textarea, Select, BrandMark } from '../ui.js';
 import { loadCodexEntries, createCodexEntry, openCampaign, updateCampaign,
   loadCampaignTags, renameCampaignTag, deleteCampaignTag,
   loadVaultTree, createVaultPage, createVaultFolder, moveVaultEntry,
@@ -434,12 +434,24 @@ export function FileTree({ campaign, tree, active, onOpen, act }) {
   const matches = query ? allPages.filter((p) => p.title.toLowerCase().includes(query) || p.path.toLowerCase().includes(query)) : null;
   const rootFolders = [...tree.folders.values()].sort((a, b) => a.name.localeCompare(b.name));
 
-  return html`<aside style=${{ width: 256, flex: '0 0 256px', borderRight: '1px solid var(--rule)', background: 'var(--paper)', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-    <div style=${{ padding: '12px 12px 8px', borderBottom: '1px solid var(--rule-soft)' }}>
-      <${Input} value=${q} onInput=${setQ} placeholder="Search the vault…" style=${{ fontSize: 12.5 }} />
+  return html`<aside style=${{ width: 220, flex: '0 0 220px', borderRight: '1px solid var(--rule)', background: 'var(--paper-deep)', padding: '14px 12px', display: 'flex', flexDirection: 'column', gap: 2, minHeight: 0 }}>
+    <div style=${{ display: 'flex', alignItems: 'center', gap: 10, padding: '4px 6px 14px', borderBottom: '1px solid var(--rule-soft)', marginBottom: 4, cursor: 'pointer' }}
+      onClick=${() => navigate('library')}>
+      <${BrandMark} size=${30} />
+      <div style=${{ lineHeight: 1.15 }}>
+        <div style=${{ fontFamily: 'var(--font-display)', fontSize: 15, fontWeight: 500, letterSpacing: '-0.01em' }}>Chronicle Keeper</div>
+        <div style=${{ fontSize: 10, fontWeight: 500, color: 'var(--ink-faint)', letterSpacing: '0.08em', textTransform: 'uppercase', marginTop: 2 }}>v0.5 · worldbuilding</div>
+      </div>
     </div>
-    <div style=${{ flex: 1, overflow: 'auto', padding: '4px 6px 10px' }}>
-      <div style=${{ display: 'flex', alignItems: 'center', padding: '12px 10px 4px', fontSize: 10, fontWeight: 600, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--ink-faint)' }}>
+    <div onClick=${() => openCampaign(campaign?.campaign_id)} style=${{ display: 'flex', alignItems: 'center', gap: 9, padding: '7px 9px', borderRadius: 4, color: 'var(--ink-soft)', fontSize: 13, fontWeight: 500, background: 'transparent', border: '1px solid transparent', cursor: 'pointer' }}
+      onMouseEnter=${(e) => { e.currentTarget.style.background = 'rgba(120,90,40,.08)'; }}
+      onMouseLeave=${(e) => { e.currentTarget.style.background = 'transparent'; }}>
+      <${Icon} name="chev-l" size=${13} />
+      <span style=${{ flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>${campaign?.name || 'World'}</span>
+    </div>
+    <${Input} value=${q} onInput=${setQ} placeholder="Search the vault…" style=${{ fontSize: 12.5 }} />
+    <div style=${{ flex: 1, overflow: 'auto', padding: '4px 0 10px', margin: '0 -12px' }}>
+      <div style=${{ display: 'flex', alignItems: 'center', padding: '8px 12px 4px', fontSize: 10, fontWeight: 600, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--ink-faint)' }}>
         <span style=${{ flex: 1 }}>Vault</span>
         <span title="New page" onClick=${() => act.newPage('')} style=${{ color: 'var(--ink-faint)', cursor: 'pointer', padding: 2 }}><${Icon} name="plus" size=${12} /></span>
         <span title="New folder" onClick=${() => act.newFolder('')} style=${{ color: 'var(--ink-faint)', cursor: 'pointer', padding: 2 }}><${Icon} name="folder" size=${12} /></span>
@@ -447,15 +459,14 @@ export function FileTree({ campaign, tree, active, onOpen, act }) {
       ${matches
         ? (matches.length
           ? matches.map((p) => html`<${PageLeaf} key=${p.path} page=${p} depth=${0} active=${active} onOpen=${() => onOpen(p)} act=${act} />`)
-          : html`<div style=${{ fontSize: 12, color: 'var(--ink-faint)', fontStyle: 'italic', padding: '6px 10px' }}>No matches.</div>`)
+          : html`<div style=${{ fontSize: 12, color: 'var(--ink-faint)', fontStyle: 'italic', padding: '6px 12px' }}>No matches.</div>`)
         : html`<div>
             ${rootFolders.map((c) => html`<${FolderNode} key=${c.path} node=${c} depth=${0} openSet=${openSet} toggle=${toggle} active=${active} onOpen=${onOpen} act=${act} />`)}
             ${tree.pages.map((p) => html`<${PageLeaf} key=${p.path} page=${p} depth=${0} active=${active} onOpen=${() => onOpen(p)} act=${act} />`)}
           </div>`}
-      <!-- Phase 2: Tags + Saved searches sections land with the .ck/index.db link+tag index. -->
     </div>
     <div onClick=${attachVaultFlow} title="Change vault folder (advanced)"
-      style=${{ borderTop: '1px solid var(--rule-soft)', padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 8, fontSize: 10.5, color: 'var(--ink-faint)', fontFamily: 'var(--font-mono)', cursor: 'pointer' }}>
+      style=${{ margin: '0 -12px -14px', borderTop: '1px solid var(--rule-soft)', padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 8, fontSize: 10.5, color: 'var(--ink-faint)', fontFamily: 'var(--font-mono)', cursor: 'pointer' }}>
       <span style=${{ width: 6, height: 6, borderRadius: '50%', background: 'var(--moss)', flex: '0 0 auto' }} />
       <span style=${{ flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', direction: 'rtl', textAlign: 'left' }}>${campaign.vault_path}</span>
     </div>
@@ -626,13 +637,8 @@ export function CodexScreen() {
   if (!c) { navigate('library'); return null; }
 
   if (c.vault_path) {
-    const sidebar = html`<${Sidebar} variant="campaign" active="codex" campaign=${c} />`;
-    const topbar = html`<${Topbar} crumbs=${[
-      { label: 'Campaigns', onClick: () => navigate('library') },
-      { label: c.name, onClick: () => openCampaign(c.campaign_id) },
-      'Codex',
-    ]} />`;
-    return html`<${Shell} sidebar=${sidebar} topbar=${topbar} bodyStyle=${{ padding: 0 }}>
+    const topbar = html`<${Topbar} crumbs=${[{ label: c.name, onClick: () => openCampaign(c.campaign_id) }, 'Codex']} />`;
+    return html`<${Shell} topbar=${topbar} bodyStyle=${{ padding: 0 }}>
       <${VaultView} campaign=${c} />
     </${Shell}>`;
   }

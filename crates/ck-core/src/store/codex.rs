@@ -2,10 +2,6 @@
 //! lore (NPCs, places, factions, items, lore notes). Built by hand or
 //! auto-extracted from the summarizer's session metadata. Injected verbatim into
 //! every summary prompt alongside the freeform `campaigns.codex` paste box.
-//!
-//! Soft-delete + dirty + updated_at mirror the campaigns/sessions tables: a
-//! deleted entry is kept as `deleted = 1, dirty = 1` so the deletion propagates
-//! through sync.
 
 use rusqlite::{params, Connection, OptionalExtension};
 use uuid::Uuid;
@@ -46,11 +42,11 @@ fn row_to_entry(row: &rusqlite::Row) -> rusqlite::Result<CodexEntry> {
 
 const COLS: &str = "entry_id, campaign_id, name, kind, body, detail, source, updated_at";
 
-/// All active (not-deleted) entries for a campaign, ordered for stable display.
+/// All entries for a campaign, ordered for stable display.
 pub fn list_entries(conn: &Connection, campaign_id: &str) -> AppResult<Vec<CodexEntry>> {
     let mut stmt = conn.prepare(&format!(
         "SELECT {COLS} FROM codex_entries \
-         WHERE campaign_id = ?1 AND deleted = 0 \
+         WHERE campaign_id = ?1 \
          ORDER BY kind, lower(name)",
     ))?;
     let rows = stmt.query_map(params![campaign_id], row_to_entry)?;
@@ -93,7 +89,7 @@ const NAME_FOLD_SQL: &str = "replace(replace(replace(replace(replace(replace(rep
      name, '\"', ''''), char(96), ''''), char(8216), ''''), char(8217), ''''), \
      char(8220), ''''), char(8221), ''''), char(8242), ''''), char(8243), '''')";
 
-/// Look up an active entry by (campaign, name, kind) using the dedup key.
+/// Look up an entry by (campaign, name, kind) using the dedup key.
 /// Match is case-insensitive and quote-variant-insensitive.
 fn find_by_natural_key(
     conn: &Connection,
@@ -105,7 +101,7 @@ fn find_by_natural_key(
         .query_row(
             &format!(
                 "SELECT {COLS} FROM codex_entries \
-                 WHERE campaign_id = ?1 AND lower({NAME_FOLD_SQL}) = lower(?2) AND kind = ?3 AND deleted = 0",
+                 WHERE campaign_id = ?1 AND lower({NAME_FOLD_SQL}) = lower(?2) AND kind = ?3",
             ),
             params![campaign_id, fold_quotes(name), kind],
             row_to_entry,
@@ -135,8 +131,8 @@ pub fn create_entry(
     let entry_id = Uuid::new_v4().to_string();
     conn.execute(
         "INSERT INTO codex_entries \
-         (entry_id, campaign_id, name, kind, body, detail, source, updated_at, deleted, dirty) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'manual', ?7, 0, 1)",
+         (entry_id, campaign_id, name, kind, body, detail, source, updated_at) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'manual', ?7)",
         params![
             entry_id,
             campaign_id,
@@ -173,7 +169,7 @@ pub fn upsert_manual(
     validate_kind(&req.kind)?;
     if let Some(existing) = find_by_natural_key(conn, campaign_id, name, &req.kind)? {
         conn.execute(
-            "UPDATE codex_entries SET body = ?1, detail = ?2, source = 'manual', updated_at = ?3, dirty = 1 \
+            "UPDATE codex_entries SET body = ?1, detail = ?2, source = 'manual', updated_at = ?3 \
              WHERE entry_id = ?4",
             params![req.body.trim(), req.detail.trim(), now(), existing.entry_id],
         )?;
@@ -184,8 +180,8 @@ pub fn upsert_manual(
     }
 }
 
-/// Auto-extract upsert: insert a row with `source='auto'` only if no active
-/// entry exists for the same (campaign, name, kind). Never overwrites an
+/// Auto-extract upsert: insert a row with `source='auto'` only if no entry
+/// exists for the same (campaign, name, kind). Never overwrites an
 /// existing row — so a user-corrected spelling or hand-written body sticks.
 /// Returns true iff a new row was inserted.
 pub fn upsert_auto(
@@ -210,8 +206,8 @@ pub fn upsert_auto(
     let entry_id = Uuid::new_v4().to_string();
     conn.execute(
         "INSERT INTO codex_entries \
-         (entry_id, campaign_id, name, kind, body, detail, source, updated_at, deleted, dirty) \
-         VALUES (?1, ?2, ?3, ?4, '', '', 'auto', ?5, 0, 1)",
+         (entry_id, campaign_id, name, kind, body, detail, source, updated_at) \
+         VALUES (?1, ?2, ?3, ?4, '', '', 'auto', ?5)",
         params![entry_id, campaign_id, name, kind, now()],
     )?;
     Ok(true)
@@ -281,8 +277,7 @@ pub fn update_entry(
             body       = COALESCE(?3, body), \
             detail     = COALESCE(?4, detail), \
             source     = 'manual', \
-            updated_at = ?5, \
-            dirty      = 1 \
+            updated_at = ?5 \
          WHERE entry_id = ?6",
         params![new_name, req.kind, req.body, req.detail, now(), entry_id],
     )?;
@@ -290,12 +285,10 @@ pub fn update_entry(
         .ok_or_else(|| AppError::NotFound(format!("Codex entry not found: {entry_id}")))
 }
 
-/// Soft-delete: keep the row so the deletion propagates through sync, but hide
-/// it from listings and the prompt context.
 pub fn delete_entry(conn: &Connection, entry_id: &str) -> AppResult<()> {
     let n = conn.execute(
-        "UPDATE codex_entries SET deleted = 1, dirty = 1, updated_at = ?1 WHERE entry_id = ?2",
-        params![now(), entry_id],
+        "DELETE FROM codex_entries WHERE entry_id = ?1",
+        params![entry_id],
     )?;
     if n == 0 {
         return Err(AppError::NotFound(format!(
@@ -501,7 +494,7 @@ mod tests {
     }
 
     #[test]
-    fn soft_delete_hides_from_list_but_allows_recreate() {
+    fn delete_hides_from_list_and_allows_recreate() {
         let conn = crate::db::open_in_memory().unwrap();
         let cid = seed_campaign(&conn);
         let e = create_entry(
@@ -520,7 +513,7 @@ mod tests {
             list_entries(&conn, &cid).unwrap().is_empty(),
             "deleted hidden"
         );
-        // Re-create with the same natural key succeeds (partial index excludes deleted).
+        // Re-create with the same natural key succeeds.
         create_entry(
             &conn,
             &cid,

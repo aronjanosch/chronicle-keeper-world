@@ -27,6 +27,11 @@ impl Paths {
     }
 
     pub fn db_path(&self) -> PathBuf {
+        self.data_dir.join("chronicle_keeper_v1.db")
+    }
+
+    /// 0.X database — the migration reads it, the new app never writes it.
+    pub fn legacy_db_path(&self) -> PathBuf {
         self.data_dir.join("chronicle_keeper.db")
     }
 
