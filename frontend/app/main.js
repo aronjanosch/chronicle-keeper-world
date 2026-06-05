@@ -9,12 +9,14 @@ import { CampaignScreen } from './screens/campaign.js';
 import { SessionScreen } from './screens/session.js';
 import { NewSessionScreen } from './screens/newSession.js';
 import { SummarizeScreen } from './screens/summarize.js';
+import { CodexUpdateScreen } from './screens/codexUpdate.js';
 import { SettingsScreen } from './screens/settings.js';
 import { CodexScreen } from './screens/codex.js';
 import { CodexEntryScreen } from './screens/codexEntry.js';
 import { PageScreen } from './screens/page.js';
 import { SessionsScreen } from './screens/sessions.js';
 import { NewWorldScreen } from './screens/newWorld.js';
+import { AtlasScreen } from './screens/atlas.js';
 import { MigrationScreen } from './screens/migration.js';
 
 function OpBanner({ op }) {
@@ -58,12 +60,14 @@ function App() {
     case 'session': screen = html`<${SessionScreen} store=${store} />`; break;
     case 'newSession': screen = html`<${NewSessionScreen} store=${store} />`; break;
     case 'summarize': screen = html`<${SummarizeScreen} store=${store} />`; break;
+    case 'codexUpdate': screen = html`<${CodexUpdateScreen} store=${store} />`; break;
     case 'settings': screen = html`<${SettingsScreen} store=${store} />`; break;
     case 'codex': screen = html`<${CodexScreen} store=${store} />`; break;
     case 'sessions': screen = html`<${SessionsScreen} store=${store} />`; break;
     case 'codexEntry': screen = html`<${CodexEntryScreen} store=${store} />`; break;
     case 'page': screen = html`<${PageScreen} store=${store} />`; break;
     case 'newWorld': screen = html`<${NewWorldScreen} store=${store} />`; break;
+    case 'atlas': screen = html`<${AtlasScreen} store=${store} />`; break;
     default: screen = html`<${LibraryScreen} store=${store} />`;
   }
   return html`<div style=${{ height: '100%' }}>

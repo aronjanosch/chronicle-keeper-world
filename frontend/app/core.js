@@ -20,12 +20,16 @@ export const store = {
   codexEntries: [],       // structured codex entries for current campaign
   vaultPages: [],
   vaultFolders: [],
+  atlasMaps: [],          // [{id, name, kind, seed, parent, page, pins[]}]
+  atlasMapId: null,       // map currently shown on the Atlas stage (sidebar selection)
   currentPage: null,
   session: null,          // current session detail (campaign{}, tracks[], speakers[], metadata{})
   transcripts: [],
   summaries: [],
   summaryPreview: null,   // { id, text } latest summary content for session screen
   summaryStreaming: null, // { stage:'reading'|'writing'|'metadata', text } live summarize run (null = idle)
+  codexUpdate: null,      // Phase 5 proposal run for current session ({status:'none'} = never generated)
+  codexUpdateStreaming: null, // { stage:'candidates'|'grounding' } generation in flight
   providers: null,        // transcription engines
   llmProviders: null,     // LLM provider registry
   providerStatus: null,   // { ok, reason } for the active summary provider (null = unknown)
@@ -135,6 +139,13 @@ export async function apiStream(path, body, onEvent) {
       try { onEvent(JSON.parse(payload)); } catch (_) {}
     }
   }
+}
+
+// raw bytes (map art) — returns a Blob
+export async function apiBlob(path) {
+  const res = await fetch(apiUrl(path), { headers: authHeaders() });
+  if (!res.ok) throw new Error('Failed to load image');
+  return res.blob();
 }
 
 // raw text (transcript / summary content + export)

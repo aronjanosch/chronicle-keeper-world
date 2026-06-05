@@ -37,7 +37,7 @@ export async function openCampaign(id) {
       vaultFolders: vaultTree.folders || [],
       loading: false,
     });
-    if (campaign.vault_path) { loadVaultLinks(id); loadKindSchemas(id); }
+    if (campaign.vault_path) { loadVaultLinks(id); loadKindSchemas(id); loadAtlasMaps(id); }
     navigate('campaign', { id });
   } catch (e) { setState({ error: e.message, loading: false }); }
 }
@@ -409,6 +409,58 @@ export async function createVaultPage(title, kind, folder) {
   return page;
 }
 
+// ── Atlas maps (files-as-truth: <world>/Atlas/<id>.json) ──────────
+export async function loadAtlasMaps(campaignId) {
+  const id = campaignId || store.campaign?.campaign_id;
+  if (!id) return [];
+  const r = await apiFetch(`/campaigns/${id}/atlas/maps`).catch((e) => {
+    console.warn('loadAtlasMaps failed:', e);
+    return { maps: [] };
+  });
+  setState({ atlasMaps: r.maps || [] });
+  return r.maps || [];
+}
+
+export async function createAtlasMap(name, imagePath, parent, page) {
+  const id = store.campaign.campaign_id;
+  const map = await apiJson(`/campaigns/${id}/atlas/maps`, 'POST',
+    { name, image_path: imagePath, parent: parent || null, page: page || null });
+  setState({ atlasMaps: [...(store.atlasMaps || []), map] });
+  return map;
+}
+
+// Native image picker in the Tauri shell; null in browser-dev (path typed instead).
+export async function pickMapImage() {
+  const dialog = window.__TAURI__?.dialog;
+  if (!dialog?.open) return null;
+  const picked = await dialog.open({
+    multiple: false, title: 'Choose map art',
+    filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif'] }],
+  });
+  return typeof picked === 'string' ? picked : null;
+}
+
+export async function saveAtlasMap(map) {
+  const id = store.campaign.campaign_id;
+  const saved = await apiJson(`/campaigns/${id}/atlas/maps/${encodeURIComponent(map.id)}`, 'PUT', map);
+  setState({ atlasMaps: (store.atlasMaps || []).map((m) => (m.id === saved.id ? saved : m)) });
+  return saved;
+}
+
+export async function replaceAtlasMapArt(mapId, imagePath) {
+  const id = store.campaign.campaign_id;
+  const saved = await apiJson(`/campaigns/${id}/atlas/maps/${encodeURIComponent(mapId)}/image`, 'PUT', { image_path: imagePath });
+  setState({ atlasMaps: (store.atlasMaps || []).map((m) => (m.id === saved.id ? saved : m)) });
+  return saved;
+}
+
+// Delete heals references on other maps server-side — reload the whole list.
+export async function deleteAtlasMap(mapId) {
+  const id = store.campaign.campaign_id;
+  await apiFetch(`/campaigns/${id}/atlas/maps/${encodeURIComponent(mapId)}`, { method: 'DELETE' });
+  return loadAtlasMaps(id);
+}
+
 // ── Sessions ──────────────────────────────────────────────────────
 export async function loadSession(id) {
   setState({ loading: true, error: null });
@@ -433,7 +485,10 @@ export async function loadSession(id) {
       const latest = summaries[0];
       try { summaryPreview = { id: latest.id, text: await apiText(`/sessions/${id}/summaries/${latest.id}/content`) }; } catch (_) {}
     }
-    setState({ session, campaign, transcripts: transcripts || [], summaries: summaries || [], summaryPreview, codexEntries: codexEntries || [], loading: false });
+    const codexUpdate = (summaries || []).length
+      ? await apiFetch(`/sessions/${id}/codex-update`).catch(() => null)
+      : null;
+    setState({ session, campaign, transcripts: transcripts || [], summaries: summaries || [], summaryPreview, codexEntries: codexEntries || [], codexUpdate, loading: false });
     if (loadErr) setOp(`Couldn't load this session's artifacts: ${loadErr.message}`, 'err');
     navigate('session', { id });
   } catch (e) { setState({ error: e.message, loading: false }); }
@@ -614,6 +669,71 @@ export async function runSummarize({ transcriptId, provider, model, title, conte
   } catch (e) {
     setState({ summaryStreaming: null });
     setOp(e.message, 'err');
+  }
+}
+
+// ── Update the Codex (Phase 5) ────────────────────────────────────
+// Proposals are ephemeral until commit; the backend keeps one JSON run per
+// session (Sessions/NNN/codex-proposals.json). Decisions persist as the user
+// reviews, so a half-reviewed run survives a restart.
+export async function loadCodexUpdate(sessionId) {
+  const sid = sessionId || store.session?.session_id;
+  if (!sid) return null;
+  const run = await apiFetch(`/sessions/${sid}/codex-update`).catch(() => null);
+  setState({ codexUpdate: run });
+  return run;
+}
+
+export async function runCodexUpdate() {
+  const sid = store.session?.session_id;
+  if (!sid) return;
+  setState({ codexUpdateStreaming: { stage: 'candidates' } });
+  try {
+    let failure = null;
+    await apiStream(`/sessions/${sid}/codex-update`, {}, (ev) => {
+      switch (ev.stage) {
+        case 'candidates':
+        case 'grounding':
+          setState({ codexUpdateStreaming: { stage: ev.stage } });
+          break;
+        case 'done':
+          setState({ codexUpdate: ev.run, codexUpdateStreaming: null });
+          break;
+        case 'error':
+          failure = ev.message || 'Codex update failed.';
+          break;
+      }
+    });
+    if (failure) throw new Error(failure);
+  } catch (e) {
+    setState({ codexUpdateStreaming: null });
+    setOp(e.message, 'err');
+  }
+}
+
+// Persist decisions / edited changes / skip. patch: { status?, proposals?: [{id, decision?, changes?}] }
+export async function saveCodexUpdateDecisions(patch) {
+  const sid = store.session?.session_id;
+  if (!sid) return;
+  const run = await apiJson(`/sessions/${sid}/codex-update`, 'PUT', patch);
+  setState({ codexUpdate: run });
+  return run;
+}
+
+export async function commitCodexUpdate(ids) {
+  const sid = store.session?.session_id;
+  if (!sid) return;
+  setOp('Writing to the Codex…');
+  try {
+    const r = await apiJson(`/sessions/${sid}/codex-update/commit`, 'POST', { ids });
+    await loadCodexUpdate(sid);
+    await loadVaultTree(store.campaign?.campaign_id);
+    const stale = r.stale?.length ? ` · ${r.stale.length} stale (page changed)` : '';
+    setOp(`Updated ${r.applied} page${r.applied === 1 ? '' : 's'}${stale}`, r.stale?.length ? 'err' : 'done');
+    return r;
+  } catch (e) {
+    setOp(e.message, 'err');
+    throw e;
   }
 }
 

@@ -78,6 +78,8 @@ export function SummarizeScreen({ store }) {
 
   if (!sess) return html`<div />`;
   const provOptions = providers.map((p) => ({ id: p.id, label: p.needs_key ? (p.has_key ? `${p.name} ✓` : `${p.name} (no key)`) : p.name }));
+  // The dead-end after a finished summary becomes the wedge: Update the Codex.
+  const hasSummary = !store.summaryStreaming && store.summaries.length > 0;
 
   function pickTemplate(t) { setCustom(false); setTemplateId(t.id); setSystemPrompt(t.text || ''); }
   function generate() {
@@ -94,7 +96,10 @@ export function SummarizeScreen({ store }) {
     ]} right=${html`
       <div style=${{ display: 'flex', gap: 8, alignItems: 'center' }}>
         <${Btn} kind="ghost" onClick=${() => navigate('session', { id: sess.session_id })}>Cancel</${Btn}>
-        <${Btn} kind="primary" icon="sparkle" disabled=${!store.transcripts.length || !!store.summaryStreaming} onClick=${generate}>${store.summaryStreaming ? 'Generating…' : 'Generate summary'}</${Btn}>
+        ${hasSummary
+          ? html`<${Btn} kind="secondary" icon="sparkle" disabled=${!store.transcripts.length || !!store.summaryStreaming} onClick=${generate}>${store.summaryStreaming ? 'Generating…' : 'Re-generate'}</${Btn}>
+              <${Btn} kind="primary" icon="book" onClick=${() => navigate('codexUpdate', { id: sess.session_id })}>Update the Codex</${Btn}>`
+          : html`<${Btn} kind="primary" icon="sparkle" disabled=${!store.transcripts.length || !!store.summaryStreaming} onClick=${generate}>${store.summaryStreaming ? 'Generating…' : 'Generate summary'}</${Btn}>`}
       </div>`} />`}
     bodyStyle=${{ padding: 0 }}
   >

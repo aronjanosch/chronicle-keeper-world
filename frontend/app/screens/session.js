@@ -179,11 +179,21 @@ export function SessionScreen({ store }) {
     { key: 's', label: 'Summarized', done: hasS, current: hasT && !hasS, detail: hasS ? `${store.summaries[0].provider} / ${store.summaries[0].model}` : 'Pending', meta: hasS ? fmtDateTime(store.summaries[0].created_at) : '' },
   ];
 
+  // Update-the-Codex review state for the latest summary: pending until the
+  // run was committed or skipped (a newer summary re-opens it).
+  const cu = store.codexUpdate;
+  const cuReviewed = cu && cu.status !== 'none' && (cu.status === 'committed' || cu.status === 'skipped')
+    && !(store.summaries[0]?.created_at && new Date(store.summaries[0].created_at) > new Date(cu.generated_at));
+  const codexPending = hasS && !cuReviewed;
+
   const primary = !tracks.length
     ? html`<${Btn} kind="primary" icon="upload" onClick=${() => navigate('newSession', { id: cam.campaign_id, attach: sess.session_id })}>Upload recording</${Btn}>`
     : !hasT
       ? html`<${Btn} kind="primary" icon="mic" onClick=${() => runTranscribe()}>Transcribe</${Btn}>`
-      : html`<${Btn} kind="primary" icon="sparkle" onClick=${() => navigate('summarize', { id: sess.session_id })}>${hasS ? 'Re-summarize' : 'Summarize'}</${Btn}>`;
+      : !hasS
+        ? html`<${Btn} kind="primary" icon="sparkle" onClick=${() => navigate('summarize', { id: sess.session_id })}>Summarize</${Btn}>`
+        : html`<${Btn} kind="secondary" icon="sparkle" onClick=${() => navigate('summarize', { id: sess.session_id })}>Re-summarize</${Btn}>
+            <${Btn} kind=${codexPending ? 'primary' : 'secondary'} icon="book" onClick=${() => navigate('codexUpdate', { id: sess.session_id })}>Update the Codex</${Btn}>`;
 
   return html`<${Shell}
     sidebar=${html`<${Sidebar} variant="campaign" active="sessions" campaign=${c} />`}
