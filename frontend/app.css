@@ -25,6 +25,14 @@ button { font-family: inherit; }
 }
 .ck *::-webkit-scrollbar-track { background: transparent; }
 
+/* ── Sidebar resize handle ─────────────────────────────────────── */
+.ck-resize-handle {
+  position: absolute; top: 0; bottom: 0; right: -3px; width: 6px;
+  cursor: col-resize; z-index: 20;
+}
+.ck-resize-handle.left { left: -3px; right: auto; }
+.ck-resize-handle:hover, .ck-resize-handle:active { background: var(--burgundy-300); opacity: .5; }
+
 /* ── Spinner ───────────────────────────────────────────────────── */
 @keyframes ck-spin { to { transform: rotate(360deg); } }
 .ck-spin { animation: ck-spin .8s linear infinite; }
@@ -32,6 +40,13 @@ button { font-family: inherit; }
 /* ── Indeterminate progress shimmer for pipeline running state ──── */
 @keyframes ck-pulse { 0%,100% { opacity: 1; } 50% { opacity: .45; } }
 .ck-pulse { animation: ck-pulse 1.4s ease-in-out infinite; }
+
+/* ── Atlas: gateway-pin pulse ring ─────────────────────────────── */
+@keyframes ck-ping {
+  0%   { transform: scale(.7); opacity: .65; }
+  70%  { transform: scale(1.5); opacity: 0; }
+  100% { transform: scale(1.5); opacity: 0; }
+}
 
 /* ── Toast / op-status banner ──────────────────────────────────── */
 @keyframes ck-rise { from { transform: translateY(8px); opacity: 0; } to { transform: none; opacity: 1; } }
@@ -161,14 +176,30 @@ button { font-family: inherit; }
 .ck-prop-vals { flex: 1; display: flex; flex-wrap: wrap; gap: 5px; }
 .ck-prop-tag { padding: 1px 7px; border-radius: 3px; background: var(--paper-deep); border: 1px solid var(--rule-soft); font-size: 11px; color: var(--ink-soft); }
 .ck-prop-tag.mono { font-family: var(--font-mono); }
+.ck-prop-tag.ck-prop-link { color: var(--burgundy); cursor: pointer; }
+.ck-prop-tag.ck-prop-link:hover { border-color: var(--burgundy); }
 .ck-prop-empty { color: var(--ink-faint); font-size: 12px; display: flex; align-items: center; gap: 5px; }
 .ck-prop-blank { color: var(--ink-faint); font-size: 11px; }
 
-/* Reading-view infobox: the page kind's frontmatter fields, floated right */
-.ck-infobox { float: right; width: 220px; margin: 0 0 14px 22px; padding: 10px 12px 8px; background: var(--surface); border: 1px solid var(--rule); border-radius: 8px; }
-.ck-infobox-head { display: flex; align-items: center; gap: 6px; font-size: 10.5px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: var(--burgundy); padding-bottom: 7px; margin-bottom: 7px; border-bottom: 1px solid var(--rule-soft); }
+/* Reading-view right rail (design page.jsx): infobox, AI memory, tags, backlinks */
+.ck-rail { width: 264px; flex: 0 0 auto; border-left: 1px solid var(--rule-soft); overflow: auto; padding: 16px; display: flex; flex-direction: column; gap: 14px; background: var(--paper); }
+@media (max-width: 1100px) { .ck-rail { display: none; } }
+.ck-rail-card { background: var(--surface); border: 1px solid var(--rule-soft); border-radius: 8px; padding: 12px 14px; }
+.ck-rail-head { display: flex; align-items: center; gap: 6px; font-size: 10.5px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-faint); margin-bottom: 9px; cursor: pointer; user-select: none; }
+.ck-rail-head:hover { color: var(--ink-muted); }
+.ck-rail-head .ck-rail-right { margin-left: auto; font-weight: 400; letter-spacing: 0; text-transform: none; font-family: var(--font-mono); }
+.ck-rail-chev { margin-left: auto; opacity: 0.6; }
+.ck-rail-right + .ck-rail-chev { margin-left: 0; }
+.ck-rail-card.collapsed .ck-rail-head { margin-bottom: 0; }
 .ck-infobox-row { display: flex; align-items: baseline; gap: 8px; padding: 3px 0; font-size: 12px; }
 .ck-infobox-key { width: 72px; flex: 0 0 auto; color: var(--ink-faint); font-family: var(--font-mono); font-size: 10.5px; }
+.ck-rail-summary { font-family: var(--font-display); font-style: italic; font-size: 13.5px; color: var(--ink); line-height: 1.5; cursor: text; border-radius: 4px; }
+.ck-rail-summary:hover { background: var(--paper-deep); }
+.ck-rail-summary-edit { width: 100%; border: 1px solid var(--rule); border-radius: 4px; background: var(--paper); font-family: var(--font-display); font-style: italic; font-size: 13.5px; color: var(--ink); line-height: 1.5; padding: 4px 6px; resize: none; overflow: hidden; }
+.ck-rail-hint { font-size: 11px; color: var(--ink-faint); line-height: 1.45; margin-top: 8px; }
+.ck-rail-link { display: flex; align-items: center; gap: 7px; padding: 4px 6px; margin: 0 -6px; border-radius: 4px; cursor: pointer; font-size: 12.5px; font-weight: 500; color: var(--ink); }
+.ck-rail-link:hover { background: var(--paper-deep); }
+.ck-rail-foot { font-size: 10.5px; color: var(--ink-faint); text-align: center; font-family: var(--font-mono); padding: 0 8px; }
 
 /* files-as-truth provenance line */
 .ck-provenance { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--ink-faint); font-family: var(--font-mono); }

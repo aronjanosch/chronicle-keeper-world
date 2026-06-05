@@ -1,13 +1,50 @@
 // App shell: sidebar + topbar + body slot. Ported from the design's shell.jsx,
 // wired to the store's router.
-import { html } from '../vendor/htm-preact-standalone.mjs';
+import { html, useState } from '../vendor/htm-preact-standalone.mjs';
 import { navigate, store } from './core.js';
 import { Icon, Sigil, BrandMark } from './ui.js';
+
+// Drag-resizable sidebar width, persisted per key. Returns [width, onMouseDown].
+// opts.fromRight flips the drag direction for panels anchored on the right edge.
+const SIDEBAR_MIN = 180;
+const SIDEBAR_MAX = 420;
+export function useSidebarWidth(key, fallback = 220, opts = {}) {
+  const min = opts.min ?? SIDEBAR_MIN;
+  const max = opts.max ?? SIDEBAR_MAX;
+  const dir = opts.fromRight ? -1 : 1;
+  const [w, setW] = useState(() => {
+    try {
+      const v = parseInt(localStorage.getItem(key), 10);
+      return v >= min && v <= max ? v : fallback;
+    } catch (_) { return fallback; }
+  });
+  function onMouseDown(e) {
+    e.preventDefault();
+    const x0 = e.clientX;
+    const w0 = w;
+    const clamp = (x) => Math.min(max, Math.max(min, w0 + dir * (x - x0)));
+    const move = (ev) => setW(clamp(ev.clientX));
+    const up = (ev) => {
+      document.removeEventListener('mousemove', move);
+      document.removeEventListener('mouseup', up);
+      document.body.style.cursor = '';
+      try { localStorage.setItem(key, String(clamp(ev.clientX))); } catch (_) { /* private mode */ }
+    };
+    document.body.style.cursor = 'col-resize';
+    document.addEventListener('mousemove', move);
+    document.addEventListener('mouseup', up);
+  }
+  return [w, onMouseDown];
+}
+
+export function ResizeHandle({ onMouseDown, side }) {
+  return html`<div class=${side === 'left' ? 'ck-resize-handle left' : 'ck-resize-handle'} onMouseDown=${onMouseDown} title="Drag to resize" />`;
+}
 
 function NavItem({ icon, label, count, active, indent, onClick }) {
   return html`<div onClick=${onClick} style=${{
     display: 'flex', alignItems: 'center', gap: 9,
-    padding: indent ? '6px 9px 6px 30px' : '7px 9px',
+    padding: indent ? `6px 9px 6px ${9 + Number(indent) * 21}px` : '7px 9px',
     borderRadius: 4, color: active ? 'var(--ink)' : 'var(--ink-soft)',
     fontSize: 13, fontWeight: 500,
     background: active ? 'var(--surface)' : 'transparent',
@@ -32,17 +69,41 @@ function sessionsCount() {
   return n > 0 ? n : null;
 }
 
+// Flatten the atlas map hierarchy (parent links) into depth-annotated rows.
+function mapTreeRows(maps) {
+  const kids = {};
+  const ids = new Set(maps.map((m) => m.id));
+  for (const m of maps) {
+    const parent = m.parent && ids.has(m.parent) ? m.parent : '';
+    (kids[parent] ||= []).push(m);
+  }
+  const rows = [];
+  const seen = new Set();
+  const walk = (parent, depth) => {
+    for (const m of kids[parent] || []) {
+      if (seen.has(m.id)) continue;
+      seen.add(m.id);
+      rows.push({ map: m, depth });
+      walk(m.id, depth + 1);
+    }
+  };
+  walk('', 1);
+  return rows;
+}
+
 function NavHead({ children }) {
   return html`<div style=${{ padding: '14px 8px 4px', fontSize: 10.5, fontWeight: 600, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--ink-faint)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>${children}</div>`;
 }
 
 export function Sidebar({ variant = 'library', active, campaign }) {
   const warn = store.providerStatus && store.providerStatus.ok === false ? store.providerStatus : null;
+  const [width, onResize] = useSidebarWidth('ck_sidebar_w');
   return html`<aside style=${{
     background: 'var(--paper-deep)', borderRight: '1px solid var(--rule)',
     padding: '14px 12px', display: 'flex', flexDirection: 'column', gap: 2,
-    width: 220, flex: '0 0 220px',
+    width, flex: `0 0 ${width}px`, position: 'relative',
   }}>
+    <${ResizeHandle} onMouseDown=${onResize} />
     <div style=${{ display: 'flex', alignItems: 'center', gap: 10, padding: '4px 6px 14px', borderBottom: '1px solid var(--rule-soft)', marginBottom: 4, cursor: 'pointer' }}
       onClick=${() => navigate('library')}>
       <${BrandMark} size=${30} />
@@ -69,6 +130,11 @@ export function Sidebar({ variant = 'library', active, campaign }) {
       <${NavHead}>World</${NavHead}>
       <${NavItem} icon="compass" label="Overview" active=${active === 'overview'} onClick=${() => navigate('campaign', { id: campaign?.campaign_id })} />
       <${NavItem} icon="book" label="The Codex" count=${codexCount(campaign)} active=${active === 'codex'} onClick=${() => navigate('codex', { id: campaign?.campaign_id })} />
+      <${NavItem} icon="map" label="Atlas" active=${active === 'atlas'} onClick=${() => navigate('atlas', { id: campaign?.campaign_id })} />
+      ${active === 'atlas' && mapTreeRows(store.atlasMaps || []).map(({ map: m, depth }) => html`
+        <${NavItem} key=${m.id} indent=${depth} label=${m.name}
+          active=${(store.atlasMapId || store.route.params?.map) === m.id}
+          onClick=${() => navigate('atlas', { id: campaign?.campaign_id, map: m.id })} />`)}
       <${NavHead}>Sessions</${NavHead}>
       <${NavItem} icon="mic" label="Sessions" count=${sessionsCount()} active=${active === 'sessions'} onClick=${() => navigate('sessions', { id: campaign?.campaign_id })} />
       <${NavHead}>Workshop</${NavHead}>

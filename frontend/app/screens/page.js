@@ -7,7 +7,7 @@ import { html, useState, useEffect, useRef, useMemo } from '../../vendor/htm-pre
 import { navigate, useStore } from '../core.js';
 import { Shell, Topbar } from '../shell.js';
 import { Btn, Empty, Icon, PageBody, renderBlockHtml, splitDoc, joinDoc, parseProps } from '../ui.js';
-import { readVaultPage, saveVaultPage, openCampaign, loadVaultTree, loadKindSchemas, createVaultPage, watchVault } from '../actions.js';
+import { readVaultPage, saveVaultPage, openCampaign, loadVaultTree, loadKindSchemas, loadAtlasMaps, createVaultPage, watchVault } from '../actions.js';
 import { FileTree, buildTree, makeVaultActions, iconForKind, KINDS } from './codex.js';
 
 function kindLabel(k) {
@@ -23,12 +23,21 @@ function schemaFor(schemas, kind) {
 
 const CHECKED = new Set(['true', 'yes', 'x', '✓', '1']);
 
-function FieldVal({ type, values }) {
+function FieldVal({ type, values, pages }) {
   if (type === 'checkbox') {
     const on = CHECKED.has(String(values[0] || '').toLowerCase());
     return html`<span class="ck-prop-tag" style=${{ color: on ? 'var(--moss)' : 'var(--ink-faint)' }}>${on ? '✓ yes' : '— no'}</span>`;
   }
-  return values.map((v, i) => html`<span class="ck-prop-tag" key=${i}>${v}</span>`);
+  return values.map((v, i) => {
+    const m = /^\[\[([^\]|]+)(?:\|([^\]]+))?\]\]$/.exec(String(v).trim());
+    if (!m) return html`<span class="ck-prop-tag" key=${i}>${v}</span>`;
+    const name = m[1].split('#')[0].trim();
+    const label = (m[2] || m[1]).trim();
+    const nl = name.toLowerCase();
+    const target = (pages || []).find((p) => p.title.toLowerCase() === nl || (p.aliases || []).includes(nl));
+    return html`<span class="ck-prop-tag ${target ? 'ck-prop-link' : ''}" key=${i}
+      onClick=${target ? (e) => { e.stopPropagation(); navigate('page', { path: target.path }); } : null}>${label}</span>`;
+  });
 }
 
 // Schema fields first (typed; blanks kept as placeholders), then custom
@@ -48,19 +57,136 @@ function infoboxRows(props, fields) {
   return rows;
 }
 
-// Right-floated wiki infobox in the reading view: the page's kind fields from
-// frontmatter. Hidden when nothing is filled in.
-function Infobox({ fm, kind, schemas }) {
+function loadFlag(key, fallback) {
+  try { const v = localStorage.getItem(key); return v == null ? fallback : v === '1'; } catch (_) { return fallback; }
+}
+function saveFlag(key, val) {
+  try { localStorage.setItem(key, val ? '1' : '0'); } catch (_) { /* private mode */ }
+}
+
+function RailCard({ icon, title, right, children }) {
+  const [open, setOpen] = useState(() => loadFlag('ck_rail_card_' + title, true));
+  const toggle = () => setOpen((o) => { saveFlag('ck_rail_card_' + title, !o); return !o; });
+  return html`<div class="ck-rail-card ${open ? '' : 'collapsed'}">
+    <div class="ck-rail-head" onClick=${toggle} title=${open ? 'Collapse' : 'Expand'}>
+      <${Icon} name=${icon} size=${12} /> ${title}${right && html`<span class="ck-rail-right">${right}</span>`}
+      <${Icon} name=${open ? 'chev-d' : 'chev-r'} size=${11} className="ck-rail-chev" />
+    </div>
+    ${open && children}
+  </div>`;
+}
+
+// Infobox: the page kind's frontmatter fields (design page.jsx right rail).
+function InfoboxCard({ fm, kind, schemas, pages }) {
   const fields = schemaFor(schemas, kind);
   const rows = infoboxRows(parseProps(fm), fields).filter((r) => r.values.length);
-  if (!rows.length) return null;
-  return html`<div class="ck-infobox">
-    <div class="ck-infobox-head"><${Icon} name=${iconForKind(kind)} size=${12} /> ${kindLabel(kind)}</div>
+  if (!kind && !rows.length) return null;
+  return html`<${RailCard} icon="book" title="Infobox" right="frontmatter">
+    ${kind && html`<div class="ck-infobox-row"><span class="ck-infobox-key">kind</span>
+      <span class="ck-prop-vals"><span class="ck-prop-tag">${kindLabel(kind)}</span></span></div>`}
     ${rows.map((r) => html`<div class="ck-infobox-row" key=${r.key}>
       <span class="ck-infobox-key">${r.key}</span>
-      <span class="ck-prop-vals"><${FieldVal} type=${r.type} values=${r.values} /></span>
+      <span class="ck-prop-vals"><${FieldVal} type=${r.type} values=${r.values} pages=${pages} /></span>
     </div>`)}
-  </div>`;
+    ${!rows.length && html`<div class="ck-prop-blank" style=${{ paddingTop: 4 }}>No fields yet — edit the page properties</div>`}
+  </${RailCard}>`;
+}
+
+// `summary:` is a scalar frontmatter line — replace it in place (or append).
+function setFmSummary(content, summary) {
+  const { fm, body } = splitDoc(content);
+  const s = summary.trim().replace(/\s+/g, ' ');
+  const val = /[:#"']/.test(s) || /^[-\s[{*&!|>@`]/.test(s) ? JSON.stringify(s) : s;
+  const line = val ? `summary: ${val}` : 'summary:';
+  const lines = fm ? fm.split('\n') : [];
+  const i = lines.findIndex((l) => /^summary:/.test(l));
+  if (i >= 0) lines[i] = line; else lines.push(line);
+  return joinDoc(lines.join('\n'), body);
+}
+
+// The AI's memory: the one-liner fed to summaries. Click to edit, blur saves.
+function SummaryCard({ page, onSave }) {
+  const [editing, setEditing] = useState(false);
+  const taRef = useRef(null);
+
+  useEffect(() => {
+    if (editing && taRef.current) {
+      const ta = taRef.current;
+      ta.value = page.summary || '';
+      autoGrow(ta);
+      ta.focus();
+      ta.setSelectionRange(ta.value.length, ta.value.length);
+    }
+  }, [editing]);
+
+  function commit() {
+    const v = taRef.current ? taRef.current.value : '';
+    setEditing(false);
+    if (v.trim() === (page.summary || '').trim()) return;
+    onSave(setFmSummary(page.content, v)).catch(() => {});
+  }
+
+  return html`<${RailCard} icon="feather" title="In the AI's memory">
+    ${editing
+      ? html`<textarea ref=${taRef} class="ck-rail-summary-edit" spellcheck="false"
+          onInput=${(e) => autoGrow(e.target)} onBlur=${commit}
+          onKeyDown=${(e) => { if (e.key === 'Escape' || (e.key === 'Enter' && !e.shiftKey)) { e.preventDefault(); e.target.blur(); } }} />`
+      : html`<div class="ck-rail-summary" onClick=${() => setEditing(true)} title="Click to edit">
+          ${page.summary && page.summary.trim()
+            ? page.summary
+            : html`<span class="ck-prop-blank">No summary yet — click to write one</span>`}
+        </div>`}
+    <div class="ck-rail-hint">Fed to the LLM as background when this page is mentioned in a session.</div>
+  </${RailCard}>`;
+}
+
+function TagsCard({ tags }) {
+  if (!tags || !tags.length) return null;
+  return html`<${RailCard} icon="tag" title="Tags">
+    <div style=${{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+      ${tags.map((t, i) => html`<span class="ck-prop-tag mono" key=${i}>#${String(t).replace(/^#/, '')}</span>`)}
+    </div>
+  </${RailCard}>`;
+}
+
+// Reverse lookup: every atlas pin (or map entry) referencing this page.
+function OnMapCard({ path, maps, campaignId }) {
+  const hits = [];
+  for (const m of maps || []) {
+    if (m.page === path) hits.push({ map: m, pin: null });
+    for (const p of m.pins || []) {
+      if (p.page === path) hits.push({ map: m, pin: p });
+    }
+  }
+  if (!hits.length) return null;
+  return html`<${RailCard} icon="map" title="On the map" right=${hits.length > 1 ? String(hits.length) : null}>
+    <div style=${{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+      ${hits.map(({ map: m, pin }, i) => html`<div class="ck-rail-link" key=${i}
+        onClick=${() => navigate('atlas', { id: campaignId, map: m.id, ...(pin ? { pin: pin.id } : {}) })}>
+        <${Icon} name=${pin ? 'pin' : 'map'} size=${12} className="ck-ink-muted" />
+        <span>${pin ? `Pinned on ${m.name}` : `Has its own map: ${m.name}`}</span>
+      </div>`)}
+    </div>
+  </${RailCard}>`;
+}
+
+function BacklinksCard({ path, pages, links }) {
+  const sources = [...new Set((links || [])
+    .filter((l) => l.target_path === path)
+    .map((l) => l.source_path))];
+  if (!sources.length) return null;
+  const byPath = new Map((pages || []).map((p) => [p.path, p]));
+  return html`<${RailCard} icon="link" title="Linked from" right=${String(sources.length)}>
+    <div style=${{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+      ${sources.map((src) => {
+        const p = byPath.get(src);
+        return html`<div class="ck-rail-link" key=${src} onClick=${() => navigate('page', { path: src })}>
+          <${Icon} name=${iconForKind(p?.kind)} size=${12} className="ck-ink-muted" />
+          <span>${p?.title || src}</span>
+        </div>`;
+      })}
+    </div>
+  </${RailCard}>`;
 }
 
 let _blkId = 0;
@@ -366,59 +492,35 @@ function Provenance({ path }) {
   </div>`;
 }
 
-// "Linked from" — client-side scan of the link-graph index for [[this page]].
-function Backlinks({ path, pages, links }) {
-  const sources = [...new Set((links || [])
-    .filter((l) => l.target_path === path)
-    .map((l) => l.source_path))];
-  if (!sources.length) return null;
-  const byPath = new Map((pages || []).map((p) => [p.path, p]));
-  return html`<div style=${{ clear: 'both', marginTop: 36, paddingTop: 18, borderTop: '1px solid var(--rule)' }}>
-    <div style=${{ fontSize: 10.5, fontWeight: 600, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--ink-faint)', marginBottom: 10 }}>
-      Linked from <span style=${{ fontFamily: 'var(--font-mono)' }}>${sources.length}</span>
-    </div>
-    <div style=${{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-      ${sources.map((src) => {
-        const p = byPath.get(src);
-        return html`<div key=${src} onClick=${() => navigate('page', { path: src })}
-          style=${{ display: 'flex', alignItems: 'center', gap: 9, padding: '8px 11px', background: 'var(--surface)', border: '1px solid var(--rule-soft)', borderRadius: 6, cursor: 'pointer' }}
-          onMouseEnter=${(e) => { e.currentTarget.style.borderColor = 'var(--rule-strong)'; }}
-          onMouseLeave=${(e) => { e.currentTarget.style.borderColor = 'var(--rule-soft)'; }}>
-          <${Icon} name=${iconForKind(p?.kind)} size=${13} className="ck-ink-muted" />
-          <span style=${{ fontSize: 13, fontWeight: 500, color: 'var(--ink)' }}>${p?.title || src}</span>
-          ${p?.summary && html`<span style=${{ flex: 1, fontSize: 12, color: 'var(--ink-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontStyle: 'italic' }}>${p.summary}</span>`}
-        </div>`;
-      })}
-    </div>
-  </div>`;
-}
-
-function ReadView({ page, path, pages, links, schemas, onBroken }) {
+function ReadView({ page, path, pages, links, schemas, atlasMaps, campaignId, onSave, onBroken, railHidden }) {
   const { fm, body } = splitDoc(page.content);
   const props = parseProps(fm);
   const role = (props.find((p) => p.key === 'role') || {}).values?.[0];
   const eyebrow = [kindLabel(page.kind), role].filter(Boolean).join(' · ');
   const prose = body.replace(/^\s*#\s+.*\n+/, ''); // title rendered above; drop the leading H1
 
-  return html`<div style=${{ flex: 1, overflow: 'auto', background: 'var(--paper)', padding: '34px 0 64px', minWidth: 0 }}>
-    <div style=${{ maxWidth: 680, margin: '0 auto', padding: '0 52px' }}>
-      <${Provenance} path=${path} />
-      <div style=${{ fontSize: 10.5, fontWeight: 600, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--burgundy)', marginTop: 16 }}>${eyebrow}</div>
-      <h1 style=${{ fontFamily: 'var(--font-display)', fontSize: 38, fontWeight: 500, letterSpacing: '-0.02em', lineHeight: 1.08, color: 'var(--ink)', marginTop: 6 }}>${page.title}</h1>
+  const meta = (pages || []).find((p) => p.path === path);
+  const words = prose.trim() ? prose.trim().split(/\s+/).length : 0;
+  const edited = meta?.modified ? new Date(meta.modified * 1000).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : null;
 
-      ${page.summary && page.summary.trim() && html`<div style=${{ display: 'flex', alignItems: 'flex-start', gap: 10, marginTop: 16, padding: '12px 14px', background: 'var(--surface)', border: '1px solid var(--rule-soft)', borderRadius: 8 }}>
-        <${Icon} name="feather" size=${13} className="ck-burgundy" style=${{ marginTop: 3, flex: '0 0 auto' }} />
-        <div style=${{ flex: 1 }}>
-          <div style=${{ fontFamily: 'var(--font-display)', fontStyle: 'italic', fontSize: 15, color: 'var(--ink)', lineHeight: 1.5 }}>${page.summary}</div>
-          <div style=${{ fontSize: 10.5, color: 'var(--ink-faint)', marginTop: 6, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase' }}>Summary · the AI's memory</div>
-        </div>
-      </div>`}
-
-      <div style=${{ height: 1, background: 'var(--rule)', margin: '26px 0' }} />
-      <${Infobox} fm=${fm} kind=${page.kind} schemas=${schemas} />
-      <${PageBody} text=${prose} pages=${pages} onBroken=${onBroken} />
-      <${Backlinks} path=${path} pages=${pages} links=${links} />
+  return html`<div style=${{ flex: 1, display: 'flex', minWidth: 0, minHeight: 0 }}>
+    <div style=${{ flex: 1, overflow: 'auto', background: 'var(--paper)', padding: '34px 0 64px', minWidth: 0 }}>
+      <div style=${{ maxWidth: 680, margin: '0 auto', padding: '0 52px' }}>
+        <${Provenance} path=${path} />
+        <div style=${{ fontSize: 10.5, fontWeight: 600, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--burgundy)', marginTop: 16 }}>${eyebrow}</div>
+        <h1 style=${{ fontFamily: 'var(--font-display)', fontSize: 38, fontWeight: 500, letterSpacing: '-0.02em', lineHeight: 1.08, color: 'var(--ink)', marginTop: 6 }}>${page.title}</h1>
+        <div style=${{ height: 1, background: 'var(--rule)', margin: '26px 0' }} />
+        <${PageBody} text=${prose} pages=${pages} onBroken=${onBroken} />
+      </div>
     </div>
+    ${!railHidden && html`<aside class="ck-rail">
+      <${InfoboxCard} fm=${fm} kind=${page.kind} schemas=${schemas} pages=${pages} />
+      <${SummaryCard} page=${page} onSave=${onSave} />
+      <${TagsCard} tags=${meta?.tags} />
+      <${OnMapCard} path=${path} maps=${atlasMaps} campaignId=${campaignId} />
+      <${BacklinksCard} path=${path} pages=${pages} links=${links} />
+      <div class="ck-rail-foot">${[edited && `Edited ${edited}`, `${words} words`].filter(Boolean).join(' · ')}</div>
+    </aside>`}
   </div>`;
 }
 
@@ -468,7 +570,10 @@ export function PageScreen() {
   const [mode, setMode] = useState('read');
   const [editStyle, setEditStyle] = useState(loadEditStyle);
   const [saveState, setSaveState] = useState('saved');
+  const [railHidden, setRailHidden] = useState(() => loadFlag('ck_rail_hidden', false));
   const [rev, setRev] = useState(0); // bumped on external reload to re-key the editor
+
+  const toggleRail = () => setRailHidden((h) => { saveFlag('ck_rail_hidden', !h); return !h; });
 
   const pageRef = useRef(null); pageRef.current = page;
   const saveRef = useRef(saveState); saveRef.current = saveState;
@@ -482,7 +587,11 @@ export function PageScreen() {
     setMode('edit');
   }
 
-  useEffect(() => { if (c) { loadVaultTree(c.campaign_id); loadKindSchemas(c.campaign_id); } }, [c?.campaign_id]);
+  useEffect(() => {
+    if (!c) return;
+    loadVaultTree(c.campaign_id); loadKindSchemas(c.campaign_id);
+    if (c.vault_path && !(store.atlasMaps || []).length) loadAtlasMaps(c.campaign_id);
+  }, [c?.campaign_id]);
 
   useEffect(() => {
     let cancelled = false;
@@ -556,6 +665,10 @@ export function PageScreen() {
   const topbar = html`<${Topbar} crumbs=${crumbs}
     right=${html`<div style=${{ display: 'flex', gap: 8, alignItems: 'center' }}>
       ${savedChip}
+      ${mode === 'read' && html`<button onClick=${toggleRail} title=${railHidden ? 'Show side panel' : 'Hide side panel'}
+        style=${{ padding: '6px 8px', color: railHidden ? 'var(--ink-faint)' : 'var(--ink-muted)', background: 'none', border: 'none', cursor: 'pointer' }}>
+        <${Icon} name=${railHidden ? 'chev-l' : 'chev-r'} size=${14} />
+      </button>`}
       <${ModeToggle} mode=${mode} onChange=${setMode} />
       ${pageLeaf && html`<${KebabMenu} items=${[
         { icon: editStyle === 'live' ? 'check' : 'feather', label: editStyle === 'live' ? 'Live preview ✓' : 'Live preview', onClick: toggleEditStyle },
@@ -574,7 +687,7 @@ export function PageScreen() {
       ${page === null
         ? html`<div style=${{ flex: 1, padding: 40, color: 'var(--ink-faint)', fontStyle: 'italic' }}>Loading…</div>`
         : mode === 'read'
-          ? html`<${ReadView} page=${page} path=${path} pages=${pages} links=${(store.vaultLinks || {}).links} schemas=${store.kindSchemas} onBroken=${openBroken} />`
+          ? html`<${ReadView} page=${page} path=${path} pages=${pages} links=${(store.vaultLinks || {}).links} schemas=${store.kindSchemas} atlasMaps=${store.atlasMaps} campaignId=${c.campaign_id} onSave=${doSave} onBroken=${openBroken} railHidden=${railHidden} />`
           : html`<div style=${{ flex: 1, overflow: 'auto', background: 'var(--paper)', padding: '34px 0 64px', minWidth: 0 }}>
               <div style=${{ maxWidth: 720, margin: '0 auto', padding: '0 52px' }}>
                 <${Provenance} path=${path} />

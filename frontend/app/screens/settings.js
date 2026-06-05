@@ -119,7 +119,10 @@ export function SettingsScreen({ store }) {
     })();
   }, []);
 
-  if (!f) return html`<${Shell} sidebar=${html`<${Sidebar} variant="library" active="settings" />`} topbar=${html`<${Topbar} crumbs=${['Workshop', 'Settings']} />`}><div /></${Shell}>`;
+  // keep the world context: settings opened from inside a world keeps its sidebar
+  const sidebar = html`<${Sidebar} variant=${store.campaign ? 'campaign' : 'library'} campaign=${store.campaign} active="settings" />`;
+
+  if (!f) return html`<${Shell} sidebar=${sidebar} topbar=${html`<${Topbar} crumbs=${['Workshop', 'Settings']} />`}><div /></${Shell}>`;
 
   async function save() {
     setSaving(true);
@@ -138,7 +141,7 @@ export function SettingsScreen({ store }) {
   const providers = store.llmProviders || [];
 
   return html`<${Shell}
-    sidebar=${html`<${Sidebar} variant="library" active="settings" />`}
+    sidebar=${sidebar}
     topbar=${html`<${Topbar} crumbs=${['Workshop', 'Settings']} right=${html`<${Btn} kind="primary" disabled=${saving} onClick=${save}>${saving ? 'Saving…' : 'Save changes'}</${Btn}>`} />`}
   >
     <div style=${{ maxWidth: 920, margin: '0 auto' }}>

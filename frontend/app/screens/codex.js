@@ -4,7 +4,7 @@
 // Keeps the Phase 1 freeform paste box (campaign-wide note, injected verbatim).
 import { html, useState, useEffect, useRef } from '../../vendor/htm-preact-standalone.mjs';
 import { navigate, openModal, useStore } from '../core.js';
-import { Shell, Sidebar, Topbar } from '../shell.js';
+import { Shell, Sidebar, Topbar, useSidebarWidth, ResizeHandle } from '../shell.js';
 import { Btn, Empty, Icon, Markdown, Input, Textarea, Select, BrandMark } from '../ui.js';
 import { loadCodexEntries, createCodexEntry, openCampaign, updateCampaign,
   loadCampaignTags, renameCampaignTag, deleteCampaignTag,
@@ -478,7 +478,9 @@ export function FileTree({ campaign, tree, active, onOpen, act }) {
     setSaved(next); storeSavedSearches(campaign?.campaign_id, next);
   }
 
-  return html`<aside style=${{ width: 220, flex: '0 0 220px', borderRight: '1px solid var(--rule)', background: 'var(--paper-deep)', padding: '14px 12px', display: 'flex', flexDirection: 'column', gap: 2, minHeight: 0 }}>
+  const [width, onResize] = useSidebarWidth('ck_tree_w');
+  return html`<aside style=${{ width, flex: `0 0 ${width}px`, borderRight: '1px solid var(--rule)', background: 'var(--paper-deep)', padding: '14px 12px', display: 'flex', flexDirection: 'column', gap: 2, minHeight: 0, position: 'relative' }}>
+    <${ResizeHandle} onMouseDown=${onResize} />
     <div style=${{ display: 'flex', alignItems: 'center', gap: 10, padding: '4px 6px 14px', borderBottom: '1px solid var(--rule-soft)', marginBottom: 4, cursor: 'pointer' }}
       onClick=${() => navigate('library')}>
       <${BrandMark} size=${30} />
