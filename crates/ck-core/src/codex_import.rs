@@ -104,7 +104,7 @@ Notes:\n\
 
 /// Map an ISO-ish language code to a name the model reliably understands. Falls
 /// back to the raw code (LLMs handle bare codes fine) for anything unlisted.
-fn language_name(code: &str) -> String {
+pub(crate) fn language_name(code: &str) -> String {
     match code
         .trim()
         .to_lowercase()

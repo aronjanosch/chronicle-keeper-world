@@ -1,4 +1,6 @@
+pub mod atlas;
 pub mod codex_import;
+pub mod codex_update;
 pub mod config;
 pub mod db;
 pub mod error;

@@ -1,6 +1,8 @@
 mod artifacts;
+mod atlas;
 mod campaigns;
 mod codex;
+mod codex_update;
 mod index;
 mod llm;
 mod migration;
@@ -90,6 +92,21 @@ pub fn router(state: AppState) -> Router {
                 .put(vault::write_page)
                 .delete(vault::delete_page),
         )
+        // atlas maps (files-as-truth: <world>/Atlas/<id>.json)
+        .route(
+            "/campaigns/:id/atlas/maps",
+            get(atlas::list_maps).post(atlas::create_map),
+        )
+        .route(
+            "/campaigns/:id/atlas/maps/:map",
+            get(atlas::read_map)
+                .put(atlas::write_map)
+                .delete(atlas::delete_map),
+        )
+        .route(
+            "/campaigns/:id/atlas/maps/:map/image",
+            get(atlas::map_image).put(atlas::replace_image),
+        )
         // vault index (links/backlinks, search, page tags, change counter)
         .route("/campaigns/:id/vault/seq", get(index::seq))
         .route("/campaigns/:id/vault/index/links", get(index::links))
@@ -102,6 +119,17 @@ pub fn router(state: AppState) -> Router {
         .route("/session/:id/metadata", get(sessions::metadata))
         .route("/session-metadata", post(sessions::set_metadata))
         .route("/sessions/:id", delete(sessions::delete))
+        // Update the Codex (Phase 5): AI page proposals after a summary
+        .route(
+            "/sessions/:id/codex-update",
+            get(codex_update::get)
+                .post(codex_update::generate)
+                .put(codex_update::put),
+        )
+        .route(
+            "/sessions/:id/codex-update/commit",
+            post(codex_update::commit),
+        )
         // upload + speakers
         .route("/upload", post(upload::upload))
         .route("/label-speakers", post(upload::label_speakers))

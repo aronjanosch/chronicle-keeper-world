@@ -507,17 +507,17 @@ pub fn count_pages(vault: &Path) -> usize {
 }
 
 pub fn page_exists(vault: &Path, title: &str) -> bool {
-    let want = title.trim().to_lowercase();
+    let want = crate::store::index::normalize_name(title.trim());
     let mut files = Vec::new();
     collect_md(vault, &mut files);
     files
         .iter()
         .filter_map(|p| p.file_stem().and_then(|s| s.to_str()))
-        .any(|s| s.to_lowercase() == want)
+        .any(|s| crate::store::index::normalize_name(s) == want)
 }
 
 // Filesystem-safe filename; spaces kept (Obsidian-style), separators stripped.
-fn safe_page_filename(name: &str) -> String {
+pub(crate) fn safe_page_filename(name: &str) -> String {
     let cleaned: String = name
         .chars()
         .map(|c| match c {
@@ -553,16 +553,7 @@ pub(crate) fn set_frontmatter_fields(content: &str, kind: &str, summary: &str) -
         if key == "kind" || key == "summary" {
             continue;
         }
-        if vals.is_empty() {
-            out.push_str(&format!("{key}:\n"));
-        } else if vals.len() == 1 {
-            out.push_str(&format!("{key}: {}\n", yaml_scalar(&vals[0])));
-        } else {
-            out.push_str(&format!("{key}:\n"));
-            for v in vals {
-                out.push_str(&format!("  - {v}\n"));
-            }
-        }
+        push_fm_field(&mut out, key, vals);
     }
     out.push_str("---\n\n");
     out.push_str(body);
@@ -570,6 +561,101 @@ pub(crate) fn set_frontmatter_fields(content: &str, kind: &str, summary: &str) -
         out.push('\n');
     }
     out
+}
+
+fn push_fm_field(out: &mut String, key: &str, vals: &[String]) {
+    if vals.is_empty() {
+        out.push_str(&format!("{key}:\n"));
+    } else if vals.len() == 1 {
+        out.push_str(&format!("{key}: {}\n", yaml_scalar(&vals[0])));
+    } else {
+        out.push_str(&format!("{key}:\n"));
+        for v in vals {
+            out.push_str(&format!("  - {v}\n"));
+        }
+    }
+}
+
+fn rebuild_with_fm(fm: &[(String, Vec<String>)], body: &str) -> String {
+    let mut out = String::from("---\n");
+    for (key, vals) in fm {
+        push_fm_field(&mut out, key, vals);
+    }
+    out.push_str("---\n\n");
+    out.push_str(body);
+    if !body.is_empty() && !body.ends_with('\n') {
+        out.push('\n');
+    }
+    out
+}
+
+/// Overwrite the `summary:` frontmatter field (unlike `set_frontmatter_fields`,
+/// which only fills blanks). Creates the frontmatter block if missing.
+pub(crate) fn overwrite_summary(content: &str, summary: &str) -> String {
+    let (mut fm, body) = split_frontmatter(content);
+    let val = vec![summary.trim().to_string()];
+    match fm.iter_mut().find(|(k, _)| k == "summary") {
+        Some((_, vals)) => *vals = val,
+        None => fm.push(("summary".into(), val)),
+    }
+    rebuild_with_fm(&fm, body)
+}
+
+/// Append a value to a frontmatter list field, creating the field if absent.
+/// No-op when the value is already present (case-insensitive).
+pub(crate) fn fm_append_list_value(content: &str, field: &str, value: &str) -> String {
+    let (mut fm, body) = split_frontmatter(content);
+    let value = value.trim();
+    match fm.iter_mut().find(|(k, _)| k == field) {
+        Some((_, vals)) => {
+            if vals.iter().any(|v| v.eq_ignore_ascii_case(value)) {
+                return content.to_string();
+            }
+            vals.push(value.to_string());
+        }
+        None => fm.push((field.to_string(), vec![value.to_string()])),
+    }
+    rebuild_with_fm(&fm, body)
+}
+
+/// Append `text` at the end of the `anchor` heading's section (before the next
+/// heading of the same or higher level). A missing anchor is created at the end
+/// of the file.
+pub(crate) fn append_under_heading(content: &str, anchor: &str, text: &str) -> String {
+    let anchor = anchor.trim();
+    let text = text.trim();
+    let level = anchor.chars().take_while(|c| *c == '#').count().max(1);
+    let lines: Vec<&str> = content.lines().collect();
+    let Some(start) = lines.iter().position(|l| l.trim() == anchor) else {
+        let mut out = content.trim_end().to_string();
+        out.push_str(&format!("\n\n{anchor}\n\n{text}\n"));
+        return out;
+    };
+    // End of section = next heading at the same or a higher level.
+    let end = lines[start + 1..]
+        .iter()
+        .position(|l| {
+            let h = l.trim_start();
+            let n = h.chars().take_while(|c| *c == '#').count();
+            n >= 1 && n <= level && h[n..].starts_with(' ')
+        })
+        .map(|i| start + 1 + i)
+        .unwrap_or(lines.len());
+    let mut out: Vec<String> = lines[..end].iter().map(|s| s.to_string()).collect();
+    while out.last().is_some_and(|l| l.trim().is_empty()) {
+        out.pop();
+    }
+    out.push(String::new());
+    out.push(text.to_string());
+    if end < lines.len() {
+        out.push(String::new());
+        out.extend(lines[end..].iter().map(|s| s.to_string()));
+    }
+    let mut joined = out.join("\n");
+    if !joined.ends_with('\n') {
+        joined.push('\n');
+    }
+    joined
 }
 
 /// Returns true when the page content lacks an explicit `kind` or `summary` frontmatter field.
@@ -594,7 +680,7 @@ fn yaml_scalar(s: &str) -> String {
     }
 }
 
-fn page_file_content(name: &str, kind: &str, summary: &str, body: &str) -> String {
+pub(crate) fn page_file_content(name: &str, kind: &str, summary: &str, body: &str) -> String {
     let mut out = format!("---\nkind: {kind}\n");
     let s = yaml_scalar(summary);
     if s.is_empty() {
