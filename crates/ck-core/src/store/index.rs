@@ -10,7 +10,8 @@ use rusqlite::{params, Connection};
 use crate::error::{AppError, AppResult};
 use crate::vault;
 
-pub const SCHEMA_VERSION: &str = "4";
+// 5: normalize_name now NFC-normalizes — stored aliases/target_names must be rebuilt.
+pub const SCHEMA_VERSION: &str = "5";
 
 const SCHEMA: &str = "
 CREATE TABLE pages (
@@ -162,7 +163,9 @@ fn is_media_target(name: &str) -> bool {
 }
 
 pub(crate) fn normalize_name(s: &str) -> String {
-    s.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase()
+    use unicode_normalization::UnicodeNormalization;
+    // NFC: macOS stores filenames NFD, link text is typically NFC.
+    s.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase().nfc().collect()
 }
 
 fn anchor_of(text: &str) -> String {
@@ -725,13 +728,13 @@ pub fn diagnostics(conn: &Connection, vault_root: &Path) -> AppResult<Diagnostic
     collect_diag_files(vault_root, vault_root, &mut files, &mut conflicts);
     conflicts.sort();
     // Resolve like Obsidian: exact relative path, else filename match anywhere.
-    let rel_set: std::collections::HashSet<String> =
-        files.iter().map(|f| f.to_lowercase()).collect();
-    let name_set: std::collections::HashSet<String> = files
-        .iter()
-        .filter_map(|f| f.rsplit('/').next())
-        .map(str::to_lowercase)
-        .collect();
+    let norm = |s: &str| -> String {
+        use unicode_normalization::UnicodeNormalization;
+        s.to_lowercase().nfc().collect()
+    };
+    let rel_set: std::collections::HashSet<String> = files.iter().map(|f| norm(f)).collect();
+    let name_set: std::collections::HashSet<String> =
+        files.iter().filter_map(|f| f.rsplit('/').next()).map(norm).collect();
     let broken_media = {
         let mut stmt =
             conn.prepare("SELECT source_path, target FROM page_media ORDER BY source_path, target")?;
@@ -740,7 +743,7 @@ pub fn diagnostics(conn: &Connection, vault_root: &Path) -> AppResult<Diagnostic
         })?;
         rows.filter_map(Result::ok)
             .filter(|m| {
-                let t = m.target.to_lowercase();
+                let t = norm(&m.target);
                 !rel_set.contains(&t)
                     && !t.rsplit('/').next().map(|n| name_set.contains(n)).unwrap_or(false)
             })
@@ -860,6 +863,18 @@ mod tests {
         assert_eq!(links.len(), 2);
         assert!(links.iter().all(|l| l.source_path == "Aragorn.md"));
         assert_eq!(unresolved_count(&conn).unwrap(), 2);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn resolves_nfd_filename_against_nfc_link() {
+        // macOS stores filenames NFD; typed link text is NFC.
+        let dir = tmp_vault("nfc");
+        write(&dir, "Gefa\u{308}ngnis.md", "---\nkind: place\n---\nA jail.\n"); // NFD ä
+        write(&dir, "Source.md", "See [[Gef\u{e4}ngnis]].\n"); // NFC ä
+        let conn = open_index(&dir).unwrap();
+        rebuild(&conn, &dir).unwrap();
+        assert_eq!(unresolved_count(&conn).unwrap(), 0);
         std::fs::remove_dir_all(&dir).ok();
     }
 

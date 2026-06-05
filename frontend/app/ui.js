@@ -46,6 +46,11 @@ const PATHS = {
   globe:    null,
   trash:    'M3 4h10M6 4V2.5h4V4M5 4l.5 9.5a.5.5 0 0 0 .5.5h4a.5.5 0 0 0 .5-.5L11 4M6.5 6.5v5M9.5 6.5v5',
   x:        'm4 4 8 8M12 4l-8 8',
+  pin:      'M8 14V9M5 9h6M5 9V3h6v6M6.5 5h3',
+  castle:   'M2 14h12M3 14V6l1.5-1V3M6.5 14V8L8 7l1.5 1v6M13 14V6l-1.5-1V3M3 6h2M11 6h2',
+  sword:    'm13 3-7 7M13 3l-1 4M13 3l-4 1M6 10l-3 3 1 1 3-3M6 10l1 1M9 13l1 1',
+  flag:     'M3 14V2M3 3h8l-1.5 2.5L11 8H3',
+  backlink: 'M9.5 6.5 6.5 9.5M10 4l1-1a2.5 2.5 0 0 1 3.5 3.5l-1 1M6 12l-1 1A2.5 2.5 0 0 1 1.5 9.5l1-1M2 2v3h3',
 };
 // icons needing extra geometry (circles/rects)
 function customIcon(name, p) {
@@ -364,8 +369,10 @@ function ckPostprocess(htmlStr) {
 export function resolveWikilinks(htmlStr, pages) {
   if (!htmlStr.includes('[[')) return htmlStr;
   const byName = new Map();
+  // NFC: macOS filenames are NFD, typed link text NFC — keys must agree.
+  const norm = (s) => s.trim().toLowerCase().normalize('NFC');
   const add = (name, path) => {
-    const key = name.trim().toLowerCase();
+    const key = norm(name);
     if (!key) return;
     const cur = byName.get(key);
     if (!cur || path.length < cur.length || (path.length === cur.length && path < cur)) byName.set(key, path);
@@ -393,7 +400,7 @@ export function resolveWikilinks(htmlStr, pages) {
       const name = (hash < 0 ? raw : raw.slice(0, hash)).trim();
       const anchor = hash < 0 ? '' : raw.slice(hash + 1).trim();
       const text = escapeHtml((label || raw).trim());
-      const path = byName.get(name.toLowerCase());
+      const path = byName.get(norm(name));
       return path
         ? `<a class="ck-wikilink" data-path="${escapeHtml(path)}"${anchor ? ` data-anchor="${escapeHtml(anchor)}"` : ''}>${text}</a>`
         : `<a class="ck-wikilink ck-wikilink--broken" data-name="${escapeHtml(name)}">${text}</a>`;
