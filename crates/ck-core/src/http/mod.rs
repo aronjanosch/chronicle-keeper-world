@@ -130,6 +130,24 @@ pub fn router(state: AppState) -> Router {
         .route("/campaigns/:id/agent/chats/:cid/abort", post(agent::abort))
         .route("/campaigns/:id/agent/chats/:cid/approve", post(agent::approve))
         .route("/campaigns/:id/agent/chats/:cid/undo", post(agent::undo))
+        .route(
+            "/campaigns/:id/agent/chats/:cid/attachments",
+            get(agent::list_attachments).post(agent::add_attachment),
+        )
+        .route(
+            "/campaigns/:id/agent/chats/:cid/attachments/:aid",
+            axum::routing::delete(agent::delete_attachment),
+        )
+        // the Keeper's memory + World Brief
+        .route("/campaigns/:id/agent/memory", get(agent::list_memory))
+        .route(
+            "/campaigns/:id/agent/memory/:name",
+            delete(agent::delete_memory),
+        )
+        .route(
+            "/campaigns/:id/agent/brief",
+            get(agent::get_brief).post(agent::run_brief),
+        )
         // sessions
         .route("/sessions", get(sessions::list))
         .route("/session/:id", get(sessions::detail))

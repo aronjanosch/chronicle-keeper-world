@@ -205,7 +205,7 @@ function autoGrow(ta) {
 }
 
 // Pixel position of the textarea caret (mirror-div trick) for the [[ autocomplete.
-function caretCoords(ta) {
+export function caretCoords(ta) {
   try {
     const s = getComputedStyle(ta);
     const div = document.createElement('div');

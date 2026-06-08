@@ -18,7 +18,7 @@ use futures_util::Stream;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use crate::agent::{self, chats, checkpoints, AskRequest, Decision, PermissionGate, RealLlm, TurnEvent};
+use crate::agent::{self, attachments, brief, chats, checkpoints, memory, AskRequest, Decision, PermissionGate, RealLlm, TurnEvent};
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
 
@@ -144,6 +144,124 @@ pub async fn undo(
         "restored": restored,
         "remaining": checkpoints::count(&root, &chat_id),
     })))
+}
+
+pub async fn list_attachments(
+    State(state): State<AppState>,
+    Path((campaign_id, chat_id)): Path<(String, String)>,
+) -> AppResult<Json<Value>> {
+    let (root, _) = world_cfg(&state, &campaign_id)?;
+    chats::load_chat(&root, &chat_id)?;
+    Ok(Json(attachments::list_json(&root, &chat_id)))
+}
+
+/// Add an attachment. A body carrying `content` is a dropped file copied into
+/// the world; otherwise it is a live vault reference (`kind` = page/session/
+/// transcript).
+pub async fn add_attachment(
+    State(state): State<AppState>,
+    Path((campaign_id, chat_id)): Path<(String, String)>,
+    Json(body): Json<Value>,
+) -> AppResult<Json<Value>> {
+    let (root, _) = world_cfg(&state, &campaign_id)?;
+    chats::load_chat(&root, &chat_id)?;
+    let att = if let Some(content) = body.get("content").and_then(Value::as_str) {
+        let name = body.get("name").and_then(Value::as_str).unwrap_or("attachment.txt");
+        attachments::add_file(&root, &chat_id, name, content)?
+    } else {
+        attachments::add_ref(&root, &chat_id, &body)?
+    };
+    Ok(Json(serde_json::to_value(att).unwrap_or_default()))
+}
+
+pub async fn delete_attachment(
+    State(state): State<AppState>,
+    Path((campaign_id, chat_id, att_id)): Path<(String, String, String)>,
+) -> AppResult<Json<Value>> {
+    let (root, _) = world_cfg(&state, &campaign_id)?;
+    attachments::remove(&root, &chat_id, &att_id)?;
+    Ok(Json(json!({ "ok": true })))
+}
+
+pub async fn list_memory(
+    State(state): State<AppState>,
+    Path(campaign_id): Path<String>,
+) -> AppResult<Json<Value>> {
+    let (root, _) = world_cfg(&state, &campaign_id)?;
+    Ok(Json(memory::list_json(&root)))
+}
+
+pub async fn delete_memory(
+    State(state): State<AppState>,
+    Path((campaign_id, name)): Path<(String, String)>,
+) -> AppResult<Json<Value>> {
+    let (root, _) = world_cfg(&state, &campaign_id)?;
+    memory::delete_memory(&root, &name).map_err(AppError::BadRequest)?;
+    Ok(Json(json!({ "ok": true })))
+}
+
+pub async fn get_brief(
+    State(state): State<AppState>,
+    Path(campaign_id): Path<String>,
+) -> AppResult<Json<Value>> {
+    let (root, cfg) = world_cfg(&state, &campaign_id)?;
+    Ok(Json(brief::status(&root, &cfg)))
+}
+
+#[derive(Deserialize)]
+pub struct BriefRequest {
+    pub provider: Option<String>,
+    pub model: Option<String>,
+    pub base_url: Option<String>,
+}
+
+pub async fn run_brief(
+    State(state): State<AppState>,
+    Path(campaign_id): Path<String>,
+    Json(req): Json<BriefRequest>,
+) -> AppResult<Sse<impl Stream<Item = Result<Event, Infallible>>>> {
+    let (root, cfg) = world_cfg(&state, &campaign_id)?;
+    let resolved = state.with_db(|conn| {
+        let app_cfg = crate::config::get_config_map(conn)?;
+        crate::llm::resolve(
+            conn,
+            &app_cfg,
+            req.provider.as_deref(),
+            req.model.as_deref(),
+            req.base_url.as_deref(),
+        )
+    })?;
+    let cancel = claim_run(&state, &campaign_id)?;
+
+    let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<Event>();
+    let st = state.clone();
+    tokio::spawn(async move {
+        let send = |val: Value| {
+            let ev = Event::default().json_data(&val).unwrap_or_else(|_| Event::default());
+            let _ = tx.send(ev);
+        };
+        let llm = RealLlm { resolved };
+        let result = brief::run_brief(&st, &root, &cfg, &llm, &cancel, |e| match e {
+            TurnEvent::TextDelta(t) => send(json!({ "type": "text_delta", "text": t })),
+            TurnEvent::ToolStart { name, args_summary, diff } => {
+                send(json!({ "type": "tool_start", "name": name, "args_summary": args_summary, "diff": diff }))
+            }
+            TurnEvent::ToolResult { name, summary, is_error } => {
+                send(json!({ "type": "tool_result", "name": name, "summary": summary, "is_error": is_error }))
+            }
+        })
+        .await;
+        release_run(&st, &campaign_id);
+        match result {
+            Ok(()) => send(json!({ "type": "turn_done" })),
+            Err(e) => send(json!({ "type": "error", "message": e.to_string() })),
+        }
+    });
+
+    let stream = futures_util::stream::unfold(rx, |mut rx| async move {
+        rx.recv().await.map(|ev| (Ok(ev), rx))
+    });
+    Ok(Sse::new(stream).keep_alive(KeepAlive::default()))
 }
 
 #[derive(Deserialize)]

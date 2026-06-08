@@ -101,7 +101,7 @@ pub fn delete_chat(world_root: &Path, chat_id: &str) -> AppResult<()> {
     std::fs::remove_file(&path)
         .map_err(|e| AppError::Internal(anyhow::anyhow!("delete chat: {e}")))?;
     super::checkpoints::delete_for_chat(world_root, chat_id);
-    // 6.4: also drop attachments.
+    super::attachments::delete_for_chat(world_root, chat_id);
     Ok(())
 }
 

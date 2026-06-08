@@ -135,6 +135,7 @@ export function Sidebar({ variant = 'library', active, campaign }) {
         <${NavItem} key=${m.id} indent=${depth} label=${m.name}
           active=${(store.atlasMapId || store.route.params?.map) === m.id}
           onClick=${() => navigate('atlas', { id: campaign?.campaign_id, map: m.id })} />`)}
+      <${NavItem} icon="feather" label="The Keeper" active=${active === 'keeper'} onClick=${() => navigate('keeper', { id: campaign?.campaign_id })} />
       <${NavHead}>Sessions</${NavHead}>
       <${NavItem} icon="mic" label="Sessions" count=${sessionsCount()} active=${active === 'sessions'} onClick=${() => navigate('sessions', { id: campaign?.campaign_id })} />
       <${NavHead}>Workshop</${NavHead}>
