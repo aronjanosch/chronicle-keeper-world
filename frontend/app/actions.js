@@ -344,10 +344,18 @@ export async function loadVaultDiagnostics(campaignId) {
   return r;
 }
 
-export async function searchVault(q) {
+export async function searchVault(q, facets) {
   const id = store.campaign?.campaign_id;
   if (!id || !q || !q.trim()) return [];
-  const r = await apiFetch(`/campaigns/${id}/vault/search?q=${encodeURIComponent(q)}`).catch(() => null);
+  const params = new URLSearchParams({ q });
+  if (facets) {
+    if (facets.kind) params.set('kind', facets.kind);
+    if (facets.tag) params.set('tag', facets.tag);
+    if (facets.folder) params.set('folder', facets.folder);
+    if (facets.edited_after) params.set('edited_after', String(facets.edited_after));
+    if (facets.edited_before) params.set('edited_before', String(facets.edited_before));
+  }
+  const r = await apiFetch(`/campaigns/${id}/vault/search?${params}`).catch(() => null);
   return (r && r.results) || [];
 }
 

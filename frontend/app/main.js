@@ -14,6 +14,7 @@ import { SummarizeScreen } from './screens/summarize.js';
 import { CodexUpdateScreen } from './screens/codexUpdate.js';
 import { SettingsScreen } from './screens/settings.js';
 import { CodexScreen } from './screens/codex.js';
+import { SearchScreen } from './screens/search.js';
 import { CodexEntryScreen } from './screens/codexEntry.js';
 import { PageScreen } from './screens/page.js';
 import { SessionsScreen } from './screens/sessions.js';
@@ -67,6 +68,7 @@ function App() {
     case 'codexUpdate': screen = html`<${CodexUpdateScreen} store=${store} />`; break;
     case 'settings': screen = html`<${SettingsScreen} store=${store} />`; break;
     case 'codex': screen = html`<${CodexScreen} store=${store} />`; break;
+    case 'search': screen = html`<${SearchScreen} store=${store} />`; break;
     case 'sessions': screen = html`<${SessionsScreen} store=${store} />`; break;
     case 'codexEntry': screen = html`<${CodexEntryScreen} store=${store} />`; break;
     case 'page': screen = html`<${PageScreen} store=${store} />`; break;

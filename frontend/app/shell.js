@@ -130,6 +130,7 @@ export function Sidebar({ variant = 'library', active, campaign }) {
       <${NavHead}>World</${NavHead}>
       <${NavItem} icon="compass" label="Overview" active=${active === 'overview'} onClick=${() => navigate('campaign', { id: campaign?.campaign_id })} />
       <${NavItem} icon="book" label="The Codex" count=${codexCount(campaign)} active=${active === 'codex'} onClick=${() => navigate('codex', { id: campaign?.campaign_id })} />
+      <${NavItem} icon="search" label="Search" active=${active === 'search'} onClick=${() => navigate('search', { id: campaign?.campaign_id })} />
       <${NavItem} icon="map" label="Atlas" active=${active === 'atlas'} onClick=${() => navigate('atlas', { id: campaign?.campaign_id })} />
       ${active === 'atlas' && mapTreeRows(store.atlasMaps || []).map(({ map: m, depth }) => html`
         <${NavItem} key=${m.id} indent=${depth} label=${m.name}

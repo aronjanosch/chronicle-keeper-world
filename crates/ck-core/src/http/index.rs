@@ -51,6 +51,11 @@ pub async fn diagnostics(
 pub struct SearchQuery {
     #[serde(default)]
     pub q: String,
+    pub kind: Option<String>,
+    pub tag: Option<String>,
+    pub folder: Option<String>,
+    pub edited_after: Option<i64>,
+    pub edited_before: Option<i64>,
 }
 
 pub async fn search(
@@ -59,8 +64,15 @@ pub async fn search(
     Query(query): Query<SearchQuery>,
 ) -> AppResult<Json<Value>> {
     let root = vault_root(&state, &campaign_id)?;
+    let facets = index::SearchFacets {
+        kind: query.kind.filter(|s| !s.is_empty()),
+        tag: query.tag.filter(|s| !s.is_empty()),
+        folder: query.folder.filter(|s| !s.is_empty()),
+        edited_after: query.edited_after,
+        edited_before: query.edited_before,
+    };
     state.with_index(&root, |conn| {
-        Ok(Json(json!({ "results": index::search(conn, &query.q)? })))
+        Ok(Json(json!({ "results": index::search_faceted(conn, &query.q, &facets)? })))
     })?
 }
 

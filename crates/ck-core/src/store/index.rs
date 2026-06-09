@@ -571,7 +571,32 @@ pub struct SearchHit {
     pub snippet: String,
 }
 
+/// Optional facets narrowing a full-text search. Applied in SQL so ranking and
+/// the 50-hit cap stay correct (client-side filtering would drop capped hits).
+#[derive(Debug, Default)]
+pub struct SearchFacets {
+    pub kind: Option<String>,
+    pub tag: Option<String>,
+    pub folder: Option<String>,
+    pub edited_after: Option<i64>,
+    pub edited_before: Option<i64>,
+}
+
+impl SearchFacets {
+    pub fn is_empty(&self) -> bool {
+        self.kind.is_none()
+            && self.tag.is_none()
+            && self.folder.is_none()
+            && self.edited_after.is_none()
+            && self.edited_before.is_none()
+    }
+}
+
 pub fn search(conn: &Connection, q: &str) -> AppResult<Vec<SearchHit>> {
+    search_faceted(conn, q, &SearchFacets::default())
+}
+
+pub fn search_faceted(conn: &Connection, q: &str, facets: &SearchFacets) -> AppResult<Vec<SearchHit>> {
     let q = q.trim();
     if q.is_empty() {
         return Ok(Vec::new());
@@ -583,12 +608,41 @@ pub fn search(conn: &Connection, q: &str) -> AppResult<Vec<SearchHit>> {
         .map(|t| format!("\"{}\"*", t.replace('"', "")))
         .collect::<Vec<_>>()
         .join(" ");
-    let mut stmt = conn.prepare(
+
+    let mut sql = String::from(
         "SELECT f.path, p.title, p.kind, p.summary, snippet(pages_fts, 3, '<b>', '</b>', '…', 12) \
          FROM pages_fts f JOIN pages p ON p.path = f.path \
-         WHERE pages_fts MATCH ?1 ORDER BY rank LIMIT 50",
-    )?;
-    let rows = stmt.query_map(params![fts_query], |r| {
+         WHERE pages_fts MATCH ?1",
+    );
+    let mut binds: Vec<Box<dyn rusqlite::types::ToSql>> = vec![Box::new(fts_query)];
+    if let Some(kind) = &facets.kind {
+        binds.push(Box::new(kind.clone()));
+        sql.push_str(&format!(" AND p.kind = ?{}", binds.len()));
+    }
+    if let Some(tag) = &facets.tag {
+        binds.push(Box::new(tag.clone()));
+        sql.push_str(&format!(
+            " AND EXISTS (SELECT 1 FROM page_tags t WHERE t.page_path = f.path AND t.tag = ?{})",
+            binds.len()
+        ));
+    }
+    if let Some(folder) = &facets.folder {
+        binds.push(Box::new(format!("{}/%", folder.trim_end_matches('/'))));
+        sql.push_str(&format!(" AND f.path LIKE ?{}", binds.len()));
+    }
+    if let Some(after) = facets.edited_after {
+        binds.push(Box::new(after));
+        sql.push_str(&format!(" AND p.modified_at >= ?{}", binds.len()));
+    }
+    if let Some(before) = facets.edited_before {
+        binds.push(Box::new(before));
+        sql.push_str(&format!(" AND p.modified_at <= ?{}", binds.len()));
+    }
+    sql.push_str(" ORDER BY rank LIMIT 50");
+
+    let mut stmt = conn.prepare(&sql)?;
+    let bind_refs: Vec<&dyn rusqlite::types::ToSql> = binds.iter().map(|b| b.as_ref()).collect();
+    let rows = stmt.query_map(bind_refs.as_slice(), |r| {
         Ok(SearchHit {
             path: r.get(0)?,
             title: r.get(1)?,
@@ -906,6 +960,35 @@ mod tests {
         assert!(search(&conn, "\"weird:[query]").unwrap().is_empty()); // no syntax error
         let tags = tag_counts(&conn).unwrap();
         assert_eq!(tags.len(), 2);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn faceted_search_narrows() {
+        let dir = tmp_vault("facets");
+        write(&dir, "Towns/Bree.md", "---\nkind: place\ntags: [town]\n---\nA muddy crossroads town.\n");
+        write(&dir, "People/Barliman.md", "---\nkind: npc\ntags: [town]\n---\nInnkeeper of the muddy town.\n");
+        let conn = open_index(&dir).unwrap();
+        rebuild(&conn, &dir).unwrap();
+
+        // bare query matches both
+        assert_eq!(search(&conn, "muddy").unwrap().len(), 2);
+        // kind facet
+        let f = SearchFacets { kind: Some("place".into()), ..Default::default() };
+        let hits = search_faceted(&conn, "muddy", &f).unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].path, "Towns/Bree.md");
+        // folder facet (prefix)
+        let f = SearchFacets { folder: Some("People".into()), ..Default::default() };
+        let hits = search_faceted(&conn, "muddy", &f).unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].path, "People/Barliman.md");
+        // tag facet matches both
+        let f = SearchFacets { tag: Some("town".into()), ..Default::default() };
+        assert_eq!(search_faceted(&conn, "muddy", &f).unwrap().len(), 2);
+        // date facet in the future excludes everything
+        let f = SearchFacets { edited_after: Some(i64::MAX), ..Default::default() };
+        assert!(search_faceted(&conn, "muddy", &f).unwrap().is_empty());
         std::fs::remove_dir_all(&dir).ok();
     }
 

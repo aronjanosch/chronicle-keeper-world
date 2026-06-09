@@ -18,6 +18,14 @@ export function useGlobalHotkeys() {
         if (open) closeModal();
         else if (!store.modal) openModal('commandPalette');
       }
+      // ⌘⇧F — jump to the standing search screen (Phase 7b). Reserved global;
+      // the editor keeps ⌘F for in-document find (Phase 7.5).
+      else if ((e.metaKey || e.ctrlKey) && e.shiftKey && !e.altKey && (e.key === 'f' || e.key === 'F')) {
+        if (!store.campaign?.campaign_id) return;
+        e.preventDefault();
+        if (store.modal?.kind === 'commandPalette') closeModal();
+        navigate('search', { id: store.campaign.campaign_id });
+      }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -134,6 +142,7 @@ function CommandPalette() {
   const actionDefs = cid ? [
     { icon: 'plus', label: 'New page', run: () => { closeModal(); newPage(); } },
     { icon: 'folder', label: 'New folder', run: () => { closeModal(); newFolder(); } },
+    { icon: 'search', label: query ? `Search the world for “${q.trim()}”` : 'Search the world', run: () => { closeModal(); navigate('search', { id: cid, q: q.trim() }); } },
     { icon: 'book', label: 'Go to Codex', run: go('codex', { id: cid }) },
     { icon: 'map', label: 'Go to Atlas', run: go('atlas', { id: cid }) },
     { icon: 'feather', label: 'Go to the Keeper', run: go('keeper', { id: cid }) },
