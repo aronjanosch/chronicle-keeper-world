@@ -1,7 +1,7 @@
 // ⌘K command palette + the app's only global hotkey dispatcher (Phase 7a).
 // Pure frontend over shipped endpoints: fuzzy page jump (name + alias),
 // full-text hits, tag jump, recent pages, and a handful of nav/create actions.
-import { html, useState, useEffect, useRef } from '../vendor/htm-preact-standalone.mjs';
+import { html, useState, useEffect, useRef } from '../../vendor/htm-preact-standalone.mjs';
 import { store, navigate, openModal, closeModal, recentPages } from '../core.js';
 import { Icon } from '../ui.js';
 import { searchVault, loadVaultTags, createVaultPage, createVaultFolder } from '../actions.js';
