@@ -6,8 +6,14 @@ import { html, useState, useEffect, useRef } from '../../vendor/htm-preact-stand
 import { navigate, useStore } from '../core.js';
 import { Shell, Sidebar, Topbar } from '../shell.js';
 import { Icon, Input, Empty } from '../ui.js';
-import { searchVault, loadVaultTree, loadVaultTags } from '../actions.js';
+import { searchVault, searchSessions, loadVaultTree, loadVaultTags, refreshCampaignSessions } from '../actions.js';
 import { KINDS, iconForKind, dirOf } from './codex.js';
+
+const SCOPES = [
+  { value: 'pages', label: 'Pages', icon: 'book' },
+  { value: 'summaries', label: 'Summaries', icon: 'scroll' },
+  { value: 'transcripts', label: 'Transcripts', icon: 'mic' },
+];
 
 const DATE_PRESETS = [
   { value: 'any', label: 'Any time' },
@@ -40,6 +46,7 @@ export function SearchScreen() {
   const c = store.campaign;
   const cid = c?.campaign_id;
   const [q, setQ] = useState(store.route.params?.q || '');
+  const [scope, setScope] = useState('pages');
   const [kind, setKind] = useState(null);
   const [tag, setTag] = useState(null);
   const [folder, setFolder] = useState(null);
@@ -49,7 +56,7 @@ export function SearchScreen() {
   const timer = useRef(null);
   const inputRef = useRef(null);
 
-  useEffect(() => { if (cid) { loadVaultTree(cid); loadVaultTags(cid); } inputRef.current?.focus(); }, [cid]);
+  useEffect(() => { if (cid) { loadVaultTree(cid); loadVaultTags(cid); refreshCampaignSessions(); } inputRef.current?.focus(); }, [cid]);
 
   const query = q.trim();
   const facets = (() => {
@@ -68,11 +75,12 @@ export function SearchScreen() {
     if (!cid || query.length < 2) { setResults([]); setLoading(false); return; }
     setLoading(true);
     timer.current = setTimeout(() => {
-      searchVault(query, facets).then((hits) => { setResults(hits || []); setLoading(false); })
+      const p = scope === 'pages' ? searchVault(query, facets) : searchSessions(query, scope);
+      p.then((hits) => { setResults(hits || []); setLoading(false); })
         .catch(() => { setResults([]); setLoading(false); });
     }, 220);
     return () => { if (timer.current) clearTimeout(timer.current); };
-  }, [query, facetKey, cid]);
+  }, [query, facetKey, scope, cid]);
 
   if (!c) { navigate('library'); return null; }
 
@@ -80,6 +88,10 @@ export function SearchScreen() {
   const folders = (store.vaultFolders || []).map((f) => f.path).filter(Boolean).sort();
   const activeFacets = Object.keys(facets).length;
   const clearFacets = () => { setKind(null); setTag(null); setFolder(null); setDatePreset('any'); };
+
+  // Session hits carry a session *number*; the session screen wants its id.
+  const idByNumber = new Map((store.campaignSessions || []).map((s) => [s.session_number, s.session_id]));
+  const openSession = (h) => { const sid = idByNumber.get(h.session); if (sid) navigate('session', { id: sid }); };
 
   const sidebar = html`<${Sidebar} variant="campaign" active="search" campaign=${c} />`;
   const topbar = html`<${Topbar} crumbs=${[
@@ -96,12 +108,19 @@ export function SearchScreen() {
       <div style=${{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', background: 'var(--surface-raised)', border: '1px solid var(--rule)', borderRadius: 10, marginBottom: 16 }}>
         <${Icon} name="search" size=${16} className="ck-ink-faint" />
         <input ref=${inputRef} value=${q} onInput=${(e) => setQ(e.target.value)}
-          placeholder="Search page titles, summaries, and body text…"
+          placeholder=${scope === 'pages' ? 'Search page titles, summaries, and body text…' : `Search session ${scope}…`}
           style=${{ flex: 1, border: 'none', outline: 'none', background: 'transparent', fontSize: 15, color: 'var(--ink)', fontFamily: 'inherit' }} />
         ${q && html`<span onClick=${() => setQ('')} title="Clear" style=${{ color: 'var(--ink-faint)', cursor: 'pointer', display: 'flex' }}><${Icon} name="x" size=${14} /></span>`}
       </div>
 
-      <div style=${{ background: 'var(--surface)', border: '1px solid var(--rule-soft)', borderRadius: 8, padding: '12px 14px', marginBottom: 18 }}>
+      <div style=${{ display: 'flex', gap: 4, padding: 3, background: 'var(--surface)', border: '1px solid var(--rule)', borderRadius: 6, marginBottom: 14, width: 'fit-content' }}>
+        ${SCOPES.map((s) => html`<button key=${s.value} onClick=${() => setScope(s.value)}
+          style=${{ padding: '5px 12px', borderRadius: 3, whiteSpace: 'nowrap', border: 'none', cursor: 'pointer', fontSize: 12, display: 'flex', alignItems: 'center', gap: 6,
+            background: scope === s.value ? 'var(--paper-deep)' : 'transparent', color: scope === s.value ? 'var(--ink)' : 'var(--ink-muted)' }}>
+          <${Icon} name=${s.icon} size=${12} /> ${s.label}</button>`)}
+      </div>
+
+      ${scope === 'pages' && html`<div style=${{ background: 'var(--surface)', border: '1px solid var(--rule-soft)', borderRadius: 8, padding: '12px 14px', marginBottom: 18 }}>
         <${FacetRow} label="Kind">
           ${KINDS.map((k) => html`<${Chip} key=${k.value} icon=${iconForKind(k.value)}
             active=${kind === k.value} onClick=${() => setKind(kind === k.value ? null : k.value)}>${k.label}</${Chip}>`)}
@@ -124,31 +143,45 @@ export function SearchScreen() {
         ${activeFacets > 0 && html`<div style=${{ marginTop: 4 }}>
           <button onClick=${clearFacets} style=${{ fontSize: 11.5, color: 'var(--burgundy)', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>Clear filters</button>
         </div>`}
-      </div>
+      </div>`}
 
       ${query.length < 2
-        ? html`<${Empty} icon="search" title="Search your world">Type at least two characters. Narrow with the kind, tag, folder, and date filters above — they apply in the index so ranking stays exact.</${Empty}>`
+        ? html`<${Empty} icon="search" title="Search your world">Type at least two characters.${scope === 'pages' ? ' Narrow with the kind, tag, folder, and date filters above — they apply in the index so ranking stays exact.' : ` Searching session ${scope}.`}</${Empty}>`
         : loading
           ? html`<div style=${{ fontSize: 12.5, color: 'var(--ink-faint)', fontStyle: 'italic', padding: '8px 0' }}>Searching…</div>`
           : results.length === 0
-            ? html`<div style=${{ fontSize: 12.5, color: 'var(--ink-faint)', fontStyle: 'italic', padding: '8px 0' }}>No matches${activeFacets ? ' with these filters' : ''}.</div>`
+            ? html`<div style=${{ fontSize: 12.5, color: 'var(--ink-faint)', fontStyle: 'italic', padding: '8px 0' }}>No matches${scope === 'pages' && activeFacets ? ' with these filters' : ''}.</div>`
             : html`<div>
-                <div style=${{ fontSize: 11.5, color: 'var(--ink-faint)', marginBottom: 10 }}>${results.length}${results.length === 50 ? '+' : ''} result${results.length === 1 ? '' : 's'}</div>
-                ${results.map((h) => html`<div key=${h.path} onClick=${() => navigate('page', { path: h.path })}
-                  style=${{ padding: '11px 14px', border: '1px solid var(--rule)', borderRadius: 8, marginBottom: 8, cursor: 'pointer', background: 'var(--surface)' }}
-                  onMouseEnter=${(e) => { e.currentTarget.style.borderColor = 'var(--rule-strong)'; }}
-                  onMouseLeave=${(e) => { e.currentTarget.style.borderColor = 'var(--rule)'; }}>
-                  <div style=${{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <${Icon} name=${iconForKind(h.kind)} size=${13} className="ck-ink-muted" />
-                    <span style=${{ fontFamily: 'var(--font-display)', fontSize: 14.5, fontWeight: 500, color: 'var(--ink)' }}>${h.title}</span>
-                    <span style=${{ flex: 1 }} />
-                    <span style=${{ fontSize: 10.5, color: 'var(--ink-faint)', fontFamily: 'var(--font-mono)', display: 'flex', alignItems: 'center', gap: 4 }}>
-                      <${Icon} name="folder" size=${10} />${dirOf(h.path) || 'root'}
-                    </span>
-                  </div>
-                  ${h.snippet && html`<div style=${{ fontSize: 12.5, color: 'var(--ink-soft)', marginTop: 5, lineHeight: 1.5 }}
-                    dangerouslySetInnerHTML=${{ __html: h.snippet }} />`}
-                </div>`)}
+                <div style=${{ fontSize: 11.5, color: 'var(--ink-faint)', marginBottom: 10 }}>${results.length}${results.length >= 50 ? '+' : ''} result${results.length === 1 ? '' : 's'}</div>
+                ${scope === 'pages'
+                  ? results.map((h) => html`<div key=${h.path} onClick=${() => navigate('page', { path: h.path })}
+                      style=${{ padding: '11px 14px', border: '1px solid var(--rule)', borderRadius: 8, marginBottom: 8, cursor: 'pointer', background: 'var(--surface)' }}
+                      onMouseEnter=${(e) => { e.currentTarget.style.borderColor = 'var(--rule-strong)'; }}
+                      onMouseLeave=${(e) => { e.currentTarget.style.borderColor = 'var(--rule)'; }}>
+                      <div style=${{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <${Icon} name=${iconForKind(h.kind)} size=${13} className="ck-ink-muted" />
+                        <span style=${{ fontFamily: 'var(--font-display)', fontSize: 14.5, fontWeight: 500, color: 'var(--ink)' }}>${h.title}</span>
+                        <span style=${{ flex: 1 }} />
+                        <span style=${{ fontSize: 10.5, color: 'var(--ink-faint)', fontFamily: 'var(--font-mono)', display: 'flex', alignItems: 'center', gap: 4 }}>
+                          <${Icon} name="folder" size=${10} />${dirOf(h.path) || 'root'}
+                        </span>
+                      </div>
+                      ${h.snippet && html`<div style=${{ fontSize: 12.5, color: 'var(--ink-soft)', marginTop: 5, lineHeight: 1.5 }}
+                        dangerouslySetInnerHTML=${{ __html: h.snippet }} />`}
+                    </div>`)
+                  : results.map((h, i) => html`<div key=${i} onClick=${() => openSession(h)}
+                      style=${{ padding: '11px 14px', border: '1px solid var(--rule)', borderRadius: 8, marginBottom: 8, cursor: 'pointer', background: 'var(--surface)' }}
+                      onMouseEnter=${(e) => { e.currentTarget.style.borderColor = 'var(--rule-strong)'; }}
+                      onMouseLeave=${(e) => { e.currentTarget.style.borderColor = 'var(--rule)'; }}>
+                      <div style=${{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <${Icon} name=${scope === 'transcripts' ? 'mic' : 'scroll'} size=${13} className="ck-ink-muted" />
+                        <span style=${{ fontFamily: 'var(--font-display)', fontSize: 14.5, fontWeight: 500, color: 'var(--ink)' }}>Session ${h.session}${h.title ? ` — ${h.title}` : ''}</span>
+                        <span style=${{ flex: 1 }} />
+                        ${h.turn != null && html`<span style=${{ fontSize: 10.5, color: 'var(--ink-faint)', fontFamily: 'var(--font-mono)' }}>turn ${h.turn}</span>`}
+                      </div>
+                      ${h.snippet && html`<div style=${{ fontSize: 12.5, color: 'var(--ink-soft)', marginTop: 5, lineHeight: 1.5 }}
+                        dangerouslySetInnerHTML=${{ __html: h.snippet }} />`}
+                    </div>`)}
               </div>`}
     </div>
   </${Shell}>`;

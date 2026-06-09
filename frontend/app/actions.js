@@ -359,6 +359,14 @@ export async function searchVault(q, facets) {
   return (r && r.results) || [];
 }
 
+export async function searchSessions(q, scope) {
+  const id = store.campaign?.campaign_id;
+  if (!id || !q || !q.trim()) return [];
+  const params = new URLSearchParams({ q, scope: scope || 'summaries' });
+  const r = await apiFetch(`/campaigns/${id}/sessions/search?${params}`).catch(() => null);
+  return (r && r.results) || [];
+}
+
 export async function loadVaultTags(campaignId) {
   const id = campaignId || store.campaign?.campaign_id;
   if (!id) return [];

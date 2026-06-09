@@ -76,6 +76,31 @@ pub async fn search(
     })?
 }
 
+#[derive(Deserialize)]
+pub struct SessionSearchQuery {
+    #[serde(default)]
+    pub q: String,
+    /// "summaries" (default) or "transcripts".
+    pub scope: Option<String>,
+}
+
+/// Full-text-ish search over session summaries / raw transcripts (Phase 7d).
+/// These records are files, not in the page FTS index, so this is a substring
+/// scan rather than a ranked query.
+pub async fn session_search(
+    State(state): State<AppState>,
+    Path(campaign_id): Path<String>,
+    Query(query): Query<SessionSearchQuery>,
+) -> AppResult<Json<Value>> {
+    let (root, _) = super::vault::world_cfg(&state, &campaign_id)?;
+    let hits = if query.scope.as_deref() == Some("transcripts") {
+        crate::session_search::search_transcripts(&root, &query.q)
+    } else {
+        crate::session_search::search_summaries(&root, &query.q)
+    };
+    Ok(Json(json!({ "results": hits })))
+}
+
 pub async fn tags(
     State(state): State<AppState>,
     Path(campaign_id): Path<String>,

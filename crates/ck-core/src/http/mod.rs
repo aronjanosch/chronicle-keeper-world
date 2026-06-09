@@ -114,6 +114,7 @@ pub fn router(state: AppState) -> Router {
         .route("/campaigns/:id/vault/diagnostics", get(index::diagnostics))
         .route("/campaigns/:id/vault/index/tags", get(index::tags))
         .route("/campaigns/:id/vault/search", get(index::search))
+        .route("/campaigns/:id/sessions/search", get(index::session_search))
         // the Keeper (Phase 6): agent chats
         .route(
             "/campaigns/:id/agent/chats",
