@@ -16,8 +16,10 @@ use crate::state::AppState;
 use crate::world_config::WorldConfig;
 
 const MAX_ITERATIONS: usize = 20;
-/// Output cap (~1.5k tokens at ~3 chars/token), matching context.rs::BRIEF_CAP.
-const BRIEF_BODY_CAP: usize = 4_500;
+/// Output cap (~2k tokens at ~3 chars/token), matching context.rs::BRIEF_CAP.
+/// Raised from 1.5k to give the structured `## Current state` section room
+/// without crowding out the narrative sections.
+const BRIEF_BODY_CAP: usize = 6_000;
 
 const INIT_PROMPT: &str = "You are the Keeper, reading up on this world to write its World Brief — \
 a concise reference you and the app will inject into future prompts.\n\n\
@@ -26,8 +28,18 @@ pages (get_backlinks helps find them), list_sessions and read the newest session
 (read_summary), read_recap if present. Ground everything in what you actually read.\n\n\
 Then write the brief as your final message — markdown, no tool calls — with exactly these sections \
 (omit a heading only if you truly found nothing for it):\n\
-## Setting in brief\n## The party\n## Major NPCs & factions\n## The story so far\n## Where things stand\n## Codex conventions observed\n\n\
-Keep it tight — about 1500 tokens total. Describe, never instruct. Do not invent: if the world is \
+## Setting in brief\n## The party\n## Major NPCs & factions\n## The story so far\n## Where things stand\n## Current state\n## Codex conventions observed\n\n\
+The sections above ## Current state are narrative prose. ## Current state is different: it is the \
+structured operational snapshot of the campaign — write it as compact lists and key-value lines, \
+NOT prose. It has exactly these four sub-headings:\n\
+- **Party** — one line per player character: their status and current focus.\n\
+- **Inventory** — group-owned items, each with a one-word function.\n\
+- **Faction stances** — one line per relevant faction: its stance toward the party.\n\
+- **Open threads** — a prioritised list of unresolved threads, each kept short.\n\
+For ## Current state specifically: include only what the Codex or session records actually support \
+— structured fields tempt invention, so leave a line out rather than guess. Describe state, do not \
+log events: write \"in hiding\" not \"hid in session 7\". (Worldbuilding is not session-state.)\n\n\
+Keep it tight — about 1800 tokens total. Describe, never instruct. Do not invent: if the world is \
 nearly empty, say so briefly.";
 
 /// One read-only run that produces and persists BRIEF.md. Streams the same

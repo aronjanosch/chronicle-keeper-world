@@ -9,8 +9,8 @@ use crate::world_config::WorldConfig;
 
 // ~3 chars/token (conservative for German + proper names, same as llm/mod.rs).
 const AGENTS_MD_CAP: usize = 6_000; // ~2k tokens
-const BRIEF_CAP: usize = 4_500; // ~1.5k tokens
-const PAGE_LIST_CAP: usize = 6_000; // ~2k tokens
+const BRIEF_CAP: usize = 6_000; // ~2k tokens (matches brief::BRIEF_BODY_CAP)
+const PAGE_LIST_CAP: usize = 12_000; // ~4k tokens (~150 pages with summaries)
 const RECENT_SESSIONS: usize = 10;
 
 /// Layers 0–2: identity (config.toml) + standing instructions (AGENTS.md) +
@@ -129,35 +129,43 @@ pub fn digest(world_root: &Path, cfg: &WorldConfig) -> String {
     let mut out = String::from("## Codex digest\n\n");
     out.push_str(&format!("{} pages.\n", pages.len()));
 
-    let full_list: String = pages
+    let kind_of = |p: &vault::PageInfo| match p.kind.as_deref().unwrap_or("") {
+        "" => String::new(),
+        k => format!(" [{k}]"),
+    };
+    let with_summaries: String = pages
         .iter()
         .map(|p| {
-            let kind = p.kind.as_deref().unwrap_or("");
-            let kind = if kind.is_empty() {
-                String::new()
-            } else {
-                format!(" [{kind}]")
-            };
             let summary = if p.summary.trim().is_empty() {
                 String::new()
             } else {
                 format!(" — {}", p.summary.trim())
             };
-            format!("- {}{kind}{summary}\n", p.path)
+            format!("- {}{}{summary}\n", p.path, kind_of(p))
         })
         .collect();
 
-    if full_list.len() <= PAGE_LIST_CAP {
-        out.push_str(&full_list);
+    // Degrade gracefully: full index with summaries → paths + kind only →
+    // folder tree. The model should keep a map of the Codex whenever it fits.
+    if with_summaries.len() <= PAGE_LIST_CAP {
+        out.push_str(&with_summaries);
     } else {
-        // Too big for one-liners — folder tree only.
-        let mut folders: Vec<String> = vault::list_folders(&vault_root).unwrap_or_default();
-        folders.sort();
-        out.push_str("Folders:\n");
-        for f in folders {
-            out.push_str(&format!("- {f}/\n"));
+        let paths_only: String = pages
+            .iter()
+            .map(|p| format!("- {}{}\n", p.path, kind_of(p)))
+            .collect();
+        if paths_only.len() <= PAGE_LIST_CAP {
+            out.push_str("(summaries omitted to fit — read_page or search_pages for detail)\n");
+            out.push_str(&paths_only);
+        } else {
+            let mut folders: Vec<String> = vault::list_folders(&vault_root).unwrap_or_default();
+            folders.sort();
+            out.push_str("Folders:\n");
+            for f in folders {
+                out.push_str(&format!("- {f}/\n"));
+            }
+            out.push_str("(page list too large — use list_pages / search_pages)\n");
         }
-        out.push_str("(page list too large — use list_pages / search_pages)\n");
     }
 
     let sessions = recent_sessions(world_root);
@@ -293,14 +301,34 @@ mod tests {
     }
 
     #[test]
-    fn digest_falls_back_to_tree_when_list_too_big() {
-        let root = tmp_world("bigdigest");
+    fn digest_drops_summaries_before_dropping_pages() {
+        let root = tmp_world("midtier");
         std::fs::create_dir_all(root.join("Codex/NPCs")).unwrap();
-        let long = "y".repeat(300);
-        for i in 0..30 {
+        let long = "y".repeat(500); // summaries blow the cap, paths don't
+        for i in 0..40 {
             std::fs::write(
                 root.join(format!("Codex/NPCs/Page{i}.md")),
                 format!("---\nsummary: {long}\n---\n\nx\n"),
+            )
+            .unwrap();
+        }
+        let d = digest(&root, &cfg("W"));
+        assert!(d.contains("summaries omitted"));
+        assert!(d.contains("NPCs/Page0.md")); // still a full page map
+        assert!(!d.contains(&long)); // but no summaries
+        assert!(!d.contains("Folders:"));
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn digest_falls_back_to_tree_when_even_paths_too_big() {
+        let root = tmp_world("bigdigest");
+        std::fs::create_dir_all(root.join("Codex/NPCs")).unwrap();
+        let name = "n".repeat(240); // long names so bare paths overflow the cap
+        for i in 0..60 {
+            std::fs::write(
+                root.join(format!("Codex/NPCs/{name}{i}.md")),
+                "---\nsummary: s\n---\n\nx\n",
             )
             .unwrap();
         }

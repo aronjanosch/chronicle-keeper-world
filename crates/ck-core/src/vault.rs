@@ -149,18 +149,6 @@ pub(crate) fn fm_list<'a>(fm: &'a [(String, Vec<String>)], key: &str) -> &'a [St
         .unwrap_or(&[])
 }
 
-fn first_paragraph(body: &str) -> String {
-    body.split("\n\n")
-        .map(str::trim)
-        .find(|p| !p.is_empty() && !p.starts_with('#'))
-        .unwrap_or("")
-        .replace('\n', " ")
-        .trim()
-        .chars()
-        .take(200)
-        .collect()
-}
-
 fn title_of(abs: &Path) -> String {
     abs.file_stem()
         .and_then(|s| s.to_str())
@@ -169,11 +157,13 @@ fn title_of(abs: &Path) -> String {
 }
 
 fn page_from(vault: &Path, abs: &Path, content: String) -> Page {
-    let (fm, body) = split_frontmatter(&content);
+    let (fm, _body) = split_frontmatter(&content);
+    // No `summary:` frontmatter means no summary — never fabricate one from the
+    // body. Plain notes (prep, scratch) legitimately have none.
     let summary = fm_get(&fm, "summary")
         .filter(|s| !s.is_empty())
         .map(str::to_string)
-        .unwrap_or_else(|| first_paragraph(body));
+        .unwrap_or_default();
     Page {
         path: rel_of(vault, abs),
         title: title_of(abs),
@@ -805,10 +795,14 @@ mod tests {
     }
 
     #[test]
-    fn summary_falls_back_to_first_paragraph() {
-        let raw = "---\nkind: lore\n---\n\n# Title\n\nFirst real paragraph here.\n\nSecond.";
-        let (_, body) = split_frontmatter(raw);
-        assert_eq!(first_paragraph(body), "First real paragraph here.");
+    fn summary_empty_when_frontmatter_absent() {
+        let dir = std::env::temp_dir().join(format!("ck-vault-sum-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let abs = dir.join("Note.md");
+        std::fs::write(&abs, "---\nkind: lore\n---\n\n# Title\n\nFirst real paragraph here.").unwrap();
+        let p = page_from(&dir, &abs, std::fs::read_to_string(&abs).unwrap());
+        assert_eq!(p.summary, "");
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
