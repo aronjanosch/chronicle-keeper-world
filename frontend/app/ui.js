@@ -1,5 +1,5 @@
 // Shared atoms ported from the design's atoms.jsx + a few form/primitive helpers.
-import { html } from '../vendor/htm-preact-standalone.mjs';
+import { html, useState, useEffect, useRef } from '../vendor/htm-preact-standalone.mjs';
 import { marked } from '../vendor/marked.esm.js';
 import { navigate } from './core.js';
 
@@ -194,6 +194,46 @@ export function Btn({ kind = 'secondary', icon, iconRight, size, onClick, disabl
     ${children}
     ${iconRight && html`<${Icon} name=${iconRight} size=${size === 'sm' ? 12 : 13} />`}
   </button>`;
+}
+
+// Overflow "kebab" menu — groups secondary actions behind one ⋯ button so a
+// toolbar shows only its primary action. `items`: {label, icon, onClick,
+// danger, disabled, hidden}. `align` anchors the dropdown left|right (default right).
+export function Menu({ items, align = 'right', title = 'More actions', label }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  const visible = items.filter((it) => it && !it.hidden);
+  useEffect(() => {
+    if (!open) return undefined;
+    const onDoc = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    const onKey = (e) => { if (e.key === 'Escape') setOpen(false); };
+    document.addEventListener('mousedown', onDoc);
+    document.addEventListener('keydown', onKey);
+    return () => { document.removeEventListener('mousedown', onDoc); document.removeEventListener('keydown', onKey); };
+  }, [open]);
+  if (!visible.length) return null;
+  return html`<div ref=${ref} style=${{ position: 'relative', display: 'inline-flex' }}>
+    <${Btn} kind="ghost" icon=${label ? undefined : 'dots'} iconRight=${label ? 'chev-d' : undefined} title=${title}
+      onClick=${() => setOpen((v) => !v)}>${label || ''}</${Btn}>
+    ${open && html`<div style=${{
+      position: 'absolute', top: 'calc(100% + 4px)', [align]: 0, zIndex: 50, minWidth: 184,
+      background: 'var(--surface-raised)', border: '1px solid var(--rule-strong)', borderRadius: 8,
+      boxShadow: 'var(--shadow-raised)', overflow: 'hidden', padding: 4,
+    }}>
+      ${visible.map((it, i) => html`<button key=${i} type="button" disabled=${it.disabled}
+        onClick=${() => { if (it.disabled) return; setOpen(false); it.onClick?.(); }}
+        style=${{
+          display: 'flex', alignItems: 'center', gap: 9, width: '100%', textAlign: 'left',
+          padding: '7px 9px', borderRadius: 5, border: 'none', background: 'transparent', cursor: it.disabled ? 'default' : 'pointer',
+          fontSize: 13, fontWeight: 500, fontFamily: 'inherit', color: it.danger ? 'var(--burgundy-700)' : 'var(--ink)', opacity: it.disabled ? 0.45 : 1,
+        }}
+        onMouseEnter=${(e) => { if (!it.disabled) e.currentTarget.style.background = it.danger ? 'var(--burgundy-50)' : 'var(--paper-deep)'; }}
+        onMouseLeave=${(e) => { e.currentTarget.style.background = 'transparent'; }}>
+        ${it.icon && html`<${Icon} name=${it.icon} size=${13} />`}
+        <span style=${{ flex: 1 }}>${it.label}</span>
+      </button>`)}
+    </div>`}
+  </div>`;
 }
 
 // ── Field / Input / Textarea / Select ─────────────────────────────

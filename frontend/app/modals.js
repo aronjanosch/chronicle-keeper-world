@@ -2,6 +2,7 @@
 import { html, useState, useEffect } from '../vendor/htm-preact-standalone.mjs';
 import { store, closeModal, navigate, setOp } from './core.js';
 import { Icon, Btn, Field, Input, Textarea, Select, Spinner } from './ui.js';
+import { CommandPalette } from './screens/palette.js';
 import {
   createCampaign, updateCampaign, saveSessionMetadata, loadSession,
   runExport,
@@ -628,6 +629,7 @@ export function ModalHost({ modal }) {
     case 'movePage': return html`<${MovePageModal} ...${modal.props} />`;
     case 'enhanceFolder': return html`<${EnhanceFolderModal} />`;
     case 'vaultDiag': return html`<${VaultDiagnosticsModal} />`;
+    case 'commandPalette': return html`<${CommandPalette} />`;
     case 'exportWorld': return html`<${ExportWorldModal} />`;
     default: return null;
   }

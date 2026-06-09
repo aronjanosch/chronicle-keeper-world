@@ -871,8 +871,8 @@ function AtlasStage({ campaign, maps, initialMapId, initialPinId }) {
           </button>`)}
       </div>
 
-      ${''/* pin palette + Drop-a-pin (bottom-right) */}
-      <div style=${{ position: 'absolute', bottom: 16, right: 16, zIndex: 88, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 10 }}>
+      ${''/* pin palette + Drop-a-pin (bottom-right) — lifted clear of the global Ask-the-Keeper dock button */}
+      <div style=${{ position: 'absolute', bottom: 74, right: 16, zIndex: 88, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 10 }}>
         ${paletteOpen && html`<div style=${{ width: 184, background: 'var(--surface-raised)', border: '1px solid var(--rule-strong)', borderRadius: 10, boxShadow: 'var(--shadow-raised)', overflow: 'hidden' }}>
           <div style=${{ padding: '9px 12px 7px', borderBottom: '1px solid var(--rule-soft)', fontSize: 10.5, fontWeight: 600, letterSpacing: '0.09em', textTransform: 'uppercase', color: 'var(--ink-faint)' }}>New pin · pick a kind</div>
           <div style=${{ padding: 5 }}>

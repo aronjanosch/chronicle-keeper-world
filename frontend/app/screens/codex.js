@@ -5,7 +5,7 @@
 import { html, useState, useEffect, useRef } from '../../vendor/htm-preact-standalone.mjs';
 import { navigate, openModal, useStore } from '../core.js';
 import { Shell, Sidebar, Topbar, useSidebarWidth, ResizeHandle } from '../shell.js';
-import { Btn, Empty, Icon, Markdown, Input, Textarea, Select, BrandMark } from '../ui.js';
+import { Btn, Empty, Icon, Markdown, Input, Textarea, Select, BrandMark, Menu } from '../ui.js';
 import { loadCodexEntries, createCodexEntry, openCampaign, updateCampaign,
   loadCampaignTags, renameCampaignTag, deleteCampaignTag,
   loadVaultTree, createVaultPage, createVaultFolder, moveVaultEntry,
@@ -645,6 +645,9 @@ function VaultView({ campaign }) {
 
   useEffect(() => { loadVaultTree(campaign.campaign_id); loadVaultDiagnostics(campaign.campaign_id); }, [campaign.campaign_id]);
   useEffect(() => { if (view === 'tags') loadVaultTags(campaign.campaign_id); }, [view, campaign.campaign_id]);
+  // Tag jump target from the command palette (navigate('codex', { tag })).
+  const routeTag = store.route.params?.tag;
+  useEffect(() => { if (routeTag) { setView('tags'); setSelTag(routeTag); } }, [routeTag]);
   useEffect(() => watchVault(campaign.campaign_id, () => {
     loadVaultTree(campaign.campaign_id);
     loadVaultTags(campaign.campaign_id);
@@ -680,12 +683,15 @@ function VaultView({ campaign }) {
           </div>
         </div>
         <span style=${{ flex: 1 }} />
-        <${Btn} kind="ghost" size="sm" icon="download" onClick=${importNotesFlow} title="Copy markdown notes (e.g. an Obsidian vault) into this Codex">Import notes</${Btn}>
-        <${Btn} kind="ghost" size="sm" icon="sparkle" onClick=${enhanceFlow} title="Assign kinds and generate summaries for pages that lack them (AI)">Enhance with AI</${Btn}>
-        <div style=${{ display: 'flex', gap: 4, padding: 3, background: 'var(--surface)', border: '1px solid var(--rule)', borderRadius: 5 }}>
-          <button onClick=${() => setView('folders')} style=${{ padding: '5px 9px', borderRadius: 3, background: view === 'folders' ? 'var(--paper-deep)' : 'transparent', color: view === 'folders' ? 'var(--ink)' : 'var(--ink-muted)', fontSize: 12, display: 'flex', alignItems: 'center', gap: 5, cursor: 'pointer' }}><${Icon} name="grid" size=${12} /> Folders</button>
-          <button onClick=${() => { setView('all'); setSel(''); }} style=${{ padding: '5px 9px', borderRadius: 3, background: view === 'all' ? 'var(--paper-deep)' : 'transparent', color: view === 'all' ? 'var(--ink)' : 'var(--ink-muted)', fontSize: 12, display: 'flex', alignItems: 'center', gap: 5, cursor: 'pointer' }}><${Icon} name="scroll" size=${12} /> All pages</button>
-          <button onClick=${() => { setView('tags'); setSel(''); }} style=${{ padding: '5px 9px', borderRadius: 3, background: view === 'tags' ? 'var(--paper-deep)' : 'transparent', color: view === 'tags' ? 'var(--ink)' : 'var(--ink-muted)', fontSize: 12, display: 'flex', alignItems: 'center', gap: 5, cursor: 'pointer' }}><${Icon} name="tag" size=${12} /> Tags</button>
+        <div style=${{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div style=${{ display: 'flex', gap: 4, padding: 3, background: 'var(--surface)', border: '1px solid var(--rule)', borderRadius: 5 }}>
+            ${[['folders', 'grid', 'Folders'], ['all', 'scroll', 'All pages'], ['tags', 'tag', 'Tags']].map(([v, ic, label]) => html`
+              <button key=${v} onClick=${() => { setView(v); if (v !== 'folders') setSel(''); }} style=${{ padding: '5px 9px', borderRadius: 3, whiteSpace: 'nowrap', background: view === v ? 'var(--paper-deep)' : 'transparent', color: view === v ? 'var(--ink)' : 'var(--ink-muted)', fontSize: 12, display: 'flex', alignItems: 'center', gap: 5, cursor: 'pointer', border: 'none' }}><${Icon} name=${ic} size=${12} /> ${label}</button>`)}
+          </div>
+          <${Menu} items=${[
+            { label: 'Import notes…', icon: 'download', onClick: importNotesFlow },
+            { label: 'Enhance with AI', icon: 'sparkle', onClick: enhanceFlow },
+          ]} />
         </div>
       </div>
 

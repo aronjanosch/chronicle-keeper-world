@@ -4,6 +4,7 @@ import { useStore, loadApiBase, setOp, setState } from './core.js';
 import { loadCampaigns, loadConfig, refreshProviderStatus, checkMigration } from './actions.js';
 import { Icon, Spinner } from './ui.js';
 import { ModalHost } from './modals.js';
+import { useGlobalHotkeys } from './screens/palette.js';
 import { KeeperDock } from './keeperPanel.js';
 import { LibraryScreen } from './screens/library.js';
 import { CampaignScreen } from './screens/campaign.js';
@@ -36,6 +37,7 @@ function OpBanner({ op }) {
 
 function App() {
   const store = useStore();
+  useGlobalHotkeys();
   // Kick off boot loads here (not at module scope): guarantees the store
   // listener is registered before the local server's near-instant responses
   // resolve, so the first paint after data lands actually repaints.

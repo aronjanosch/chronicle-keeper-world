@@ -6,7 +6,7 @@ import { navigate, apiFetch, apiJson, fmtDate } from '../core.js';
 import { Shell, Sidebar, Topbar } from '../shell.js';
 import { Icon, Spinner } from '../ui.js';
 import {
-  keeperState, openChat, newChat, undoLast, ModeSelect, Conversation, sendMessage,
+  keeperState, openChat, newChat, ModeSelect, Conversation, sendMessage,
 } from '../keeperPanel.js';
 import { MemoryView, fetchBriefStatus } from '../keeperMemory.js';
 
@@ -121,7 +121,6 @@ export function KeeperScreen({ store }) {
             ${(chats || []).find((x) => x.id === k.chatId)?.title || 'Chat'}
           </div>
           <${ModeSelect} mode=${k.mode} />
-          <button class="ck-btn" title="Undo the Keeper's last edit in this chat" onClick=${undoLast} disabled=${!!k.live}>Undo</button>
         </div>
         <${Conversation} k=${k} empty=${emptyState} />
       </div>`

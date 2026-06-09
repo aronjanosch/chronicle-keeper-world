@@ -64,7 +64,26 @@ export function useStore() {
 
 // ── Navigation ────────────────────────────────────────────────────
 export function navigate(name, params = {}) {
+  if (name === 'page' && params.path) recordRecentPage(params.path);
   setState({ route: { name, params } });
+}
+
+// ── Recent pages (MRU, per-world, localStorage) ───────────────────
+const RECENT_CAP = 12;
+function recentKey(id) { return `ck_recent_pages_${id}`; }
+export function recentPages(campaignId) {
+  const id = campaignId || store.campaign?.campaign_id;
+  if (!id) return [];
+  try { return JSON.parse(localStorage.getItem(recentKey(id)) || '[]'); }
+  catch (_) { return []; }
+}
+function recordRecentPage(path) {
+  const id = store.campaign?.campaign_id;
+  if (!id) return;
+  try {
+    const next = [path, ...recentPages(id).filter((p) => p !== path)].slice(0, RECENT_CAP);
+    localStorage.setItem(recentKey(id), JSON.stringify(next));
+  } catch (_) { /* private mode */ }
 }
 
 // ── Op banner (transcribe/summarize/export progress + result) ─────

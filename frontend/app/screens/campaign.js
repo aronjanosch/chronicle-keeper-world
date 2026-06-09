@@ -3,7 +3,7 @@ import { html, useState } from '../../vendor/htm-preact-standalone.mjs';
 import { navigate, openModal, fmtDate, fmtDateTime, toneFor } from '../core.js';
 import { deleteCampaign, generateRecap, revealPath } from '../actions.js';
 import { Shell, Sidebar, Topbar } from '../shell.js';
-import { Icon, Sigil, Btn, StagePill, Empty, Markdown } from '../ui.js';
+import { Icon, Sigil, Btn, StagePill, Empty, Markdown, Menu } from '../ui.js';
 import { KINDS, iconForKind } from './codex.js';
 
 // Collapsed height cap for the recap body. Tall recaps would otherwise push
@@ -158,20 +158,22 @@ export function CampaignScreen({ store }) {
     sidebar=${html`<${Sidebar} variant="campaign" active="overview" campaign=${c} />`}
     topbar=${html`<${Topbar} crumbs=${[{ label: 'Worlds', onClick: () => navigate('library') }, c.name]} right=${html`
       <div style=${{ display: 'flex', gap: 8, alignItems: 'center' }}>
-        ${window.__TAURI__ && c.vault_path && html`<${Btn} kind="ghost" icon="folder" title="Reveal the world folder in your file manager" onClick=${() => revealPath(c.vault_path)} />`}
-        ${c.vault_path && html`<${Btn} kind="ghost" icon="download" title="Export the whole world as a ZIP" onClick=${() => openModal('exportWorld')} />`}
-        <${Btn} kind="ghost" icon="edit" onClick=${() => openModal('campaign', { edit: c })}>Edit world</${Btn}>
-        <${Btn} kind="danger" icon="trash" title="Delete world" onClick=${() => {
-          const n = sessions.length;
-          const tail = n ? ` and its ${n} session${n === 1 ? '' : 's'} (transcripts and summaries included)` : '';
-          openModal('confirm', {
-            title: 'Delete world',
-            message: `Delete "${c.name}"${tail}? This cannot be undone.`,
-            confirmLabel: 'Delete world',
-            onConfirm: () => deleteCampaign(c.campaign_id),
-          });
-        }} />
         <${Btn} kind="primary" icon="mic" onClick=${() => navigate('newSession', { id: c.campaign_id })}>New session</${Btn}>
+        <${Menu} items=${[
+          { label: 'Edit world', icon: 'edit', onClick: () => openModal('campaign', { edit: c }) },
+          { label: 'Reveal folder', icon: 'folder', hidden: !(window.__TAURI__ && c.vault_path), onClick: () => revealPath(c.vault_path) },
+          { label: 'Export world…', icon: 'download', hidden: !c.vault_path, onClick: () => openModal('exportWorld') },
+          { label: 'Delete world', icon: 'trash', danger: true, onClick: () => {
+            const n = sessions.length;
+            const tail = n ? ` and its ${n} session${n === 1 ? '' : 's'} (transcripts and summaries included)` : '';
+            openModal('confirm', {
+              title: 'Delete world',
+              message: `Delete "${c.name}"${tail}? This cannot be undone.`,
+              confirmLabel: 'Delete world',
+              onConfirm: () => deleteCampaign(c.campaign_id),
+            });
+          } },
+        ]} />
       </div>`} />`}
   >
     <div style=${{ background: 'var(--surface)', border: '1px solid var(--rule)', borderRadius: 8, padding: '24px 28px', display: 'flex', alignItems: 'flex-start', gap: 24, marginBottom: 24, position: 'relative', overflow: 'hidden' }}>

@@ -508,7 +508,6 @@ export function KeeperDock() {
       <div style=${{ fontFamily: 'var(--font-display)', fontSize: 14, fontWeight: 600, flex: 1 }}>The Keeper</div>
       <${ModeSelect} mode=${k.mode} />
       <button class="ck-btn" title="Open full view" onClick=${() => { patchKeeper({ open: false }); navigateKeeper(); }}>↗</button>
-      <button class="ck-btn" title="Undo the Keeper's last edit in this chat" onClick=${undoLast} disabled=${!!k.live}>Undo</button>
       <button class="ck-btn" title="New chat" onClick=${newChat}>New</button>
       <button onClick=${() => patchKeeper({ open: false })} title="Close (Esc)"
         style=${{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--ink-muted)', display: 'flex' }}>

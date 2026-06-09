@@ -3,7 +3,7 @@ import { html, useState } from '../../vendor/htm-preact-standalone.mjs';
 import { navigate, openModal, fmtDate, fmtDateTime, toneFor } from '../core.js';
 import { deleteArtifact, artifactContent, deleteSession, openCampaign, runTranscribe, saveSessionMetadata, loadSession } from '../actions.js';
 import { Shell, Sidebar, Topbar } from '../shell.js';
-import { Icon, Sigil, Btn, Pipeline, Markdown, Empty } from '../ui.js';
+import { Icon, Sigil, Btn, Pipeline, Markdown, Empty, Menu } from '../ui.js';
 
 function SpeakerChip({ s }) {
   const ch = s.character_name || s.player_name || `track ${s.track_id}`;
@@ -203,21 +203,23 @@ export function SessionScreen({ store }) {
       `Session ${cam.session_number || '?'}`,
     ]} right=${html`
       <div style=${{ display: 'flex', gap: 8, alignItems: 'center' }}>
-        <${Btn} kind="ghost" icon="edit" onClick=${() => openModal('session', { session: sess })}>Edit</${Btn}>
-        <${Btn} kind="danger" icon="trash" title="Delete session" onClick=${() => openModal('confirm', {
-          title: 'Delete session',
-          message: 'Delete this session? This removes its transcripts and summaries permanently.',
-          onConfirm: () => deleteSession(sess.session_id),
-        })} />
         ${tracks.length > 0 && !hasT ? html`<${Btn} kind="secondary" icon="users" onClick=${() => navigate('newSession', { id: cam.campaign_id, attach: sess.session_id })}>Label speakers</${Btn}>` : ''}
-        ${hasT ? html`<${Btn} kind="secondary" icon="mic" onClick=${() => openModal('confirm', {
-          title: 'Re-transcribe session',
-          message: 'Run transcription again? A new transcript is added; existing transcripts are kept.',
-          confirmLabel: 'Re-transcribe',
-          onConfirm: () => runTranscribe(),
-        })}>Re-transcribe</${Btn}>` : ''}
-        <${Btn} kind="secondary" icon="export" disabled=${!hasS} onClick=${() => openModal('export', {})}>Export</${Btn}>
         ${primary}
+        <${Menu} items=${[
+          { label: 'Edit session', icon: 'edit', onClick: () => openModal('session', { session: sess }) },
+          { label: 'Export…', icon: 'export', disabled: !hasS, onClick: () => openModal('export', {}) },
+          { label: 'Re-transcribe', icon: 'mic', hidden: !hasT, onClick: () => openModal('confirm', {
+            title: 'Re-transcribe session',
+            message: 'Run transcription again? A new transcript is added; existing transcripts are kept.',
+            confirmLabel: 'Re-transcribe',
+            onConfirm: () => runTranscribe(),
+          }) },
+          { label: 'Delete session', icon: 'trash', danger: true, onClick: () => openModal('confirm', {
+            title: 'Delete session',
+            message: 'Delete this session? This removes its transcripts and summaries permanently.',
+            onConfirm: () => deleteSession(sess.session_id),
+          }) },
+        ]} />
       </div>`} />`}
   >
     <div style=${{ display: 'flex', alignItems: 'flex-start', gap: 20, marginBottom: 22 }}>
