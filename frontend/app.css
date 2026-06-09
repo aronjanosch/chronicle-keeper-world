@@ -136,15 +136,43 @@ button { font-family: inherit; }
 .ck-callout-title { display: block; font-weight: 600; font-size: 12px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink-muted); margin-bottom: 4px; }
 .ck-prose blockquote[data-callout="secret"] .ck-callout-title { color: var(--burgundy-700); }
 
-/* GM-only spoiler: content blurred until clicked (click again to re-hide) */
-.ck-prose blockquote[data-callout="secret"] { cursor: pointer; position: relative; }
-.ck-prose blockquote[data-callout="secret"]:not(.ck-revealed) > * { filter: blur(5px); user-select: none; pointer-events: none; }
-.ck-prose blockquote[data-callout="secret"]:not(.ck-revealed)::after {
-  content: 'Secret · click to reveal'; position: absolute; inset: 0;
-  display: flex; align-items: center; justify-content: center;
-  font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;
-  color: var(--burgundy-700);
+/* Collapsible callouts (Phase 8B): head (fold toggle) + body; secrets and
+   [!type]- start collapsed */
+.ck-callout-head { display: flex; align-items: center; gap: 7px; cursor: pointer; user-select: none; }
+.ck-callout-head .ck-callout-title { margin-bottom: 0; }
+.ck-callout-chev { width: 0; height: 0; border-left: 5px solid var(--ink-faint); border-top: 4px solid transparent; border-bottom: 4px solid transparent; transition: transform .12s; transform: rotate(90deg); }
+blockquote.ck-collapsed .ck-callout-chev { transform: rotate(0deg); }
+.ck-callout-body { margin-top: 6px; }
+.ck-callout-body > :last-child { margin-bottom: 0; }
+blockquote.ck-collapsed > .ck-callout-body { display: none; }
+
+/* ![[Page]] transclusion (Phase 8A) */
+.ck-transclude {
+  display: block; border: 1px solid var(--rule); border-left: 3px solid var(--burgundy-300);
+  border-radius: 0 6px 6px 0; padding: 10px 14px; margin: 0 0 14px; background: var(--surface-raised);
 }
+.ck-embed-src {
+  display: block; font-size: 10.5px; font-weight: 600; letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--ink-faint); margin-bottom: 6px;
+}
+span.ck-embed-src.ck-wikilink { border-bottom: none; color: var(--ink-faint); cursor: pointer; }
+span.ck-embed-src.ck-wikilink:hover { color: var(--burgundy); }
+.ck-embed-body { display: block; }
+.ck-embed-body > :last-child { margin-bottom: 0; }
+.ck-embed-note { font-size: 12.5px; font-family: var(--font-mono); color: var(--ink-faint); font-style: italic; }
+
+/* ```ck-query live lists (Phase 9C) */
+.ck-query {
+  border: 1px solid var(--rule); border-left: 3px solid var(--ink-blue);
+  border-radius: 0 6px 6px 0; padding: 10px 14px; margin: 0 0 14px; background: var(--surface-raised);
+}
+.ck-query-head {
+  font-size: 10.5px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--ink-faint); font-family: var(--font-mono); margin-bottom: 6px;
+}
+.ck-query ul { margin: 0; padding-left: 18px; }
+.ck-query li { margin: 2px 0; list-style: disc; font-size: 14px; }
+.ck-query-sub { color: var(--ink-muted); font-size: 12.5px; }
 
 /* Wikilinks */
 .ck-prose a.ck-wikilink { color: var(--burgundy); text-decoration: none; border-bottom: 1px solid var(--burgundy-300); cursor: pointer; }

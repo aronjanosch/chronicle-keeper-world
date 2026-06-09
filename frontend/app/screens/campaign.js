@@ -1,7 +1,7 @@
 // Screen 02 — Campaign Overview. Hero + party + codex teaser + sessions list.
-import { html, useState } from '../../vendor/htm-preact-standalone.mjs';
+import { html, useState, useEffect } from '../../vendor/htm-preact-standalone.mjs';
 import { navigate, openModal, fmtDate, fmtDateTime, toneFor } from '../core.js';
-import { deleteCampaign, generateRecap, revealPath } from '../actions.js';
+import { deleteCampaign, generateRecap, revealPath, refreshCampaignSessions } from '../actions.js';
 import { Shell, Sidebar, Topbar } from '../shell.js';
 import { Icon, Sigil, Btn, StagePill, Empty, Markdown, Menu } from '../ui.js';
 import { KINDS, iconForKind } from './codex.js';
@@ -147,6 +147,9 @@ function CodexTeaser({ campaign, entries, vaultPages }) {
 
 export function CampaignScreen({ store }) {
   const c = store.campaign;
+  // Stale-while-revalidate: the list in the store predates sessions created
+  // elsewhere (e.g. a draft saved on the New-Session screen).
+  useEffect(() => { refreshCampaignSessions(); }, [c?.campaign_id]);
   if (!c) return html`<div />`;
   const sessions = store.campaignSessions;
   const players = c.players || [];

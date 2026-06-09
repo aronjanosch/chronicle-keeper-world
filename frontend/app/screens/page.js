@@ -1,15 +1,17 @@
 // The Page — rendered reading view + a CodeMirror 6 source editor (Phase 7.5).
-// Read mode renders the markdown with the right rail (infobox, AI memory, outline,
-// backlinks). Edit mode mounts CM6 over the literal .md (frontmatter + body), with
+// Read mode renders the markdown with a tabbed right rail — Info (infobox, AI
+// memory, tags, map), Links (outline, local graph, links to/from, relations),
+// Chat. Edit mode mounts CM6 over the literal .md (frontmatter + body), with
 // markdown highlight, [[ / #tag autocomplete, ⌘F search, and format shortcuts.
 // Auto-saves to the vault (800ms). See cm.js.
 import { html, useState, useEffect, useRef, useMemo } from '../../vendor/htm-preact-standalone.mjs';
 import { navigate, useStore } from '../core.js';
 import { Shell, Topbar, useSidebarWidth, ResizeHandle } from '../shell.js';
 import { Empty, Icon, PageBody, splitDoc, joinDoc, parseProps } from '../ui.js';
-import { readVaultPage, saveVaultPage, openCampaign, loadVaultTree, loadKindSchemas, loadAtlasMaps, createVaultPage, watchVault, uploadVaultAsset } from '../actions.js';
+import { readVaultPage, saveVaultPage, openCampaign, loadVaultTree, loadKindSchemas, loadAtlasMaps, createVaultPage, watchVault, uploadVaultAsset, loadSnippets, loadRelations } from '../actions.js';
 import { mountEditor } from '../cm.js';
 import { FileTree, buildTree, makeVaultActions, iconForKind, KINDS } from './codex.js';
+import { colorForKind } from '../graph.js';
 import { keeperState, openPanel, Conversation } from '../keeperPanel.js';
 
 function kindLabel(k) {
@@ -207,23 +209,108 @@ function OutlineCard({ outline, scrollRef }) {
   </${RailCard}>`;
 }
 
-function BacklinksCard({ path, pages, links }) {
-  const sources = [...new Set((links || [])
-    .filter((l) => l.target_path === path)
-    .map((l) => l.source_path))];
-  if (!sources.length) return null;
+// Incoming typed relations grouped by predicate (Phase 9B): the other end of
+// `member_of: "[[X]]"` — no manual upkeep of both directions.
+function RelationsCard({ path, pages, relations }) {
+  const incoming = (relations || []).filter((r) => r.target_path === path);
+  if (!incoming.length) return null;
   const byPath = new Map((pages || []).map((p) => [p.path, p]));
-  return html`<${RailCard} icon="link" title="Linked from" right=${String(sources.length)}>
+  const groups = new Map();
+  for (const r of incoming) {
+    if (!groups.has(r.predicate)) groups.set(r.predicate, []);
+    const g = groups.get(r.predicate);
+    if (!g.includes(r.source_path)) g.push(r.source_path);
+  }
+  return html`<${RailCard} icon="backlink" title="Relations" right=${String(incoming.length)}>
+    <div style=${{ display: 'flex', flexDirection: 'column', gap: 9 }}>
+      ${[...groups.entries()].map(([pred, sources]) => html`<div key=${pred}>
+        <div class="ck-infobox-key" style=${{ marginBottom: 3 }}>${pred} ←</div>
+        <div style=${{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+          ${sources.map((src) => {
+            const p = byPath.get(src);
+            return html`<div class="ck-rail-link" key=${src} onClick=${() => navigate('page', { path: src })}>
+              <${Icon} name=${iconForKind(p?.kind)} size=${12} className="ck-ink-muted" />
+              <span>${p?.title || src}</span>
+            </div>`;
+          })}
+        </div>
+      </div>`)}
+    </div>
+  </${RailCard}>`;
+}
+
+// 1-hop local graph (Phase 9D): radial SVG — center page, linked neighbors on
+// a ring. No force sim needed at this size.
+function LocalGraphCard({ path, pages, links, relations }) {
+  const byPath = new Map((pages || []).map((p) => [p.path, p]));
+  const seen = new Set();
+  const neighbors = [];
+  const add = (p, typed) => {
+    if (!p || p === path || seen.has(p)) return;
+    seen.add(p);
+    neighbors.push({ path: p, typed });
+  };
+  for (const l of links || []) {
+    if (l.source_path === path) add(l.target_path, false);
+    else if (l.target_path === path) add(l.source_path, false);
+  }
+  for (const r of relations || []) {
+    if (r.source_path === path) add(r.target_path, true);
+    else if (r.target_path === path) add(r.source_path, true);
+  }
+  if (!neighbors.length) return null;
+  const shown = neighbors.slice(0, 12);
+  const W = 248, H = 170, cx = W / 2, cy = H / 2, R = 62;
+  const me = byPath.get(path);
+  return html`<${RailCard} icon="link" title="Local graph" right=${neighbors.length > 12 ? `12 of ${neighbors.length}` : null}>
+    <svg viewBox=${`0 0 ${W} ${H}`} style=${{ width: '100%', display: 'block' }}>
+      ${shown.map((n, i) => {
+        const a = (i / shown.length) * 2 * Math.PI - Math.PI / 2;
+        const x = cx + R * Math.cos(a), y = cy + R * Math.sin(a);
+        const p = byPath.get(n.path);
+        const label = (p?.title || n.path).slice(0, 14);
+        return html`<g key=${n.path} onClick=${() => navigate('page', { path: n.path })} style=${{ cursor: 'pointer' }}>
+          <line x1=${cx} y1=${cy} x2=${x} y2=${y}
+            stroke=${n.typed ? 'rgba(122,46,31,.5)' : 'rgba(31,24,19,.16)'} stroke-width=${n.typed ? 1.4 : 1} />
+          <circle cx=${x} cy=${y} r="4.5" fill=${colorForKind(p?.kind)} />
+          <text x=${x} y=${y + (y >= cy ? 14 : -8)} text-anchor="middle"
+            style=${{ fontSize: 8.5, fontFamily: 'var(--font-mono)', fill: 'var(--ink-soft)' }}>${label}</text>
+        </g>`;
+      })}
+      <circle cx=${cx} cy=${cy} r="6.5" fill=${colorForKind(me?.kind)} stroke="var(--burgundy-700)" stroke-width="1.5" />
+    </svg>
+  </${RailCard}>`;
+}
+
+// Shared list body for "Linked from" / "Links to".
+function LinkListCard({ title, paths, pages }) {
+  if (!paths.length) return null;
+  const byPath = new Map((pages || []).map((p) => [p.path, p]));
+  return html`<${RailCard} icon="link" title=${title} right=${String(paths.length)}>
     <div style=${{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-      ${sources.map((src) => {
-        const p = byPath.get(src);
-        return html`<div class="ck-rail-link" key=${src} onClick=${() => navigate('page', { path: src })}>
+      ${paths.map((pp) => {
+        const p = byPath.get(pp);
+        return html`<div class="ck-rail-link" key=${pp} onClick=${() => navigate('page', { path: pp })}>
           <${Icon} name=${iconForKind(p?.kind)} size=${12} className="ck-ink-muted" />
-          <span>${p?.title || src}</span>
+          <span>${p?.title || pp}</span>
         </div>`;
       })}
     </div>
   </${RailCard}>`;
+}
+
+function BacklinksCard({ path, pages, links }) {
+  const sources = [...new Set((links || [])
+    .filter((l) => l.target_path === path)
+    .map((l) => l.source_path))];
+  return html`<${LinkListCard} title="Linked from" paths=${sources} pages=${pages} />`;
+}
+
+function OutgoingLinksCard({ path, pages, links }) {
+  const targets = [...new Set((links || [])
+    .filter((l) => l.source_path === path && l.target_path)
+    .map((l) => l.target_path))];
+  return html`<${LinkListCard} title="Links to" paths=${targets} pages=${pages} />`;
 }
 
 function autoGrow(ta) {
@@ -267,14 +354,16 @@ export function caretCoords(ta) {
 
 // CodeMirror 6 source editor — edits the whole .md (frontmatter + body) as literal
 // text. Lazy-mounts the vendored bundle into a div; re-keyed on path/reload by parent.
-function CmEditor({ content, pages, onSave, onCreate, onState }) {
+function CmEditor({ content, pages, snippets, onSave, onCreate, onState }) {
   const hostRef = useRef(null);
   const pagesRef = useRef(pages); pagesRef.current = pages;
+  const snippetsRef = useRef(snippets); snippetsRef.current = snippets;
   useEffect(() => {
     let ctl = null, dead = false;
     mountEditor(hostRef.current, {
       doc: content,
       getPages: () => pagesRef.current,
+      getSnippets: () => snippetsRef.current,
       onCreatePage: (name) => onCreate(name),
       onUploadAsset: uploadVaultAsset,
       onSave,
@@ -324,7 +413,7 @@ function Provenance({ path }) {
   </div>`;
 }
 
-function ReadView({ page, path, pages, links, schemas, atlasMaps, campaignId, onSave, onBroken, railHidden }) {
+function ReadView({ page, path, pages, links, relations, schemas, atlasMaps, campaignId, onSave, onBroken, railHidden }) {
   const { fm, body } = splitDoc(page.content);
   const props = parseProps(fm);
   const role = (props.find((p) => p.key === 'role') || {}).values?.[0];
@@ -353,17 +442,24 @@ function ReadView({ page, path, pages, links, schemas, atlasMaps, campaignId, on
       <${ResizeHandle} side="left" onMouseDown=${onRailResize} />
       <div style=${{ display: 'flex', padding: '0 8px', borderBottom: '1px solid var(--rule-soft)' }}>
         <${RailTab} icon="book" label="Info" active=${railTab === 'info'} onClick=${() => setRailTab('info')} />
+        <${RailTab} icon="link" label="Links" active=${railTab === 'links'} onClick=${() => setRailTab('links')} />
         <${RailTab} icon="feather" label="Chat" active=${railTab === 'chat'} onClick=${() => setRailTab('chat')} />
       </div>
       ${railTab === 'info'
         ? html`<div style=${{ flex: 1, overflow: 'auto', padding: 16, display: 'flex', flexDirection: 'column', gap: 14 }}>
-            <${OutlineCard} outline=${outline} scrollRef=${scrollRef} />
             <${InfoboxCard} fm=${fm} kind=${page.kind} schemas=${schemas} pages=${pages} />
             <${SummaryCard} page=${page} onSave=${onSave} />
             <${TagsCard} tags=${meta?.tags} />
             <${OnMapCard} path=${path} maps=${atlasMaps} campaignId=${campaignId} />
-            <${BacklinksCard} path=${path} pages=${pages} links=${links} />
             <div class="ck-rail-foot">${[edited && `Edited ${edited}`, `${words} words`].filter(Boolean).join(' · ')}</div>
+          </div>`
+        : railTab === 'links'
+        ? html`<div style=${{ flex: 1, overflow: 'auto', padding: 16, display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <${OutlineCard} outline=${outline} scrollRef=${scrollRef} />
+            <${LocalGraphCard} path=${path} pages=${pages} links=${links} relations=${relations} />
+            <${OutgoingLinksCard} path=${path} pages=${pages} links=${links} />
+            <${BacklinksCard} path=${path} pages=${pages} links=${links} />
+            <${RelationsCard} path=${path} pages=${pages} relations=${relations} />
           </div>`
         : html`<${RailChat} />`}
     </aside>`}
@@ -410,7 +506,8 @@ export function PageScreen() {
 
   useEffect(() => {
     if (!c) return;
-    loadVaultTree(c.campaign_id); loadKindSchemas(c.campaign_id);
+    loadVaultTree(c.campaign_id); loadKindSchemas(c.campaign_id); loadRelations(c.campaign_id);
+    if (!(store.snippets || []).length) loadSnippets(c.campaign_id);
     if (c.vault_path && !(store.atlasMaps || []).length) loadAtlasMaps(c.campaign_id);
   }, [c?.campaign_id]);
 
@@ -512,11 +609,11 @@ export function PageScreen() {
       ${page === null
         ? html`<div style=${{ flex: 1, padding: 40, color: 'var(--ink-faint)', fontStyle: 'italic' }}>Loading…</div>`
         : mode === 'read'
-          ? html`<${ReadView} page=${page} path=${path} pages=${pages} links=${(store.vaultLinks || {}).links} schemas=${store.kindSchemas} atlasMaps=${store.atlasMaps} campaignId=${c.campaign_id} onSave=${doSave} onBroken=${openBroken} railHidden=${railHidden} />`
+          ? html`<${ReadView} page=${page} path=${path} pages=${pages} links=${(store.vaultLinks || {}).links} relations=${store.vaultRelations} schemas=${store.kindSchemas} atlasMaps=${store.atlasMaps} campaignId=${c.campaign_id} onSave=${doSave} onBroken=${openBroken} railHidden=${railHidden} />`
           : html`<div style=${{ flex: 1, overflow: 'auto', background: 'var(--paper)', padding: '34px 0 64px', minWidth: 0 }}>
               <div style=${{ maxWidth: 720, margin: '0 auto', padding: '0 52px' }}>
                 <${Provenance} path=${path} />
-                <${CmEditor} key=${'cm:' + rev + ':' + path} content=${page.content} pages=${pages}
+                <${CmEditor} key=${'cm:' + rev + ':' + path} content=${page.content} pages=${pages} snippets=${store.snippets}
                   onSave=${doSave} onCreate=${(name) => createVaultPage(name, 'lore', '')} onState=${setSaveState} />
               </div>
             </div>`}

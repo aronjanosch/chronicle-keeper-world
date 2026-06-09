@@ -10,7 +10,7 @@ use crate::error::{AppError, AppResult};
 use crate::models::{CodexEntry, CodexEntryCreate, CodexEntryUpdate};
 use crate::store::now;
 
-pub const KINDS: &[&str] = &["pc", "npc", "place", "faction", "item", "lore"];
+pub const KINDS: &[&str] = &["pc", "npc", "place", "faction", "item", "event", "lore"];
 
 fn validate_kind(kind: &str) -> AppResult<()> {
     if KINDS.contains(&kind) {

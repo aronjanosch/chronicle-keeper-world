@@ -293,6 +293,19 @@ pub async fn delete_folder(
     Ok(Json(json!({ "ok": true })))
 }
 
+// Caret-insert snippets for the editor's slash menu (Phase 8C).
+pub async fn list_snippets(
+    State(state): State<AppState>,
+    Path(campaign_id): Path<String>,
+) -> AppResult<Json<Value>> {
+    let (root, _) = world_cfg(&state, &campaign_id)?;
+    let snippets: Vec<Value> = vault::list_snippets(&root)
+        .into_iter()
+        .map(|(name, content)| json!({ "name": name, "content": content }))
+        .collect();
+    Ok(Json(json!({ "snippets": snippets })))
+}
+
 #[derive(Deserialize)]
 pub struct AssetQuery {
     pub name: String,
@@ -411,7 +424,8 @@ fn kind_from_folder(path: &str) -> Option<&'static str> {
         "factions" | "faction" | "organizations" | "organisations" | "groups" | "guilds"
         | "fraktionen" => Some("faction"),
         "items" | "item" | "artifacts" | "gear" | "weapons" | "gegenstände" => Some("item"),
-        "lore" | "lores" | "history" | "knowledge" | "concepts" | "events" => Some("lore"),
+        "events" | "event" | "ereignisse" => Some("event"),
+        "lore" | "lores" | "history" | "knowledge" | "concepts" => Some("lore"),
         _ => None,
     }
 }

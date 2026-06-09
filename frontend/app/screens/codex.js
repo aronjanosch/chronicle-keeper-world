@@ -4,7 +4,7 @@
 // Keeps the Phase 1 freeform paste box (campaign-wide note, injected verbatim).
 import { html, useState, useEffect, useRef } from '../../vendor/htm-preact-standalone.mjs';
 import { navigate, openModal, useStore } from '../core.js';
-import { Shell, Sidebar, Topbar, useSidebarWidth, ResizeHandle } from '../shell.js';
+import { Shell, Sidebar, Topbar, useSidebarWidth, ResizeHandle, WORLD_NAV, navToWorldDest } from '../shell.js';
 import { Btn, Empty, Icon, Markdown, Input, Textarea, Select, BrandMark } from '../ui.js';
 import { loadCodexEntries, createCodexEntry, openCampaign, updateCampaign,
   loadCampaignTags, renameCampaignTag, deleteCampaignTag,
@@ -19,11 +19,12 @@ export const KINDS = [
   { value: 'place',   label: 'Place',   plural: 'Places',   tone: 'moss' },
   { value: 'faction', label: 'Faction', plural: 'Factions', tone: 'ink-blue' },
   { value: 'item',    label: 'Item',    plural: 'Items',    tone: 'ochre' },
+  { value: 'event',   label: 'Event',   plural: 'Events',   tone: 'ochre' },
   { value: 'lore',    label: 'Lore',    plural: 'Lore',     tone: 'gilt' },
 ];
 
 export function iconForKind(k) {
-  return { pc: 'sparkle', npc: 'users', place: 'map', faction: 'shield', item: 'gem', lore: 'scroll' }[k] || 'doc';
+  return { pc: 'sparkle', npc: 'users', place: 'map', faction: 'shield', item: 'gem', event: 'cal', lore: 'scroll' }[k] || 'doc';
 }
 function toneForKind(k) {
   return (KINDS.find((x) => x.value === k) || {}).tone || 'burgundy';
@@ -578,27 +579,21 @@ function VaultPanel({ campaign, tree, active, onOpen, act }) {
 
 // Compact icon nav for the Codex/page screens — the same world destinations as
 // the main Sidebar, but a single icon row so the file browser keeps its height.
-function WorldNavBar({ campaign }) {
+function WorldNavBar({ campaign, active = 'codex' }) {
   const id = campaign?.campaign_id;
-  const items = [
-    { icon: 'compass', title: 'Overview', go: () => navigate('campaign', { id }) },
-    { icon: 'book', title: 'The Codex', active: true, go: () => navigate('codex', { id }) },
-    { icon: 'search', title: 'Search', go: () => navigate('search', { id }) },
-    { icon: 'map', title: 'Atlas', go: () => navigate('atlas', { id }) },
-    { icon: 'feather', title: 'The Keeper', go: () => navigate('keeper', { id }) },
-    { icon: 'mic', title: 'Sessions', go: () => navigate('sessions', { id }) },
-    { icon: 'cog', title: 'Settings', go: () => navigate('settings') },
-  ];
   return html`<div style=${{ display: 'flex', gap: 2, padding: '2px 0 6px', marginBottom: 2, borderBottom: '1px solid var(--rule-soft)' }}>
-    ${items.map((it) => html`<span key=${it.title} title=${it.title} onClick=${it.go} style=${{
-      flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '6px 0', borderRadius: 4, cursor: 'pointer',
-      color: it.active ? 'var(--burgundy)' : 'var(--ink-soft)',
-      background: it.active ? 'var(--burgundy-50)' : 'transparent',
-    }}
-      onMouseEnter=${(e) => { if (!it.active) e.currentTarget.style.background = 'rgba(120,90,40,.08)'; }}
-      onMouseLeave=${(e) => { if (!it.active) e.currentTarget.style.background = 'transparent'; }}>
-      <${Icon} name=${it.icon} size=${15} />
-    </span>`)}
+    ${WORLD_NAV.map((d) => {
+      const on = d.key === active;
+      return html`<span key=${d.key} title=${d.label} onClick=${() => navToWorldDest(d, id)} style=${{
+        flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '6px 0', borderRadius: 4, cursor: 'pointer',
+        color: on ? 'var(--burgundy)' : 'var(--ink-soft)',
+        background: on ? 'var(--burgundy-50)' : 'transparent',
+      }}
+        onMouseEnter=${(e) => { if (!on) e.currentTarget.style.background = 'rgba(120,90,40,.08)'; }}
+        onMouseLeave=${(e) => { if (!on) e.currentTarget.style.background = 'transparent'; }}>
+        <${Icon} name=${d.icon} size=${15} />
+      </span>`;
+    })}
   </div>`;
 }
 

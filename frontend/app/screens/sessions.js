@@ -1,8 +1,8 @@
 // Sessions — the recording pipeline that feeds the world. Split out of the
 // Overview per the worldbuilding IA. A lean list; each row links to its session.
-import { html } from '../../vendor/htm-preact-standalone.mjs';
+import { html, useEffect } from '../../vendor/htm-preact-standalone.mjs';
 import { navigate, fmtDate } from '../core.js';
-import { loadSession } from '../actions.js';
+import { loadSession, refreshCampaignSessions } from '../actions.js';
 import { Shell, Sidebar, Topbar } from '../shell.js';
 import { Icon, Btn, StagePill, Empty } from '../ui.js';
 
@@ -38,6 +38,9 @@ function SessionRow({ s, onClick }) {
 
 export function SessionsScreen({ store }) {
   const c = store.campaign;
+  // Stale-while-revalidate: sessions created elsewhere (draft saved on the
+  // New-Session screen) aren't in the store yet.
+  useEffect(() => { refreshCampaignSessions(); }, [c?.campaign_id]);
   if (!c) return html`<div />`;
   const sessions = store.campaignSessions || [];
 

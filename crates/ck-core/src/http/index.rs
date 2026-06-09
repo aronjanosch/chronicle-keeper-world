@@ -101,6 +101,55 @@ pub async fn session_search(
     Ok(Json(json!({ "results": hits })))
 }
 
+/// Typed relations (Phase 9A): every frontmatter `[[link]]` value, keyed by
+/// its frontmatter key as the predicate. Graph edges + reverse-relation rail.
+pub async fn relations(
+    State(state): State<AppState>,
+    Path(campaign_id): Path<String>,
+) -> AppResult<Json<Value>> {
+    let root = vault_root(&state, &campaign_id)?;
+    state.with_index(&root, |conn| {
+        Ok(Json(json!({ "relations": index::all_relations(conn)? })))
+    })?
+}
+
+#[derive(Deserialize)]
+pub struct VaultQuery {
+    pub q: String,
+}
+
+/// Dataview-lite (Phase 9C): `LIST FROM #npc WHERE location = [[Ashfall]]`.
+/// Parse errors come back as `{ error }` so the render layer can show them inline.
+pub async fn query(
+    State(state): State<AppState>,
+    Path(campaign_id): Path<String>,
+    Query(q): Query<VaultQuery>,
+) -> AppResult<Json<Value>> {
+    let root = vault_root(&state, &campaign_id)?;
+    state.with_index(&root, |conn| {
+        Ok(Json(match index::run_query(conn, &q.q)? {
+            Ok(hits) => json!({ "hits": hits }),
+            Err(e) => json!({ "error": e }),
+        }))
+    })?
+}
+
+/// World timeline (Phase 11): dated pages sorted on the world's calendar,
+/// plus the calendar itself so the frontend can group/label.
+pub async fn timeline(
+    State(state): State<AppState>,
+    Path(campaign_id): Path<String>,
+) -> AppResult<Json<Value>> {
+    let (_, cfg) = super::vault::world_cfg(&state, &campaign_id)?;
+    let root = vault_root(&state, &campaign_id)?;
+    let rows = state.with_index(&root, index::all_frontmatter)??;
+    let events = crate::timeline::world_events(rows, &cfg.calendar);
+    Ok(Json(json!({
+        "events": events,
+        "calendar": { "months": cfg.calendar.months, "eras": cfg.calendar.eras },
+    })))
+}
+
 pub async fn tags(
     State(state): State<AppState>,
     Path(campaign_id): Path<String>,

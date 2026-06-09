@@ -1,7 +1,7 @@
 // Shared atoms ported from the design's atoms.jsx + a few form/primitive helpers.
 import { html, useState, useEffect, useRef } from '../vendor/htm-preact-standalone.mjs';
 import { marked } from '../vendor/marked.esm.js';
-import { navigate, store, apiBlob } from './core.js';
+import { navigate, store, apiBlob, apiFetch } from './core.js';
 
 // ── Icon — monoline 16-grid SVGs ──────────────────────────────────
 const PATHS = {
@@ -393,11 +393,12 @@ function stripFrontmatter(text) {
 }
 
 function ckPostprocess(htmlStr) {
-  return htmlStr.replace(/<blockquote>\s*<p>\s*\[!([a-zA-Z]+)\]([^\n<]*)(<br\s*\/?>)?/g,
-    (_, type, title, br) => {
+  // `[!type]-` starts collapsed, `[!type]+` starts open (Obsidian fold markers).
+  return htmlStr.replace(/<blockquote>\s*<p>\s*\[!([a-zA-Z]+)\]([+-]?)([^\n<]*)(<br\s*\/?>)?/g,
+    (_, type, fold, title, br) => {
       const t = title.trim();
       const head = t ? `<span class="ck-callout-title">${escapeHtml(t)}</span>${br || ''}` : '';
-      return `<blockquote data-callout="${type.toLowerCase()}"><p>${head}`;
+      return `<blockquote data-callout="${type.toLowerCase()}"${fold ? ` data-fold="${fold}"` : ''}><p>${head}`;
     });
 }
 
@@ -435,7 +436,7 @@ export function resolveWikilinks(htmlStr, pages) {
     tokens[i] = t.replace(/(!?)\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g, (m, bang, target, label) => {
       const raw = target.trim();
       // `![[file.ext]]` media embeds → <img>; PageBody fills src via blob fetch
-      // (an <img src> can't carry the auth header). `![[Note]]` stays deferred.
+      // (an <img src> can't carry the auth header).
       if (bang && /\.(?!md$)[A-Za-z0-9]+$/i.test(raw)) {
         const w = /^\d+$/.test((label || '').trim()) ? ` width="${(label || '').trim()}"` : '';
         return `<img class="ck-embed-img" data-ck-asset="${escapeHtml(raw)}" alt="${escapeHtml(raw)}"${w} loading="lazy" />`;
@@ -443,13 +444,21 @@ export function resolveWikilinks(htmlStr, pages) {
       // Block refs ([[Page#^id]]) are a locked Drop — plain text.
       if (raw.includes('#^')) return bang + escapeHtml((label || raw).trim());
       const hash = raw.indexOf('#');
-      const name = (hash < 0 ? raw : raw.slice(0, hash)).trim();
+      const name = (hash < 0 ? raw : raw.slice(0, hash)).trim().replace(/\.md$/i, '');
       const anchor = hash < 0 ? '' : raw.slice(hash + 1).trim();
       const text = escapeHtml((label || raw).trim());
       const path = byName.get(norm(name));
-      return bang + (path
+      // `![[Note]]` / `![[Note#Heading]]` page transclusion (Phase 8A) —
+      // placeholder span; PageBody fetches + renders the body (or heading slice).
+      // A <span> because marked wraps the line in <p> (a <div> would break out).
+      if (bang) {
+        return path
+          ? `<span class="ck-transclude" data-ck-embed="${escapeHtml(path)}"${anchor ? ` data-ck-anchor="${escapeHtml(anchor)}"` : ''}></span>`
+          : `<a class="ck-wikilink ck-wikilink--broken" data-name="${escapeHtml(name)}">${text}</a>`;
+      }
+      return path
         ? `<a class="ck-wikilink" data-path="${escapeHtml(path)}"${anchor ? ` data-anchor="${escapeHtml(anchor)}"` : ''}>${text}</a>`
-        : `<a class="ck-wikilink ck-wikilink--broken" data-name="${escapeHtml(name)}">${text}</a>`);
+        : `<a class="ck-wikilink ck-wikilink--broken" data-name="${escapeHtml(name)}">${text}</a>`;
     });
   }
   return tokens.join('');
@@ -465,8 +474,7 @@ export function renderBlockHtml(text, pages) {
 }
 
 // Click handler shared by reading view + live preview: navigate resolved wikilinks,
-// hand unresolved ones to onBroken (e.g. create a page). Also reveals/hides
-// GM-only [!secret] callouts.
+// hand unresolved ones to onBroken (e.g. create a page). Also folds/unfolds callouts.
 export function wikilinkClick(onBroken) {
   return (e) => {
     const a = e.target && e.target.closest && e.target.closest('.ck-wikilink');
@@ -476,32 +484,166 @@ export function wikilinkClick(onBroken) {
       else if (a.dataset.name && onBroken) onBroken(a.dataset.name);
       return;
     }
-    const secret = e.target && e.target.closest && e.target.closest('blockquote[data-callout="secret"]');
-    if (secret) secret.classList.toggle('ck-revealed');
+    const head = e.target && e.target.closest && e.target.closest('.ck-callout-head');
+    if (head) head.closest('blockquote').classList.toggle('ck-collapsed');
   };
+}
+
+// ── Prose hydration: callout fold structure, ![[Page]] embeds, image blobs ──
+
+// Restructure marked's callout blockquotes into head (clickable fold) + body.
+// Secrets and `[!type]-` start collapsed.
+function structureCallouts(scope) {
+  for (const bq of scope.querySelectorAll('blockquote[data-callout]')) {
+    if (bq.querySelector(':scope > .ck-callout-head')) continue;
+    const type = bq.dataset.callout;
+    const titleEl = bq.querySelector('.ck-callout-title');
+    const title = titleEl ? titleEl.textContent : type.charAt(0).toUpperCase() + type.slice(1);
+    if (titleEl) {
+      const p = titleEl.closest('p');
+      titleEl.remove();
+      if (p) {
+        while (p.firstChild && p.firstChild.nodeName === 'BR') p.firstChild.remove();
+        if (!p.textContent.trim() && !p.children.length) p.remove();
+      }
+    }
+    const body = document.createElement('div');
+    body.className = 'ck-callout-body';
+    while (bq.firstChild) body.appendChild(bq.firstChild);
+    const head = document.createElement('div');
+    head.className = 'ck-callout-head';
+    const chev = document.createElement('span');
+    chev.className = 'ck-callout-chev';
+    const t = document.createElement('span');
+    t.className = 'ck-callout-title';
+    t.textContent = title;
+    head.appendChild(chev);
+    head.appendChild(t);
+    bq.appendChild(head);
+    bq.appendChild(body);
+    const fold = bq.dataset.fold || '';
+    if (fold === '-' || (type === 'secret' && fold !== '+')) bq.classList.add('ck-collapsed');
+  }
+}
+
+// `![[Page#Heading]]`: the heading's section — from its line to the next
+// heading of the same or higher level. Fences skipped. Null when not found.
+function sliceHeading(md, anchor) {
+  const want = anchor.trim().toLowerCase();
+  const lines = md.split('\n');
+  let start = -1, level = 0, fence = false;
+  for (let i = 0; i < lines.length; i++) {
+    if (/^\s*(```|~~~)/.test(lines[i])) { fence = !fence; continue; }
+    if (fence) continue;
+    const m = lines[i].match(/^(#{1,6})\s+(.+)/);
+    if (!m) continue;
+    if (start < 0) {
+      if (m[2].replace(/[*_`]/g, '').trim().toLowerCase() === want) { start = i; level = m[1].length; }
+    } else if (m[1].length <= level) {
+      return lines.slice(start, i).join('\n');
+    }
+  }
+  return start < 0 ? null : lines.slice(start).join('\n');
+}
+
+const EMBED_DEPTH = 3;
+
+function embedNote(node, msg) {
+  node.innerHTML = `<span class="ck-embed-note">${escapeHtml(msg)}</span>`;
+}
+
+// Fill ![[Page]] placeholders: fetch the page, render body (or heading slice)
+// as prose, recurse for nested embeds. `seen` guards cycles per branch.
+async function fillEmbeds(scope, pages, campaignId, depth, seen, done) {
+  const nodes = [...scope.querySelectorAll('span[data-ck-embed]:not(.ck-filled)')];
+  await Promise.all(nodes.map(async (node) => {
+    node.classList.add('ck-filled');
+    const path = node.dataset.ckEmbed;
+    const anchor = node.dataset.ckAnchor || '';
+    if (seen.has(path)) return embedNote(node, `Circular embed: ${path}`);
+    if (depth >= EMBED_DEPTH) return embedNote(node, `Embed too deep: ${path}`);
+    let page;
+    try {
+      page = await apiFetch(`/campaigns/${campaignId}/vault/pages/${encodeURI(path)}`);
+    } catch (_) {
+      return embedNote(node, `Couldn't load embed: ${path}`);
+    }
+    let body = splitDoc(page.content).body.replace(/^\s*#\s+.*\n+/, '');
+    if (anchor) {
+      const sliced = sliceHeading(body, anchor);
+      if (sliced == null) return embedNote(node, `Heading "${anchor}" not found in ${page.title}`);
+      body = sliced;
+    }
+    node.innerHTML =
+      `<span class="ck-embed-src ck-wikilink" data-path="${escapeHtml(path)}">${escapeHtml(page.title)}${anchor ? ` › ${escapeHtml(anchor)}` : ''}</span>`
+      + `<span class="ck-embed-body">${renderBlockHtml(body, pages)}</span>`;
+    structureCallouts(node);
+    await fillEmbeds(node, pages, campaignId, depth + 1, new Set([...seen, path]), done);
+    done(node); // let the caller hydrate images inside this embed
+  }));
+}
+
+// ```ck-query fenced blocks → live page lists (Phase 9C). The backend parses
+// and evaluates; errors render inline so a typo'd query explains itself.
+function fillQueries(scope, campaignId) {
+  for (const code of scope.querySelectorAll('pre > code.language-ck-query, pre > code.language-query, pre > code.language-dataview')) {
+    const pre = code.closest('pre');
+    if (!pre || pre.classList.contains('ck-filled')) continue;
+    pre.classList.add('ck-filled');
+    const q = (code.textContent || '').split('\n').map((l) => l.trim()).filter(Boolean).join(' ');
+    apiFetch(`/campaigns/${campaignId}/vault/query?q=${encodeURIComponent(q)}`)
+      .then((r) => {
+        const box = document.createElement('div');
+        box.className = 'ck-query';
+        if (r.error) {
+          box.innerHTML = `<span class="ck-embed-note">${escapeHtml(r.error)}</span>`;
+        } else {
+          const hits = r.hits || [];
+          box.innerHTML =
+            `<div class="ck-query-head">${escapeHtml(q)} · ${hits.length} ${hits.length === 1 ? 'page' : 'pages'}</div>`
+            + (hits.length
+              ? `<ul>${hits.map((h) => `<li><a class="ck-wikilink" data-path="${escapeHtml(h.path)}">${escapeHtml(h.title)}</a>${h.summary ? `<span class="ck-query-sub"> — ${escapeHtml(h.summary)}</span>` : ''}</li>`).join('')}</ul>`
+              : '<span class="ck-embed-note">No matches</span>');
+        }
+        pre.replaceWith(box);
+      })
+      .catch(() => {});
+  }
+}
+
+// Swap ![[image]] placeholders' src for authenticated blob URLs.
+function fillAssetImgs(scope, campaignId, urls, isDead) {
+  for (const img of scope.querySelectorAll('img[data-ck-asset]:not(.ck-filled)')) {
+    img.classList.add('ck-filled');
+    apiBlob(`/campaigns/${campaignId}/vault/assets/${encodeURI(img.dataset.ckAsset)}`)
+      .then((b) => {
+        if (isDead()) return;
+        const u = URL.createObjectURL(b);
+        urls.push(u);
+        img.src = u;
+      })
+      .catch(() => { img.classList.add('ck-embed-img--missing'); });
+  }
 }
 
 export function PageBody({ text, pages, onBroken }) {
   const ref = useRef(null);
   const htmlStr = renderPageHtml(text, pages);
-  // ![[image]] embeds: fetch asset bytes with the auth header, swap in object URLs.
   useEffect(() => {
     const root = ref.current;
     const id = store.campaign?.campaign_id;
-    const imgs = root ? [...root.querySelectorAll('img[data-ck-asset]')] : [];
-    if (!imgs.length || !id) return undefined;
+    if (!root || !id) return undefined;
     let dead = false;
     const urls = [];
-    for (const img of imgs) {
-      apiBlob(`/campaigns/${id}/vault/assets/${encodeURI(img.dataset.ckAsset)}`)
-        .then((b) => {
-          if (dead) return;
-          const u = URL.createObjectURL(b);
-          urls.push(u);
-          img.src = u;
-        })
-        .catch(() => { img.classList.add('ck-embed-img--missing'); });
-    }
+    const isDead = () => dead;
+    structureCallouts(root);
+    fillAssetImgs(root, id, urls, isDead);
+    fillQueries(root, id);
+    fillEmbeds(root, pages, id, 0, new Set(), (node) => {
+      if (dead) return;
+      fillAssetImgs(node, id, urls, isDead);
+      fillQueries(node, id);
+    }).catch(() => {});
     return () => { dead = true; urls.forEach((u) => URL.revokeObjectURL(u)); };
   }, [htmlStr]);
   return html`<div ref=${ref} class="ck-prose" onClick=${wikilinkClick(onBroken)}

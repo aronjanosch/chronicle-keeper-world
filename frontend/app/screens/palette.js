@@ -26,6 +26,12 @@ export function useGlobalHotkeys() {
         if (store.modal?.kind === 'commandPalette') closeModal();
         navigate('search', { id: store.campaign.campaign_id });
       }
+      // ⌘⇧J — quick capture into Inbox/ (Phase 8D).
+      else if ((e.metaKey || e.ctrlKey) && e.shiftKey && !e.altKey && (e.key === 'j' || e.key === 'J')) {
+        if (!store.campaign?.campaign_id || store.modal) return;
+        e.preventDefault();
+        openModal('quickCapture');
+      }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -145,6 +151,9 @@ function CommandPalette() {
     { icon: 'search', label: query ? `Search the world for “${q.trim()}”` : 'Search the world', run: () => { closeModal(); navigate('search', { id: cid, q: q.trim() }); } },
     { icon: 'book', label: 'Go to Codex', run: go('codex', { id: cid }) },
     { icon: 'map', label: 'Go to Atlas', run: go('atlas', { id: cid }) },
+    { icon: 'time', label: 'Go to Timeline', run: go('timeline', { id: cid }) },
+    { icon: 'link', label: 'Go to Graph', run: go('graph', { id: cid }) },
+    { icon: 'feather', label: 'Quick capture', run: () => { closeModal(); openModal('quickCapture'); } },
     { icon: 'feather', label: 'Go to the Keeper', run: go('keeper', { id: cid }) },
     { icon: 'mic', label: 'Go to Sessions', run: go('sessions', { id: cid }) },
     { icon: 'compass', label: 'World overview', run: go('campaign', { id: cid }) },

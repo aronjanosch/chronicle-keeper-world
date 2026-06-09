@@ -95,6 +95,24 @@ function NavHead({ children }) {
   return html`<div style=${{ padding: '14px 8px 4px', fontSize: 10.5, fontWeight: 600, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--ink-faint)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>${children}</div>`;
 }
 
+// Single source of truth for in-world destinations — the full Sidebar and the
+// compact icon row on the Codex/page screens both render from this list.
+export const WORLD_NAV = [
+  { key: 'overview', icon: 'compass', label: 'Overview', screen: 'campaign' },
+  { key: 'codex', icon: 'book', label: 'The Codex', screen: 'codex' },
+  { key: 'search', icon: 'search', label: 'Search', screen: 'search' },
+  { key: 'atlas', icon: 'map', label: 'Atlas', screen: 'atlas' },
+  { key: 'timeline', icon: 'time', label: 'Timeline', screen: 'timeline' },
+  { key: 'graph', icon: 'link', label: 'Graph', screen: 'graph' },
+  { key: 'keeper', icon: 'feather', label: 'The Keeper', screen: 'keeper' },
+  { key: 'sessions', icon: 'mic', label: 'Sessions', screen: 'sessions' },
+  { key: 'settings', icon: 'cog', label: 'Settings', screen: 'settings' },
+];
+
+export function navToWorldDest(dest, campaignId) {
+  navigate(dest.screen, dest.key === 'settings' ? undefined : { id: campaignId });
+}
+
 export function Sidebar({ variant = 'library', active, campaign }) {
   const warn = store.providerStatus && store.providerStatus.ok === false ? store.providerStatus : null;
   const [width, onResize] = useSidebarWidth('ck_sidebar_w');
@@ -116,8 +134,6 @@ export function Sidebar({ variant = 'library', active, campaign }) {
     ${variant === 'library' ? html`
       <${NavHead}>Library</${NavHead}>
       <${NavItem} icon="globe" label="Worlds" active=${active === 'campaigns' || active === 'worlds'} onClick=${() => navigate('library')} />
-      <${NavHead}>Workshop</${NavHead}>
-      <${NavItem} icon="cog" label="Settings" active=${active === 'settings'} onClick=${() => navigate('settings')} />
     ` : html`
       <${NavItem} icon="chev-l" label="All worlds" onClick=${() => navigate('library')} />
       <div style=${{ margin: '10px 4px 6px', padding: '10px', background: 'var(--surface)', border: '1px solid var(--rule-soft)', borderRadius: 6, display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -128,22 +144,20 @@ export function Sidebar({ variant = 'library', active, campaign }) {
         </div>
       </div>
       <${NavHead}>World</${NavHead}>
-      <${NavItem} icon="compass" label="Overview" active=${active === 'overview'} onClick=${() => navigate('campaign', { id: campaign?.campaign_id })} />
-      <${NavItem} icon="book" label="The Codex" count=${codexCount(campaign)} active=${active === 'codex'} onClick=${() => navigate('codex', { id: campaign?.campaign_id })} />
-      <${NavItem} icon="search" label="Search" active=${active === 'search'} onClick=${() => navigate('search', { id: campaign?.campaign_id })} />
-      <${NavItem} icon="map" label="Atlas" active=${active === 'atlas'} onClick=${() => navigate('atlas', { id: campaign?.campaign_id })} />
-      ${active === 'atlas' && mapTreeRows(store.atlasMaps || []).map(({ map: m, depth }) => html`
-        <${NavItem} key=${m.id} indent=${depth} label=${m.name}
-          active=${(store.atlasMapId || store.route.params?.map) === m.id}
-          onClick=${() => navigate('atlas', { id: campaign?.campaign_id, map: m.id })} />`)}
-      <${NavItem} icon="feather" label="The Keeper" active=${active === 'keeper'} onClick=${() => navigate('keeper', { id: campaign?.campaign_id })} />
-      <${NavHead}>Sessions</${NavHead}>
-      <${NavItem} icon="mic" label="Sessions" count=${sessionsCount()} active=${active === 'sessions'} onClick=${() => navigate('sessions', { id: campaign?.campaign_id })} />
-      <${NavHead}>Workshop</${NavHead}>
-      <${NavItem} icon="cog" label="Settings" active=${active === 'settings'} onClick=${() => navigate('settings')} />
+      ${WORLD_NAV.filter((d) => d.key !== 'settings').map((d) => html`
+        <${NavItem} key=${d.key} icon=${d.icon} label=${d.label}
+          count=${d.key === 'codex' ? codexCount(campaign) : d.key === 'sessions' ? sessionsCount() : null}
+          active=${active === d.key}
+          onClick=${() => navToWorldDest(d, campaign?.campaign_id)} />
+        ${d.key === 'atlas' && active === 'atlas' && mapTreeRows(store.atlasMaps || []).map(({ map: m, depth }) => html`
+          <${NavItem} key=${m.id} indent=${depth} label=${m.name}
+            active=${(store.atlasMapId || store.route.params?.map) === m.id}
+            onClick=${() => navigate('atlas', { id: campaign?.campaign_id, map: m.id })} />`)}
+      `)}
     `}
 
     <div style=${{ flex: 1 }} />
+    <${NavItem} icon="cog" label="Settings" active=${active === 'settings'} onClick=${() => navigate('settings')} />
     ${warn && html`<div onClick=${() => navigate('settings')} title="Open Settings"
       style=${{ margin: '8px 4px 0', padding: '10px 12px', background: 'var(--ochre-50)', border: '1px solid rgba(168,115,40,.28)', borderRadius: 6, display: 'flex', alignItems: 'center', gap: 10, fontSize: 12, color: 'var(--ink-soft)', cursor: 'pointer' }}>
       <span style=${{ width: 8, height: 8, borderRadius: '50%', background: 'var(--ochre)', flex: '0 0 auto' }} />

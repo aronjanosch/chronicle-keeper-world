@@ -34,12 +34,16 @@ const KEYWORDS = {
     'schaetze', 'schatz', 'ausruestung', 'relikte',
     'objets', 'objetos', 'oggetti', 'tesoros', 'tesori',
   ],
+  event: [
+    'event', 'events', 'ereignis', 'ereignisse', 'timeline', 'zeitlinie',
+    'evenements', 'eventos', 'eventi',
+  ],
   lore: [
     'lore', 'history', 'myth', 'myths', 'legend', 'legends', 'religion', 'religions',
-    'god', 'gods', 'deities', 'cosmology', 'calendar', 'timeline', 'event', 'events',
+    'god', 'gods', 'deities', 'cosmology', 'calendar',
     'background', 'knowledge', 'culture', 'cultures',
     'geschichte', 'mythen', 'legenden', 'goetter', 'gottheiten', 'kosmologie',
-    'kalender', 'zeitlinie', 'ereignisse', 'hintergrund', 'wissen', 'kulturen', 'sagen',
+    'kalender', 'hintergrund', 'wissen', 'kulturen', 'sagen',
     'histoire', 'mythes', 'legendes', 'dieux', 'historia', 'mitos', 'leyendas', 'dioses', 'storia', 'miti',
   ],
 };

@@ -11,7 +11,7 @@ use crate::error::{AppError, AppResult};
 use crate::vault;
 
 // 5: normalize_name now NFC-normalizes — stored aliases/target_names must be rebuilt.
-pub const SCHEMA_VERSION: &str = "5";
+pub const SCHEMA_VERSION: &str = "6";
 
 const SCHEMA: &str = "
 CREATE TABLE pages (
@@ -50,6 +50,14 @@ CREATE TABLE page_headings (
     anchor    TEXT NOT NULL,
     PRIMARY KEY (page_path, anchor)
 );
+CREATE TABLE page_relations (
+    source_path TEXT NOT NULL REFERENCES pages(path) ON DELETE CASCADE,
+    predicate   TEXT NOT NULL,
+    link_text   TEXT NOT NULL,
+    target_path TEXT,
+    PRIMARY KEY (source_path, predicate, link_text)
+);
+CREATE INDEX idx_relations_target ON page_relations(target_path);
 CREATE TABLE page_media (
     source_path TEXT NOT NULL REFERENCES pages(path) ON DELETE CASCADE,
     target      TEXT NOT NULL,
@@ -147,6 +155,7 @@ pub struct ParsedPage {
     pub tags: Vec<String>,
     pub headings: Vec<(i64, String, String)>, // (level, text, anchor)
     pub links: Vec<RawLink>,
+    pub relations: Vec<(String, String)>, // typed relations: (predicate, [[link]] inner text)
     pub media: Vec<String>, // ![[file.ext]] embed targets (name only, no |size)
     pub content_hash: String,
     pub modified_at: i64,
@@ -306,6 +315,28 @@ pub fn parse_page(vault_root: &Path, abs: &Path, content: &str) -> ParsedPage {
         }
     }
 
+    // Typed relations (Phase 9A): any frontmatter value that is a single
+    // `[[wikilink]]` — the key is the predicate (`located_in: "[[Ashfall]]"`).
+    let mut relations: Vec<(String, String)> = Vec::new();
+    for (key, values) in &fm {
+        if matches!(key.as_str(), "kind" | "aliases" | "tags" | "summary" | "cssclasses" | "publish" | "permalink") {
+            continue;
+        }
+        for v in values {
+            let v = v.trim();
+            let Some(inner) = v.strip_prefix("[[").and_then(|s| s.strip_suffix("]]")) else {
+                continue;
+            };
+            let inner = inner.trim();
+            if inner.is_empty() || inner.contains("[[") || inner.starts_with("#^") {
+                continue;
+            }
+            if !relations.iter().any(|(p, t)| p == key && t == inner) {
+                relations.push((key.clone(), inner.to_string()));
+            }
+        }
+    }
+
     let mut headings = Vec::new();
     let mut links = Vec::new();
     let mut media = Vec::new();
@@ -330,6 +361,7 @@ pub fn parse_page(vault_root: &Path, abs: &Path, content: &str) -> ParsedPage {
         tags,
         headings,
         links,
+        relations,
         media,
         content_hash: fnv1a(content.as_bytes()),
         modified_at,
@@ -367,6 +399,12 @@ fn insert_page(conn: &Connection, p: &ParsedPage, body: &str) -> AppResult<()> {
         conn.execute(
             "INSERT OR IGNORE INTO page_links (source_path, target_path, link_text, heading) VALUES (?1, NULL, ?2, ?3)",
             params![p.path, link.link_text, link.heading],
+        )?;
+    }
+    for (predicate, link_text) in &p.relations {
+        conn.execute(
+            "INSERT OR IGNORE INTO page_relations (source_path, predicate, link_text, target_path) VALUES (?1, ?2, ?3, NULL)",
+            params![p.path, predicate, link_text],
         )?;
     }
     for target in &p.media {
@@ -525,6 +563,22 @@ pub fn resolve_links(conn: &Connection) -> AppResult<()> {
         conn.execute(
             "UPDATE page_links SET target_path = ?1 WHERE source_path = ?2 AND link_text = ?3",
             params![resolved, source, link_text],
+        )?;
+    }
+    // Typed relations resolve the same way (no heading requirement).
+    let rels: Vec<(String, String, String)> = {
+        let mut stmt =
+            conn.prepare("SELECT source_path, predicate, link_text FROM page_relations")?;
+        let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
+        rows.filter_map(Result::ok).collect()
+    };
+    for (source, predicate, link_text) in rels {
+        let target = link_text.split('|').next().unwrap_or(&link_text);
+        let name = normalize_name(target.split('#').next().unwrap_or(target));
+        let resolved = by_alias.get(&name).and_then(|paths| paths.first().cloned());
+        conn.execute(
+            "UPDATE page_relations SET target_path = ?1 WHERE source_path = ?2 AND predicate = ?3 AND link_text = ?4",
+            params![resolved, source, predicate, link_text],
         )?;
     }
     Ok(())
@@ -748,6 +802,196 @@ fn collect_diag_files(dir: &Path, root: &Path, media: &mut Vec<String>, conflict
     }
 }
 
+/// One row of `all_frontmatter`: (path, title, kind, frontmatter_json).
+pub type PageFrontmatter = (String, String, Option<String>, String);
+
+/// Every page's stored frontmatter — the timeline extracts `date:` from it.
+pub fn all_frontmatter(conn: &Connection) -> AppResult<Vec<PageFrontmatter>> {
+    let mut stmt =
+        conn.prepare("SELECT path, title, kind, COALESCE(frontmatter, '{}') FROM pages")?;
+    let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?;
+    Ok(rows.filter_map(Result::ok).collect())
+}
+
+// ── Dataview-lite queries (Phase 9C) ──────────────────────────────
+// `LIST FROM #npc AND kind:place WHERE location = [[Ashfall]] AND status != dead`
+// Read-only; evaluated over indexed tags + frontmatter. Values compare
+// wikilink-insensitively (`[[Ashfall|the city]]` == `Ashfall`).
+
+#[derive(Debug)]
+enum Cond {
+    Eq(String, String),
+    Ne(String, String),
+    Contains(String, String),
+}
+
+#[derive(Debug, serde::Serialize)]
+pub struct QueryHit {
+    pub path: String,
+    pub title: String,
+    pub kind: Option<String>,
+    pub summary: String,
+}
+
+// `[[Ashfall|the city]]` / `"Ashfall"` / `Ashfall` → comparable key.
+fn query_norm(v: &str) -> String {
+    let v = v.trim().trim_matches('"').trim();
+    let v = v.strip_prefix("[[").and_then(|s| s.strip_suffix("]]")).unwrap_or(v);
+    let v = v.split('|').next().unwrap_or(v);
+    let v = v.split('#').next().unwrap_or(v);
+    normalize_name(v)
+}
+
+// (tags, kinds, conditions)
+type ParsedQuery = (Vec<String>, Vec<String>, Vec<Cond>);
+
+fn parse_query(q: &str) -> Result<ParsedQuery, String> {
+    let s = q.trim();
+    let s = if s.len() >= 4 && s[..4].eq_ignore_ascii_case("list") { s[4..].trim() } else { s };
+    if s.is_empty() {
+        return Err("Empty query — try `LIST FROM #npc`".into());
+    }
+    // Split off WHERE (case-insensitive, whole word, byte-safe vs the original).
+    let lower = s.to_lowercase();
+    let widx = {
+        let mut found = None;
+        let mut start = 0;
+        while let Some(i) = lower[start..].find("where").map(|p| p + start) {
+            let before_ok = i == 0 || lower.as_bytes()[i - 1] == b' ';
+            let after_ok = lower.as_bytes().get(i + 5).is_none_or(|b| *b == b' ');
+            if before_ok && after_ok && s.get(..i).is_some() && s.get(i + 5..).is_some() {
+                found = Some(i);
+                break;
+            }
+            start = i + 5;
+        }
+        found
+    };
+    let (from_part, where_part) = match widx {
+        Some(i) => (&s[..i], Some(&s[i + 5..])),
+        None => (s, None),
+    };
+    let from_part = from_part.trim();
+    let from_part = if from_part.len() >= 4 && from_part[..4].eq_ignore_ascii_case("from") {
+        from_part[4..].trim()
+    } else if from_part.is_empty() {
+        from_part
+    } else {
+        return Err(format!("Expected FROM or WHERE, got “{from_part}”"));
+    };
+
+    let split_and = |part: &str| -> Vec<String> {
+        let mut out = Vec::new();
+        let mut rest = part.trim();
+        loop {
+            let lc = rest.to_lowercase();
+            match lc.find(" and ").filter(|i| rest.get(..*i).is_some() && rest.get(i + 5..).is_some()) {
+                Some(i) => {
+                    out.push(rest[..i].trim().to_string());
+                    rest = &rest[i + 5..];
+                }
+                None => break,
+            }
+        }
+        if !rest.trim().is_empty() {
+            out.push(rest.trim().to_string());
+        }
+        out
+    };
+
+    let mut tags = Vec::new();
+    let mut kinds = Vec::new();
+    for term in split_and(from_part) {
+        if let Some(t) = term.strip_prefix('#') {
+            tags.push(t.to_lowercase());
+        } else if let Some(k) = term.to_lowercase().strip_prefix("kind:") {
+            kinds.push(k.trim().to_string());
+        } else {
+            return Err(format!("FROM terms are #tag or kind:<kind>, got “{term}”"));
+        }
+    }
+
+    let mut conds = Vec::new();
+    if let Some(w) = where_part {
+        for c in split_and(w) {
+            let cond = if let Some((f, v)) = c.split_once("!=") {
+                Cond::Ne(f.trim().to_string(), query_norm(v))
+            } else if let Some((f, v)) = c.split_once('=') {
+                Cond::Eq(f.trim().to_string(), query_norm(v))
+            } else {
+                let lc = c.to_lowercase();
+                match lc.find(" contains ").filter(|i| c.get(..*i).is_some() && c.get(i + 10..).is_some()) {
+                    Some(i) => Cond::Contains(c[..i].trim().to_string(), query_norm(&c[i + 10..])),
+                    None => return Err(format!("WHERE conditions are `field = value`, `field != value` or `field contains value`, got “{c}”")),
+                }
+            };
+            conds.push(cond);
+        }
+    }
+    if tags.is_empty() && kinds.is_empty() && conds.is_empty() {
+        return Err("Query needs a FROM or WHERE clause".into());
+    }
+    Ok((tags, kinds, conds))
+}
+
+/// Run a dataview-lite query. `Err` carries a user-facing parse message.
+pub fn run_query(conn: &Connection, q: &str) -> AppResult<Result<Vec<QueryHit>, String>> {
+    let (tags, kinds, conds) = match parse_query(q) {
+        Ok(p) => p,
+        Err(e) => return Ok(Err(e)),
+    };
+    let mut tag_map: HashMap<String, Vec<String>> = HashMap::new();
+    {
+        let mut stmt = conn.prepare("SELECT page_path, tag FROM page_tags")?;
+        let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+        for (path, tag) in rows.filter_map(Result::ok) {
+            tag_map.entry(path).or_default().push(tag.to_lowercase());
+        }
+    }
+    let mut hits = Vec::new();
+    let mut stmt =
+        conn.prepare("SELECT path, title, kind, summary, COALESCE(frontmatter, '{}') FROM pages ORDER BY title COLLATE NOCASE")?;
+    let rows = stmt.query_map([], |r| {
+        Ok((
+            r.get::<_, String>(0)?,
+            r.get::<_, String>(1)?,
+            r.get::<_, Option<String>>(2)?,
+            r.get::<_, String>(3)?,
+            r.get::<_, String>(4)?,
+        ))
+    })?;
+    for (path, title, kind, summary, fm_json) in rows.filter_map(Result::ok) {
+        let page_tags = tag_map.get(&path).cloned().unwrap_or_default();
+        // a page tag matches the query tag or any parent segment (`character/ranger` matches #character)
+        if !tags.iter().all(|t| page_tags.iter().any(|pt| pt == t || pt.starts_with(&format!("{t}/")))) {
+            continue;
+        }
+        if !kinds.is_empty() && !kinds.iter().any(|k| kind.as_deref() == Some(k)) {
+            continue;
+        }
+        let fm: serde_json::Value = serde_json::from_str(&fm_json).unwrap_or_default();
+        let field_vals = |f: &str| -> Vec<String> {
+            match &fm[f] {
+                serde_json::Value::String(s) => vec![query_norm(s)],
+                serde_json::Value::Array(a) => {
+                    a.iter().filter_map(|v| v.as_str()).map(query_norm).collect()
+                }
+                _ => Vec::new(),
+            }
+        };
+        let ok = conds.iter().all(|c| match c {
+            Cond::Eq(f, v) => field_vals(f).iter().any(|x| x == v),
+            Cond::Ne(f, v) => !field_vals(f).iter().any(|x| x == v),
+            Cond::Contains(f, v) => field_vals(f).iter().any(|x| x.contains(v.as_str())),
+        });
+        if !ok {
+            continue;
+        }
+        hits.push(QueryHit { path, title, kind, summary });
+    }
+    Ok(Ok(hits))
+}
+
 /// Everything the diagnostics panel shows. Index reads + one fs walk
 /// (media existence, conflict filenames).
 pub fn diagnostics(conn: &Connection, vault_root: &Path) -> AppResult<Diagnostics> {
@@ -807,11 +1051,39 @@ pub fn diagnostics(conn: &Connection, vault_root: &Path) -> AppResult<Diagnostic
     Ok(Diagnostics { broken_links, orphans, broken_media, scan_errors, conflicts })
 }
 
-/// Sources linking to `rel` (resolved), with the raw link text — rename uses this.
+/// Sources linking to `rel` (resolved), with the raw link text — rename uses
+/// this. Includes frontmatter relations so renames rewrite those values too.
 pub fn sources_linking_to(conn: &Connection, rel: &str) -> AppResult<Vec<(String, String)>> {
-    let mut stmt =
-        conn.prepare("SELECT source_path, link_text FROM page_links WHERE target_path = ?1")?;
+    let mut stmt = conn.prepare(
+        "SELECT source_path, link_text FROM page_links WHERE target_path = ?1 \
+         UNION SELECT source_path, link_text FROM page_relations WHERE target_path = ?1",
+    )?;
     let rows = stmt.query_map(params![rel], |r| Ok((r.get(0)?, r.get(1)?)))?;
+    Ok(rows.filter_map(Result::ok).collect())
+}
+
+#[derive(Debug, serde::Serialize)]
+pub struct RelationRow {
+    pub source_path: String,
+    pub predicate: String,
+    pub link_text: String,
+    pub target_path: Option<String>,
+}
+
+/// Every typed relation in the world (graph edges + reverse-relation rail).
+pub fn all_relations(conn: &Connection) -> AppResult<Vec<RelationRow>> {
+    let mut stmt = conn.prepare(
+        "SELECT source_path, predicate, link_text, target_path FROM page_relations \
+         ORDER BY source_path, predicate, link_text",
+    )?;
+    let rows = stmt.query_map([], |r| {
+        Ok(RelationRow {
+            source_path: r.get(0)?,
+            predicate: r.get(1)?,
+            link_text: r.get(2)?,
+            target_path: r.get(3)?,
+        })
+    })?;
     Ok(rows.filter_map(Result::ok).collect())
 }
 
@@ -885,6 +1157,48 @@ mod tests {
         assert_eq!(names, ["rivendell", "gandalf"]);
         assert_eq!(p.links[0].heading.as_deref(), Some("geography"));
         assert_eq!(p.media, ["portrait.png"]);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn relations_index_resolve_rename_and_query() {
+        let dir = tmp_vault("relations");
+        write(&dir, "Ashfall.md", "---\nkind: place\n---\n# Ashfall\n");
+        write(&dir, "Kel.md", "---\nkind: npc\nlocation: \"[[Ashfall|the city]]\"\ntags: [npc]\n---\n# Kel\n");
+        write(
+            &dir,
+            "Mara.md",
+            "---\nkind: npc\nlocation: \"[[Ashfall]]\"\nstatus: alive\nallies:\n  - \"[[Kel]]\"\n  - \"[[Missing]]\"\ntags: [npc]\n---\n# Mara\n",
+        );
+        let conn = open_index(&dir).unwrap();
+        rebuild(&conn, &dir).unwrap();
+
+        let rels = all_relations(&conn).unwrap();
+        let find = |src: &str, pred: &str, txt: &str| {
+            rels.iter()
+                .find(|r| r.source_path == src && r.predicate == pred && r.link_text == txt)
+                .unwrap()
+        };
+        assert_eq!(find("Mara.md", "location", "Ashfall").target_path.as_deref(), Some("Ashfall.md"));
+        assert_eq!(find("Kel.md", "location", "Ashfall|the city").target_path.as_deref(), Some("Ashfall.md"));
+        assert_eq!(find("Mara.md", "allies", "Kel").target_path.as_deref(), Some("Kel.md"));
+        assert_eq!(find("Mara.md", "allies", "Missing").target_path, None);
+
+        // rename rewrite picks up frontmatter-only linkers
+        let srcs = sources_linking_to(&conn, "Ashfall.md").unwrap();
+        assert!(srcs.iter().any(|(s, _)| s == "Mara.md"));
+        assert!(srcs.iter().any(|(s, _)| s == "Kel.md"));
+
+        // dataview-lite
+        let hits = run_query(&conn, "LIST FROM #npc WHERE location = [[Ashfall]]").unwrap().unwrap();
+        let titles: Vec<&str> = hits.iter().map(|h| h.title.as_str()).collect();
+        assert_eq!(titles, ["Kel", "Mara"]);
+        let hits = run_query(&conn, "FROM kind:npc WHERE allies contains kel").unwrap().unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].title, "Mara");
+        let hits = run_query(&conn, "LIST FROM kind:npc WHERE status != alive").unwrap().unwrap();
+        assert_eq!(hits[0].title, "Kel"); // absent field passes !=
+        assert!(run_query(&conn, "LIST nonsense").unwrap().is_err());
         std::fs::remove_dir_all(&dir).ok();
     }
 

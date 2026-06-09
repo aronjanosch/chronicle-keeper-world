@@ -10,6 +10,7 @@ import {
   importCodex, commitCodexImport,
   createPromptTemplate, updatePromptTemplate,
   enhanceVaultPages, loadVaultDiagnostics, exportWorld, revealPath,
+  createVaultPage, saveVaultPage,
 } from './actions.js';
 
 const PRONOUNS = ['she/her', 'he/him', 'they/them'];
@@ -17,6 +18,7 @@ const PRONOUNS = ['she/her', 'he/him', 'they/them'];
 const CODEX_KINDS = [
   { value: 'pc', label: 'PC' }, { value: 'npc', label: 'NPC' }, { value: 'place', label: 'Place' },
   { value: 'faction', label: 'Faction' }, { value: 'item', label: 'Item' },
+  { value: 'event', label: 'Event' },
   { value: 'lore', label: 'Lore' },
 ];
 
@@ -244,6 +246,43 @@ function TextPromptModal({ title, label, initial = '', placeholder, confirmLabel
       <${Input} value=${val} onInput=${setVal} placeholder=${placeholder}
         onKeydown=${(e) => { if (e.key === 'Enter') go(); }} />
     </${Field}>
+  </${ModalShell}>`;
+}
+
+// ── Quick capture (Phase 8D): fleeting note → Inbox/, sort later ───
+function QuickCaptureModal() {
+  const [text, setText] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState(null);
+  const taRef = { current: null };
+  useEffect(() => { if (taRef.current) taRef.current.focus(); }, []);
+  async function go() {
+    const t = text.trim();
+    if (!t) { setErr('Write something first'); return; }
+    setBusy(true); setErr(null);
+    const lines = t.split('\n');
+    const first = lines[0].replace(/^#+\s*/, '').replace(/[/\\]/g, '-').trim();
+    const stamp = new Date().toISOString().slice(0, 16).replace('T', ' ').replace(':', '.');
+    const title = first && first.length <= 80 ? first : `Capture ${stamp}`;
+    const body = (title === first ? lines.slice(1).join('\n') : t).trim();
+    try {
+      let page;
+      try { page = await createVaultPage(title, 'lore', 'Inbox'); }
+      catch (_) { page = await createVaultPage(`${title} ${stamp}`, 'lore', 'Inbox'); }
+      await saveVaultPage(page.path, `---\nkind: lore\nsummary:\ntags: [inbox]\n---\n\n# ${page.title}\n\n${body}\n`);
+      setOp(`Captured to ${page.path}`, 'done');
+      closeModal();
+    } catch (e) { setErr(e.message); setBusy(false); }
+  }
+  return html`<${ModalShell} title="Quick capture" footer=${html`
+    <span style=${{ flex: 1, fontSize: 12, color: 'var(--ink-faint)', fontStyle: 'italic' }}>First line becomes the title · lands in Inbox/</span>
+    <${Btn} kind="ghost" disabled=${busy} onClick=${closeModal}>Cancel</${Btn}>
+    <${Btn} kind="primary" disabled=${busy} onClick=${go}>${busy ? 'Saving…' : 'Capture'}</${Btn}>`}>
+    ${err && html`<div style=${{ color: 'var(--burgundy-700)', fontSize: 13 }}>${err}</div>`}
+    <textarea ref=${(el) => { taRef.current = el; }} rows=${6} value=${text} placeholder="Jot it down — sort it later (⌘↵ saves)"
+      onInput=${(e) => setText(e.target.value)}
+      onKeyDown=${(e) => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); go(); } }}
+      style=${{ width: '100%', background: 'var(--surface-raised)', border: '1px solid var(--rule)', borderRadius: 4, padding: '7px 10px', fontSize: 13, color: 'var(--ink)', fontFamily: 'inherit', resize: 'vertical', lineHeight: 1.45 }} />
   </${ModalShell}>`;
 }
 
@@ -630,6 +669,7 @@ export function ModalHost({ modal }) {
     case 'enhanceFolder': return html`<${EnhanceFolderModal} />`;
     case 'vaultDiag': return html`<${VaultDiagnosticsModal} />`;
     case 'commandPalette': return html`<${CommandPalette} />`;
+    case 'quickCapture': return html`<${QuickCaptureModal} />`;
     case 'exportWorld': return html`<${ExportWorldModal} />`;
     default: return null;
   }

@@ -8,50 +8,128 @@ export function loadCM() {
   return _cm;
 }
 
-// Scriptorium-matched markdown highlight + chrome. Tokens come from tokens.css.
+// Scriptorium-matched markdown highlight + chrome. Mirrors .ck-prose (app.css) so
+// edit mode reads like the rendered page: serif body, small-caps h2/h3, inset code.
 function buildTheme(cm) {
   const { HighlightStyle, syntaxHighlighting, tags, EditorView } = cm;
   const hl = HighlightStyle.define([
-    { tag: tags.heading1, fontSize: '1.5em', fontWeight: '600', color: 'var(--ink)' },
-    { tag: tags.heading2, fontSize: '1.25em', fontWeight: '600', color: 'var(--ink)' },
-    { tag: tags.heading3, fontSize: '1.1em', fontWeight: '600', color: 'var(--ink)' },
+    { tag: tags.heading1, fontSize: '26px', fontWeight: '500', letterSpacing: '-0.015em', color: 'var(--ink)' },
+    { tag: tags.heading2, fontSize: '12px', fontWeight: '600', letterSpacing: '0.12em', textTransform: 'uppercase', fontFamily: 'var(--font-ui)', color: 'var(--ink-faint)' },
+    { tag: tags.heading3, fontSize: '11px', fontWeight: '600', letterSpacing: '0.12em', textTransform: 'uppercase', fontFamily: 'var(--font-ui)', color: 'var(--burgundy)' },
     { tag: tags.heading, fontWeight: '600', color: 'var(--ink)' },
-    { tag: tags.strong, fontWeight: '700', color: 'var(--ink)' },
+    { tag: tags.strong, fontWeight: '600', color: 'var(--ink)' },
     { tag: tags.emphasis, fontStyle: 'italic', color: 'var(--ink-soft)' },
     { tag: tags.strikethrough, textDecoration: 'line-through', color: 'var(--ink-faint)' },
     { tag: tags.link, color: 'var(--burgundy)' },
     { tag: tags.url, color: 'var(--ink-blue)' },
-    { tag: [tags.monospace, tags.contentSeparator], color: 'var(--ink-soft)', fontFamily: 'var(--font-mono)' },
+    { tag: tags.monospace, color: 'var(--ink-soft)', fontFamily: 'var(--font-mono)', fontSize: '13px', background: 'var(--surface-inset)', borderRadius: '3px' },
+    { tag: tags.contentSeparator, color: 'var(--ink-ghost)', fontFamily: 'var(--font-mono)' },
     { tag: tags.quote, color: 'var(--ink-muted)', fontStyle: 'italic' },
     { tag: tags.list, color: 'var(--burgundy)' },
-    { tag: tags.processingInstruction, color: 'var(--ink-faint)' },
+    { tag: tags.processingInstruction, color: 'var(--ink-ghost)' },
   ]);
   const theme = EditorView.theme({
-    '&': { color: 'var(--ink)', backgroundColor: 'transparent', fontSize: '14px' },
+    '&': { color: 'var(--ink)', backgroundColor: 'transparent', fontSize: '15px' },
     '&.cm-focused': { outline: 'none' },
-    '.cm-scroller': { fontFamily: 'var(--font-mono)', lineHeight: '1.7', overflow: 'visible' },
+    '.cm-scroller': { fontFamily: 'var(--font-display)', lineHeight: '1.7', overflow: 'visible' },
     '.cm-content': { padding: '8px 0', caretColor: 'var(--burgundy)' },
     '.cm-cursor, .cm-dropCursor': { borderLeftColor: 'var(--burgundy)' },
     '.cm-selectionBackground, .cm-content ::selection': { backgroundColor: 'rgba(180,116,101,.25)' },
     '&.cm-focused .cm-selectionBackground': { backgroundColor: 'rgba(180,116,101,.3)' },
     '.cm-gutters': { backgroundColor: 'transparent', border: 'none', color: 'var(--ink-ghost)' },
+    '.cm-foldGutter .cm-gutterElement': { padding: '0 4px 0 0', cursor: 'pointer' },
     '.cm-activeLine': { backgroundColor: 'rgba(120,90,40,.045)' },
     '.cm-activeLineGutter': { backgroundColor: 'transparent', color: 'var(--ink-faint)' },
     '.cm-foldPlaceholder': { background: 'var(--paper-deep)', border: '1px solid var(--rule)', color: 'var(--ink-muted)' },
+
+    // Decorations from inkDecorations(): wikilinks, tags, frontmatter block.
+    '.cm-wikilink': { color: 'var(--burgundy)', borderBottom: '1px solid var(--burgundy-300)' },
+    '.cm-wikilink-bracket': { color: 'var(--ink-ghost)' },
+    '.cm-hashtag': { color: 'var(--ink-blue)', background: 'var(--ink-blue-50)', borderRadius: '4px', padding: '1px 4px', fontFamily: 'var(--font-ui)', fontSize: '12.5px' },
+    // The closing --- makes markdown read the YAML as a setext heading; flatten
+    // every inherited style so the block stays a quiet mono header.
+    '.cm-fmLine, .cm-fmLine span': {
+      fontFamily: 'var(--font-mono)', fontSize: '12.5px', fontWeight: 'normal', fontStyle: 'normal',
+      textTransform: 'none', letterSpacing: 'normal', color: 'var(--ink-muted)',
+      background: 'none', padding: '0', border: 'none', textDecoration: 'none',
+    },
+
     '.cm-tooltip': { background: 'var(--surface-raised)', border: '1px solid var(--rule-strong)', borderRadius: '8px', boxShadow: 'var(--shadow-raised)', overflow: 'hidden' },
     '.cm-tooltip.cm-tooltip-autocomplete > ul': { fontFamily: 'var(--font-display)', fontSize: '13px', maxHeight: '16em' },
     '.cm-tooltip-autocomplete ul li[aria-selected]': { background: 'var(--burgundy-50)', color: 'var(--ink)' },
     '.cm-completionIcon': { display: 'none' },
     '.cm-completionLabel': { color: 'var(--ink)' },
     '.cm-completionDetail': { color: 'var(--ink-faint)', fontStyle: 'normal', fontFamily: 'var(--font-mono)', fontSize: '10.5px' },
+
+    // Search & replace panel, restyled as an app toolbar.
     '.cm-panels': { background: 'var(--surface-raised)', color: 'var(--ink)' },
     '.cm-panels.cm-panels-top': { borderBottom: '1px solid var(--rule)' },
-    '.cm-panel.cm-search input, .cm-panel.cm-search button': { fontFamily: 'var(--font-mono)', fontSize: '12px' },
-    '.cm-panel.cm-search input': { background: 'var(--paper)', border: '1px solid var(--rule)', borderRadius: '4px', color: 'var(--ink)' },
+    '.cm-panel.cm-search': { fontFamily: 'var(--font-ui)', fontSize: '12px', padding: '8px 10px', display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '6px' },
+    '.cm-panel.cm-search br': { display: 'none' },
+    '.cm-panel.cm-search .cm-textfield': {
+      background: 'var(--paper)', border: '1px solid var(--rule)', borderRadius: '6px',
+      color: 'var(--ink)', fontFamily: 'var(--font-mono)', fontSize: '12.5px', padding: '4px 8px', margin: '0', width: '220px',
+    },
+    '.cm-panel.cm-search .cm-textfield:focus': { outline: 'none', borderColor: 'var(--burgundy-300)' },
+    '.cm-panel.cm-search .cm-button': {
+      background: 'var(--surface)', backgroundImage: 'none', border: '1px solid var(--rule-strong)', borderRadius: '6px',
+      color: 'var(--ink-soft)', fontFamily: 'var(--font-ui)', fontSize: '12px', padding: '4px 10px', margin: '0', cursor: 'pointer',
+    },
+    '.cm-panel.cm-search .cm-button:hover': { background: 'var(--paper-deep)' },
+    '.cm-panel.cm-search label': { display: 'inline-flex', alignItems: 'center', gap: '4px', color: 'var(--ink-muted)', fontSize: '11.5px', textTransform: 'lowercase' },
+    '.cm-panel.cm-search input[type=checkbox]': { accentColor: 'var(--burgundy)', margin: '0' },
+    '.cm-panel.cm-search [name=close]': { color: 'var(--ink-faint)', fontSize: '16px', cursor: 'pointer', top: '6px', right: '8px' },
     '.cm-searchMatch': { backgroundColor: 'rgba(180,116,101,.25)' },
     '.cm-searchMatch-selected': { backgroundColor: 'var(--burgundy-50)', outline: '1px solid var(--burgundy-300)' },
   }, { dark: false });
   return [theme, syntaxHighlighting(hl)];
+}
+
+// Marks for syntax the markdown parser doesn't know: [[wikilinks]], #tags, and the
+// YAML frontmatter block (styled as a quiet mono header, not body prose).
+function inkDecorations(cm) {
+  const { ViewPlugin, Decoration, MatchDecorator, RangeSetBuilder } = cm;
+  const plug = (deco) => ViewPlugin.fromClass(class {
+    constructor(view) { this.decorations = deco.createDeco(view); }
+    update(u) { this.decorations = deco.updateDeco(u, this.decorations); }
+  }, { decorations: (v) => v.decorations });
+
+  const bracketMark = Decoration.mark({ class: 'cm-wikilink-bracket' });
+  const linkMark = Decoration.mark({ class: 'cm-wikilink' });
+  const wiki = new MatchDecorator({
+    regexp: /(!?\[\[)([^\]\n]+)(\]\])/g,
+    decorate(add, from, to, m) {
+      add(from, from + m[1].length, bracketMark);
+      add(from + m[1].length, to - 2, linkMark);
+      add(to - 2, to, bracketMark);
+    },
+  });
+
+  const tagMark = Decoration.mark({ class: 'cm-hashtag' });
+  const tag = new MatchDecorator({
+    regexp: /(^|\s)(#[A-Za-z][\w/-]*)/g,
+    decorate(add, from, to, m) { add(to - m[2].length, to, tagMark); },
+  });
+
+  const fmLine = Decoration.line({ class: 'cm-fmLine' });
+  const frontmatter = ViewPlugin.fromClass(class {
+    constructor(view) { this.decorations = this.build(view); }
+    update(u) { if (u.docChanged) this.decorations = this.build(u.view); }
+    build(view) {
+      const b = new RangeSetBuilder();
+      const doc = view.state.doc;
+      if (doc.lines > 1 && doc.line(1).text.trim() === '---') {
+        let end = 0;
+        for (let i = 2; i <= Math.min(doc.lines, 80); i++) {
+          if (doc.line(i).text.trim() === '---') { end = i; break; }
+        }
+        for (let i = 1; i <= end; i++) b.add(doc.line(i).from, doc.line(i).from, fmLine);
+      }
+      return b.finish();
+    }
+  }, { decorations: (v) => v.decorations });
+
+  return [plug(wiki), plug(tag), frontmatter];
 }
 
 // ── Selection-wrap commands (⌘B / ⌘I / ⌘L) ──────────────────────────────
@@ -243,16 +321,24 @@ const SLASH_ITEMS = [
   { label: '/divider', detail: 'Horizontal rule', insert: '---\n' },
 ];
 
-function slashSource() {
+function slashSource(getSnippets) {
   return (ctx) => {
     const line = ctx.state.doc.lineAt(ctx.pos);
     const before = ctx.state.sliceDoc(line.from, ctx.pos);
     const m = /^\s*\/[\w-]*$/.exec(before);
     if (!m) return null;
     const from = line.from + before.indexOf('/');
+    const items = [
+      ...SLASH_ITEMS,
+      ...((getSnippets && getSnippets()) || []).map((s) => ({
+        label: '/' + s.name.toLowerCase().replace(/\s+/g, '-'),
+        detail: 'snippet',
+        insert: s.content.replace(/\n+$/, '\n'),
+      })),
+    ];
     return {
       from,
-      options: SLASH_ITEMS.map((it) => ({
+      options: items.map((it) => ({
         label: it.label, detail: it.detail, type: 'keyword',
         apply: (view, _c, f, to) => {
           view.dispatch({
@@ -271,7 +357,7 @@ function slashSource() {
 export async function mountEditor(host, opts) {
   const cm = await loadCM();
   const {
-    EditorState, EditorView, keymap, lineNumbers, highlightActiveLine, drawSelection, dropCursor,
+    EditorState, EditorView, keymap, highlightActiveLine, drawSelection, dropCursor,
     history, historyKeymap, defaultKeymap, indentWithTab, indentMore, indentLess, Prec,
     foldGutter, foldKeymap, codeFolding, indentOnInput, bracketMatching, syntaxHighlighting: _sh,
     markdown, markdownLanguage, insertNewlineContinueMarkup, deleteMarkupBackward,
@@ -314,16 +400,17 @@ export async function mountEditor(host, opts) {
     state: EditorState.create({
       doc: opts.doc,
       extensions: [
-        lineNumbers(), foldGutter(), codeFolding(),
+        foldGutter(), codeFolding(),
         history(), drawSelection(), dropCursor(),
         EditorState.allowMultipleSelections.of(true),
         indentOnInput(), bracketMatching(), closeBrackets(),
         highlightActiveLine(), highlightSelectionMatches(),
         markdown({ base: markdownLanguage }),
-        autocompletion({ override: [wikilinkSource(cm, opts.getPages, opts.onCreatePage), tagSource(opts.getPages), slashSource()], icons: false }),
+        autocompletion({ override: [wikilinkSource(cm, opts.getPages, opts.onCreatePage), tagSource(opts.getPages), slashSource(opts.getSnippets)], icons: false }),
         pasteDrop(cm, opts),
         search({ top: true }),
         buildTheme(cm),
+        inkDecorations(cm),
         EditorView.lineWrapping,
         formatKeys, listKeys,
         keymap.of([...closeBracketsKeymap, ...searchKeymap, ...completionKeymap, ...foldKeymap, ...historyKeymap, indentWithTab, ...defaultKeymap]),

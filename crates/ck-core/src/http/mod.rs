@@ -83,6 +83,7 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/campaigns/:id/vault/move", post(vault::move_entry))
         .route("/campaigns/:id/vault/kinds", get(vault::kind_schemas))
+        .route("/campaigns/:id/vault/snippets", get(vault::list_snippets))
         .route("/campaigns/:id/vault/assets", post(vault::upload_asset))
         .route("/campaigns/:id/vault/assets/*name", get(vault::asset_bytes))
         .route(
@@ -115,7 +116,10 @@ pub fn router(state: AppState) -> Router {
         .route("/campaigns/:id/vault/index/links", get(index::links))
         .route("/campaigns/:id/vault/diagnostics", get(index::diagnostics))
         .route("/campaigns/:id/vault/index/tags", get(index::tags))
+        .route("/campaigns/:id/vault/relations", get(index::relations))
+        .route("/campaigns/:id/vault/query", get(index::query))
         .route("/campaigns/:id/vault/search", get(index::search))
+        .route("/campaigns/:id/timeline", get(index::timeline))
         .route("/campaigns/:id/sessions/search", get(index::session_search))
         // the Keeper (Phase 6): agent chats
         .route(

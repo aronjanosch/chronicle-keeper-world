@@ -46,8 +46,25 @@ pub struct WorldConfig {
     /// Per-kind infobox field overrides (`[kinds.npc] fields = ["race", "affiliation:list"]`).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub kinds: BTreeMap<String, KindOverride>,
+    /// Custom fantasy calendar for the timeline (`[calendar]`).
+    #[serde(default, skip_serializing_if = "is_default_calendar")]
+    pub calendar: CalendarConfig,
     #[serde(flatten)]
     pub extra: toml::Table,
+}
+
+/// `[calendar]`: month names map `date:` month numbers for display; eras are
+/// ordered suffixes (`1374-08-12 DR`), earliest first.
+#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CalendarConfig {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub months: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub eras: Vec<String>,
+}
+
+fn is_default_calendar(c: &CalendarConfig) -> bool {
+    c.months.is_empty() && c.eras.is_empty()
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
@@ -73,6 +90,7 @@ const DEFAULT_KINDS: &[(&str, &[&str])] = &[
     ("place", &["region", "type", "population", "ruler"]),
     ("faction", &["type", "leader", "headquarters", "alignment"]),
     ("item", &["type", "owner", "location", "magical:checkbox"]),
+    ("event", &["date:date", "location", "participants:list"]),
     ("lore", &[]),
 ];
 
@@ -222,6 +240,7 @@ mod tests {
             }],
             codex_root: String::new(),
             kinds: BTreeMap::new(),
+            calendar: CalendarConfig::default(),
             extra: toml::Table::new(),
         };
         write(&root, &cfg).unwrap();

@@ -418,6 +418,24 @@ export async function saveVaultPage(path, content) {
   return page;
 }
 
+// Typed relations (Phase 9A): frontmatter [[link]] values, predicate = key.
+export async function loadRelations(campaignId) {
+  const id = campaignId || store.campaign?.campaign_id;
+  if (!id) return [];
+  const r = await apiFetch(`/campaigns/${id}/vault/relations`).catch(() => ({ relations: [] }));
+  setState({ vaultRelations: r.relations || [] });
+  return r.relations || [];
+}
+
+// Slash-menu snippets (.ck/templates/snippets/).
+export async function loadSnippets(campaignId) {
+  const id = campaignId || store.campaign?.campaign_id;
+  if (!id) return [];
+  const r = await apiFetch(`/campaigns/${id}/vault/snippets`).catch(() => ({ snippets: [] }));
+  setState({ snippets: r.snippets || [] });
+  return r.snippets || [];
+}
+
 // Pasted/dropped editor media → <vault>/Assets/. Returns { path, name }.
 export function uploadVaultAsset(name, blob) {
   const id = store.campaign.campaign_id;

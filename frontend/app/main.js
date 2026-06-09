@@ -19,6 +19,8 @@ import { PageScreen } from './screens/page.js';
 import { SessionsScreen } from './screens/sessions.js';
 import { NewWorldScreen } from './screens/newWorld.js';
 import { AtlasScreen } from './screens/atlas.js';
+import { TimelineScreen } from './screens/timeline.js';
+import { GraphScreen } from './screens/graph.js';
 import { KeeperScreen } from './screens/keeper.js';
 import { MigrationScreen } from './screens/migration.js';
 
@@ -73,6 +75,8 @@ function App() {
     case 'page': screen = html`<${PageScreen} store=${store} />`; break;
     case 'newWorld': screen = html`<${NewWorldScreen} store=${store} />`; break;
     case 'atlas': screen = html`<${AtlasScreen} store=${store} />`; break;
+    case 'timeline': screen = html`<${TimelineScreen} store=${store} />`; break;
+    case 'graph': screen = html`<${GraphScreen} store=${store} />`; break;
     case 'keeper': screen = html`<${KeeperScreen} store=${store} />`; break;
     default: screen = html`<${LibraryScreen} store=${store} />`;
   }

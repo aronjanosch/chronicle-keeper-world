@@ -300,7 +300,8 @@ pub fn ensure_ck_dir(vault: &Path) -> AppResult<()> {
     if !gitignore.exists() {
         let _ = std::fs::write(&gitignore, "index.db\nindex.db-*\n");
     }
-    write_default_templates(vault)
+    write_default_templates(vault)?;
+    write_default_snippets(vault)
 }
 
 pub fn list_pages(vault: &Path) -> AppResult<Vec<PageInfo>> {
@@ -408,6 +409,66 @@ pub fn write_default_templates(world_root: &Path) -> AppResult<()> {
         let _ = std::fs::write(dir.join(format!("{kind}.md")), template_content(&kind, &fields));
     }
     Ok(())
+}
+
+// ── Snippets (.ck/templates/snippets/<name>.md) — caret inserts, Phase 8C ──
+
+pub fn snippets_dir(world_root: &Path) -> PathBuf {
+    templates_dir(world_root).join("snippets")
+}
+
+const DEFAULT_SNIPPETS: &[(&str, &str)] = &[
+    (
+        "Statblock",
+        "> [!note] Statblock\n> **AC** — · **HP** — · **Speed** —\n>\n> | STR | DEX | CON | INT | WIS | CHA |\n> | --- | --- | --- | --- | --- | --- |\n> | — | — | — | — | — | — |\n>\n> **Traits** —\n> **Actions** —\n",
+    ),
+    (
+        "Location skeleton",
+        "## At a glance\n\n\n## Notable people\n\n- [[ ]]\n\n## Hooks\n\n- \n\n> [!secret] GM only\n> \n",
+    ),
+    (
+        "Plot hook",
+        "> [!note] Hook\n> **Who** — \n> **Wants** — \n> **Obstacle** — \n> **Twist** — \n",
+    ),
+];
+
+/// Seed starter snippets once; an existing folder is the user's (edits and
+/// deletions sacred), exactly like the kind templates.
+pub fn write_default_snippets(world_root: &Path) -> AppResult<()> {
+    let dir = snippets_dir(world_root);
+    if dir.exists() {
+        return Ok(());
+    }
+    std::fs::create_dir_all(&dir)
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("create snippets dir: {e}")))?;
+    for (name, content) in DEFAULT_SNIPPETS {
+        let _ = std::fs::write(dir.join(format!("{name}.md")), content);
+    }
+    Ok(())
+}
+
+/// (name, content) for every snippet file, sorted by name.
+pub fn list_snippets(world_root: &Path) -> Vec<(String, String)> {
+    let Ok(entries) = std::fs::read_dir(snippets_dir(world_root)) else {
+        return Vec::new();
+    };
+    let mut out: Vec<(String, String)> = entries
+        .flatten()
+        .filter_map(|e| {
+            let path = e.path();
+            if path.extension().and_then(|x| x.to_str()) != Some("md") {
+                return None;
+            }
+            let name = path.file_stem()?.to_str()?.to_string();
+            if name.starts_with('.') {
+                return None;
+            }
+            let content = std::fs::read_to_string(&path).ok()?;
+            Some((name, content))
+        })
+        .collect();
+    out.sort_by_key(|(name, _)| name.to_lowercase());
+    out
 }
 
 pub fn read_template(world_root: &Path, kind: &str) -> Option<String> {
@@ -845,6 +906,20 @@ mod tests {
         assert!(resolve(v, "a/../../b.md").is_err());
         assert!(resolve(v, "notes.txt").is_err());
         assert_eq!(resolve(v, "Characters/Aragorn.md").unwrap(), v.join("Characters/Aragorn.md"));
+    }
+
+    #[test]
+    fn snippets_seed_once_and_list() {
+        let dir = std::env::temp_dir().join(format!("ck-vault-snip-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        write_default_snippets(&dir).unwrap();
+        let names: Vec<String> = list_snippets(&dir).into_iter().map(|(n, _)| n).collect();
+        assert!(names.contains(&"Statblock".to_string()));
+        // user edits are sacred: a second seed run must not restore deletions
+        std::fs::remove_file(snippets_dir(&dir).join("Statblock.md")).unwrap();
+        write_default_snippets(&dir).unwrap();
+        assert!(!list_snippets(&dir).iter().any(|(n, _)| n == "Statblock"));
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
