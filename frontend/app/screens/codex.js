@@ -357,15 +357,20 @@ function RenameInput({ initial, onCommit, onCancel }) {
       color: 'var(--ink)', outline: 'none' }} />`;
 }
 
-function PageLeaf({ page, depth, active, onOpen, act, ren }) {
+function PageLeaf({ page, depth, active, onOpen, act, ren, dnd }) {
   const isActive = page.path === active;
   const renaming = ren && ren.path === page.path;
+  const dragging = dnd && dnd.draggingPath === page.path;
   return html`<div onClick=${renaming ? null : onOpen} onMouseEnter=${rowHover(true)} onMouseLeave=${rowHover(false)}
+    draggable=${dnd && !renaming ? true : undefined}
+    onDragStart=${dnd ? dnd.startPage(page) : undefined}
+    onDragEnd=${dnd ? dnd.end : undefined}
     style=${{
       display: 'flex', alignItems: 'center', gap: 7, padding: '4px 8px', paddingLeft: 27 + depth * 14, borderRadius: 5, cursor: 'pointer',
       background: isActive ? 'var(--burgundy-50)' : 'transparent',
       boxShadow: isActive ? 'inset 2px 0 0 var(--burgundy)' : 'none',
       color: isActive ? 'var(--burgundy-700)' : 'var(--ink-soft)',
+      opacity: dragging ? 0.45 : 1,
     }}>
     ${glyphFor(page.kind, 16)}
     ${renaming
@@ -379,14 +384,25 @@ function PageLeaf({ page, depth, active, onOpen, act, ren }) {
   </div>`;
 }
 
-function FolderNode({ node, depth, openSet, toggle, active, onOpen, act, ren }) {
+function FolderNode({ node, depth, openSet, toggle, active, onOpen, act, ren, dnd }) {
   const open = openSet.has(node.path);
   const kind = kindForFolder(node.name);
   const renaming = ren && ren.path === node.path;
   const children = [...node.folders.values()].sort((a, b) => a.name.localeCompare(b.name));
+  const dragging = dnd && dnd.draggingPath === node.path;
+  const dropOver = dnd && dnd.over === node.path;
   return html`<div>
     <div onClick=${renaming ? null : () => toggle(node.path)} onMouseEnter=${rowHover(true)} onMouseLeave=${rowHover(false)}
-      style=${{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 8px', paddingLeft: 10 + depth * 14, borderRadius: 5, cursor: 'pointer', color: 'var(--ink-soft)' }}>
+      draggable=${dnd && !renaming ? true : undefined}
+      onDragStart=${dnd ? dnd.startFolder(node) : undefined}
+      onDragEnd=${dnd ? dnd.end : undefined}
+      onDragOver=${dnd ? dnd.overFolder(node.path) : undefined}
+      onDragLeave=${dnd ? dnd.leave(node.path) : undefined}
+      onDrop=${dnd ? dnd.dropFolder(node.path) : undefined}
+      style=${{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 8px', paddingLeft: 10 + depth * 14, borderRadius: 5, cursor: 'pointer',
+        color: 'var(--ink-soft)', opacity: dragging ? 0.45 : 1,
+        background: dropOver ? 'var(--burgundy-50)' : 'transparent',
+        boxShadow: dropOver ? 'inset 0 0 0 1px var(--burgundy-300)' : 'none' }}>
       <${Icon} name=${open ? 'chev-d' : 'chev-r'} size=${11} className="ck-ink-faint" />
       ${kind ? glyphFor(kind, 16) : html`<${Icon} name="folder" size=${13} className="ck-burgundy" />`}
       ${renaming
@@ -400,8 +416,8 @@ function FolderNode({ node, depth, openSet, toggle, active, onOpen, act, ren }) 
       <span style=${{ fontFamily: 'var(--font-mono)', fontSize: 10.5, color: 'var(--ink-faint)' }}>${countPages(node) || ''}</span>`}
     </div>
     ${open && html`<div>
-      ${children.map((c) => html`<${FolderNode} key=${c.path} node=${c} depth=${depth + 1} openSet=${openSet} toggle=${toggle} active=${active} onOpen=${onOpen} act=${act} ren=${ren} />`)}
-      ${node.pages.map((p) => html`<${PageLeaf} key=${p.path} page=${p} depth=${depth + 1} active=${active} onOpen=${() => onOpen(p)} act=${act} ren=${ren} />`)}
+      ${children.map((c) => html`<${FolderNode} key=${c.path} node=${c} depth=${depth + 1} openSet=${openSet} toggle=${toggle} active=${active} onOpen=${onOpen} act=${act} ren=${ren} dnd=${dnd} />`)}
+      ${node.pages.map((p) => html`<${PageLeaf} key=${p.path} page=${p} depth=${depth + 1} active=${active} onOpen=${() => onOpen(p)} act=${act} ren=${ren} dnd=${dnd} />`)}
     </div>`}
   </div>`;
 }
@@ -436,6 +452,31 @@ export function FileTree({ campaign, tree, active, onOpen, act }) {
     },
   };
   const toggle = (path) => setOpenSet((s) => { const n = new Set(s); n.has(path) ? n.delete(path) : n.add(path); return n; });
+
+  // Drag-to-move: drop a page/folder onto a folder (or the root) → move_entry,
+  // with the link-rewrite cascade the backend already runs on rename. The
+  // kebab "Move…" modal stays as the a11y fallback.
+  const [drag, setDrag] = useState(null);   // { path, isFolder, name }
+  const [over, setOver] = useState(null);   // folder path being hovered ('' = root)
+  async function doMove(folder) {
+    const item = drag; setDrag(null); setOver(null);
+    if (!item) return;
+    if (item.isFolder && (folder === item.path || folder.startsWith(item.path + '/'))) return; // into self/descendant
+    if (dirOf(item.path) === folder) return; // already there
+    const dest = folder ? `${folder}/${item.name}` : item.name;
+    try { await moveVaultEntry(item.path, dest); }
+    catch (e) { window.alert(`Move failed: ${e.message}`); }
+  }
+  const dnd = {
+    draggingPath: drag?.path, over,
+    startPage: (page) => (e) => { setDrag({ path: page.path, isFolder: false, name: baseName(page.path) }); e.dataTransfer.effectAllowed = 'move'; },
+    startFolder: (node) => (e) => { e.stopPropagation(); setDrag({ path: node.path, isFolder: true, name: baseName(node.path) }); e.dataTransfer.effectAllowed = 'move'; },
+    overFolder: (path) => (e) => { if (!drag) return; e.preventDefault(); e.stopPropagation(); e.dataTransfer.dropEffect = 'move'; if (over !== path) setOver(path); },
+    leave: (path) => () => { if (over === path) setOver(null); },
+    dropFolder: (path) => (e) => { e.preventDefault(); e.stopPropagation(); doMove(path); },
+    end: () => { setDrag(null); setOver(null); },
+  };
+
   const query = q.trim().toLowerCase();
   const allPages = [];
   (function walk(node) { node.pages.forEach((p) => allPages.push(p)); node.folders.forEach(walk); })(tree);
@@ -528,9 +569,10 @@ export function FileTree({ campaign, tree, active, onOpen, act }) {
             </div>`}
             ${matches.length === 0 && bodyHits.length === 0 && html`<div style=${{ fontSize: 12, color: 'var(--ink-faint)', fontStyle: 'italic', padding: '6px 12px' }}>No matches.</div>`}
           </div>`
-        : html`<div>
-            ${rootFolders.map((c) => html`<${FolderNode} key=${c.path} node=${c} depth=${0} openSet=${openSet} toggle=${toggle} active=${active} onOpen=${onOpen} act=${act} ren=${ren} />`)}
-            ${tree.pages.map((p) => html`<${PageLeaf} key=${p.path} page=${p} depth=${0} active=${active} onOpen=${() => onOpen(p)} act=${act} ren=${ren} />`)}
+        : html`<div onDragOver=${dnd.overFolder('')} onDragLeave=${dnd.leave('')} onDrop=${dnd.dropFolder('')}
+            style=${{ minHeight: 40, borderRadius: 5, boxShadow: dnd.over === '' && dnd.draggingPath ? 'inset 0 0 0 1px var(--burgundy-300)' : 'none' }}>
+            ${rootFolders.map((c) => html`<${FolderNode} key=${c.path} node=${c} depth=${0} openSet=${openSet} toggle=${toggle} active=${active} onOpen=${onOpen} act=${act} ren=${ren} dnd=${dnd} />`)}
+            ${tree.pages.map((p) => html`<${PageLeaf} key=${p.path} page=${p} depth=${0} active=${active} onOpen=${() => onOpen(p)} act=${act} ren=${ren} dnd=${dnd} />`)}
           </div>`}
     </div>
     ${diag && (diag.unresolved > 0 || diag.orphans > 0 || diag.issues > 0) && html`<div title="Vault diagnostics — click for the full list"

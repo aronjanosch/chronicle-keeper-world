@@ -170,6 +170,41 @@ function OnMapCard({ path, maps, campaignId }) {
   </${RailCard}>`;
 }
 
+// Headings (H1–H3) parsed from the page body, skipping fenced code blocks.
+// Decision (Phase 7c): depth capped at H3.
+function parseOutline(md) {
+  const out = [];
+  let fence = false;
+  for (const raw of (md || '').split('\n')) {
+    const line = raw.trimEnd();
+    if (/^(```|~~~)/.test(line.trim())) { fence = !fence; continue; }
+    if (fence) continue;
+    const m = line.match(/^(#{1,3})\s+(.+)/);
+    if (m) out.push({ level: m[1].length, text: m[2].replace(/[*_`]/g, '').trim() });
+  }
+  return out;
+}
+
+// Sticky in-page nav. Click scrolls to the Nth rendered heading — the prose is
+// rendered from the same source in order, so outline index === h1/h2/h3 index.
+function OutlineCard({ outline, scrollRef }) {
+  if (!outline || outline.length < 2) return null;
+  const go = (i) => {
+    // Scope to the prose body — the page title <h1> sits outside .ck-prose, so
+    // querying the whole scroller would be off by one vs the parsed outline.
+    const hs = scrollRef.current?.querySelectorAll('.ck-prose h1, .ck-prose h2, .ck-prose h3');
+    if (hs && hs[i]) hs[i].scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+  return html`<${RailCard} icon="scroll" title="Outline">
+    <div style=${{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+      ${outline.map((h, i) => html`<div key=${i} class="ck-rail-link"
+        onClick=${() => go(i)} style=${{ paddingLeft: (h.level - 1) * 12 }}>
+        <span style=${{ fontSize: h.level === 1 ? 12.5 : 12, color: h.level === 1 ? 'var(--ink)' : 'var(--ink-soft)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>${h.text}</span>
+      </div>`)}
+    </div>
+  </${RailCard}>`;
+}
+
 function BacklinksCard({ path, pages, links }) {
   const sources = [...new Set((links || [])
     .filter((l) => l.target_path === path)
@@ -502,9 +537,11 @@ function ReadView({ page, path, pages, links, schemas, atlasMaps, campaignId, on
   const meta = (pages || []).find((p) => p.path === path);
   const words = prose.trim() ? prose.trim().split(/\s+/).length : 0;
   const edited = meta?.modified ? new Date(meta.modified * 1000).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : null;
+  const outline = useMemo(() => parseOutline(prose), [prose]);
+  const scrollRef = useRef(null);
 
   return html`<div style=${{ flex: 1, display: 'flex', minWidth: 0, minHeight: 0 }}>
-    <div style=${{ flex: 1, overflow: 'auto', background: 'var(--paper)', padding: '34px 0 64px', minWidth: 0 }}>
+    <div ref=${scrollRef} style=${{ flex: 1, overflow: 'auto', background: 'var(--paper)', padding: '34px 0 64px', minWidth: 0 }}>
       <div style=${{ maxWidth: 680, margin: '0 auto', padding: '0 52px' }}>
         <${Provenance} path=${path} />
         <div style=${{ fontSize: 10.5, fontWeight: 600, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--burgundy)', marginTop: 16 }}>${eyebrow}</div>
@@ -514,6 +551,7 @@ function ReadView({ page, path, pages, links, schemas, atlasMaps, campaignId, on
       </div>
     </div>
     ${!railHidden && html`<aside class="ck-rail">
+      <${OutlineCard} outline=${outline} scrollRef=${scrollRef} />
       <${InfoboxCard} fm=${fm} kind=${page.kind} schemas=${schemas} pages=${pages} />
       <${SummaryCard} page=${page} onSave=${onSave} />
       <${TagsCard} tags=${meta?.tags} />
