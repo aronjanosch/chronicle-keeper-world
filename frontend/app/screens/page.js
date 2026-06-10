@@ -10,6 +10,7 @@ import { Shell, Topbar, useSidebarWidth, ResizeHandle } from '../shell.js';
 import { Empty, Icon, PageBody, WikilinkHoverCard, splitDoc, joinDoc, parseProps, openContextMenu, useAsset, bannerAsset } from '../ui.js';
 import { readVaultPage, saveVaultPage, openCampaign, loadVaultTree, loadKindSchemas, loadAtlasMaps, createVaultPage, watchVault, uploadVaultAsset, loadSnippets, loadRelations, copyText } from '../actions.js';
 import { mountEditor } from '../cm.js';
+import { setEditorActive } from '../commands.js';
 import { FileTree, buildTree, makeVaultActions, iconForKind, KINDS, dirOf } from './codex.js';
 import { colorForKind } from '../graph.js';
 import { keeperState, openPanel, Conversation } from '../keeperPanel.js';
@@ -388,7 +389,8 @@ function CmEditor({ content, pages, snippets, onSave, onCreate, onState, onExtra
       onExtract,
       onQuote,
     }).then((c) => { if (dead) c.destroy(); else ctl = c; });
-    return () => { dead = true; if (ctl) ctl.destroy(); };
+    setEditorActive(true);
+    return () => { dead = true; if (ctl) ctl.destroy(); setEditorActive(false); };
   }, []);
   return html`<div ref=${hostRef} class="ck-cm" />`;
 }
@@ -526,6 +528,16 @@ export function PageScreen() {
 
   const toggleRail = () => setRailHidden((h) => { saveFlag('ck_rail_hidden', !h); return !h; });
   const toggleZen = () => setZen((z) => { saveFlag('ck_zen', !z); return !z; });
+
+  // 14E: ⌘⇧K / View-menu commands for the toggles this screen owns.
+  useEffect(() => {
+    const onCmd = (e) => {
+      if (e.detail === 'toggle-rail' && mode === 'read') toggleRail();
+      else if (e.detail === 'zen' && mode === 'edit') toggleZen();
+    };
+    window.addEventListener('ck:cmd', onCmd);
+    return () => window.removeEventListener('ck:cmd', onCmd);
+  }, [mode]);
 
   const pageRef = useRef(null); pageRef.current = page;
   const saveRef = useRef(saveState); saveRef.current = saveState;

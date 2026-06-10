@@ -288,6 +288,40 @@ function QuickCaptureModal() {
   </${ModalShell}>`;
 }
 
+// ── Shortcut cheat sheet (Phase 14E, ⌘/) ──────────────────────────
+const SHORTCUT_GROUPS = [
+  { head: 'Navigate', keys: [
+    ['⌘K', 'Command palette'], ['⌘P', 'Quick-open a page'], ['⌘[ / ⌘]', 'Back / forward'],
+    ['⌘⇧F', 'Search the world'], ['⌘,', 'Settings'],
+  ] },
+  { head: 'Create', keys: [
+    ['⌘N', 'New page'], ['⌘⇧J', 'Quick capture'],
+  ] },
+  { head: 'Page', keys: [
+    ['⌘⇧K', 'Toggle the side panel'], ['⌘S', 'Save now'], ['⌘/', 'This cheat sheet'],
+  ] },
+  { head: 'Editor', keys: [
+    ['⌘B / ⌘I', 'Bold / italic'], ['⌘L', 'Wrap as [[wikilink]]'], ['⌘F', 'Find in page'],
+    ['[[', 'Link a page'], ['/', 'Slash menu (on an empty line)'], ['Tab / ⇧Tab', 'Indent list item'],
+  ] },
+];
+
+function ShortcutsModal() {
+  const mac = /Mac|iP(hone|ad|od)/.test(navigator.platform || '');
+  const key = (k) => mac ? k : k.replace(/⌘/g, 'Ctrl+').replace(/⇧/g, 'Shift+');
+  return html`<${ModalShell} title="Keyboard shortcuts" wide>
+    <div style=${{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '18px 28px' }}>
+      ${SHORTCUT_GROUPS.map((g) => html`<div key=${g.head}>
+        <div style=${{ fontSize: 10, fontWeight: 600, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--ink-faint)', marginBottom: 8 }}>${g.head}</div>
+        ${g.keys.map(([k, label]) => html`<div key=${k} style=${{ display: 'flex', alignItems: 'baseline', gap: 12, padding: '3px 0' }}>
+          <span style=${{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--ink)', background: 'var(--surface-inset)', border: '1px solid var(--rule-soft)', borderRadius: 4, padding: '1px 6px', whiteSpace: 'nowrap' }}>${key(k)}</span>
+          <span style=${{ fontSize: 13, color: 'var(--ink-soft)' }}>${label}</span>
+        </div>`)}
+      </div>`)}
+    </div>
+  </${ModalShell}>`;
+}
+
 // ── New event (Phase 11.5): mint a thin dated beat from the timeline ──
 // Picker over existing pages; Enter accepts free text (broken wikilink
 // until the page exists — same contract as typing [[New Name]]).
@@ -1008,6 +1042,7 @@ export function ModalHost({ modal }) {
     case 'worldHistory': return html`<${WorldHistoryModal} />`;
     case 'trash': return html`<${TrashModal} />`;
     case 'commandPalette': return html`<${CommandPalette} />`;
+    case 'shortcuts': return html`<${ShortcutsModal} />`;
     case 'quickCapture': return html`<${QuickCaptureModal} />`;
     case 'newEvent': return html`<${NewEventModal} ...${modal.props} />`;
     case 'exportWorld': return html`<${ExportWorldModal} />`;

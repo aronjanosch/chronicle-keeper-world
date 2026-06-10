@@ -487,6 +487,13 @@ function escapeHtml(s) {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
+// Undo marked's text escaping: resolveWikilinks runs on rendered HTML, so a
+// [[Remnant's Fury]] arrives as [[Remnant&#39;s Fury]] and would never match
+// a page title (and would double-escape on output).
+function unescapeHtml(s) {
+  return s.replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+}
 function inline(s) {
   return escapeHtml(s)
     .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
@@ -582,7 +589,8 @@ export function resolveWikilinks(htmlStr, pages) {
     }
     if (skip > 0 || !t.includes('[[')) continue;
     tokens[i] = t.replace(/(!?)\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g, (m, bang, target, label) => {
-      const raw = target.trim();
+      const raw = unescapeHtml(target.trim());
+      if (label) label = unescapeHtml(label);
       // `![[file.ext]]` media embeds → <img>; PageBody fills src via blob fetch
       // (an <img src> can't carry the auth header).
       if (bang && /\.(?!md$)[A-Za-z0-9]+$/i.test(raw)) {

@@ -2,45 +2,30 @@
 // Pure frontend over shipped endpoints: fuzzy page jump (name + alias),
 // full-text hits, tag jump, recent pages, and a handful of nav/create actions.
 import { html, useState, useEffect, useRef } from '../../vendor/htm-preact-standalone.mjs';
-import { store, navigate, navigateBack, navigateForward, openModal, closeModal, recentPages } from '../core.js';
+import { store, navigate, openModal, closeModal, recentPages } from '../core.js';
 import { Icon } from '../ui.js';
-import { searchVault, loadVaultTags, createVaultPage, createVaultFolder } from '../actions.js';
+import { searchVault, loadVaultTags, createVaultPage } from '../actions.js';
+import { runCommand, promptNewPage, promptNewFolder } from '../commands.js';
 
-// The single global keydown listener. ⌘K (Ctrl+K) is the only reserved key —
+// ⌘<key> / ⌘⇧<key> → command id (14E). Symbol keys match on e.key regardless
+// of shift so non-US layouts that type them shifted still work.
+const MOD_KEYS = { k: 'palette', p: 'quick-open', n: 'new-page', s: 'save' };
+const MOD_SHIFT_KEYS = { f: 'search-world', j: 'quick-capture', k: 'toggle-rail' };
+const MOD_SYMBOLS = { '[': 'nav-back', ']': 'nav-forward', ',': 'settings', '/': 'shortcuts' };
+
+// The single global keydown dispatcher. Only ⌘-chords are reserved —
 // everything else falls through to the focused element so editors keep their
-// own keymaps. Mount once at the app root.
+// own keymaps. In the Tauri shell most of these also exist as native menu
+// accelerators; runCommand dedupes the double fire. Mount once at the app root.
 export function useGlobalHotkeys() {
   useEffect(() => {
     const onKey = (e) => {
-      if ((e.metaKey || e.ctrlKey) && !e.altKey && (e.key === 'k' || e.key === 'K')) {
-        e.preventDefault();
-        const open = store.modal?.kind === 'commandPalette';
-        if (open) closeModal();
-        else if (!store.modal) openModal('commandPalette');
-      }
-      // ⌘⇧F — jump to the standing search screen (Phase 7b). Reserved global;
-      // the editor keeps ⌘F for in-document find (Phase 7.5).
-      else if ((e.metaKey || e.ctrlKey) && e.shiftKey && !e.altKey && (e.key === 'f' || e.key === 'F')) {
-        if (!store.campaign?.campaign_id) return;
-        e.preventDefault();
-        if (store.modal?.kind === 'commandPalette') closeModal();
-        navigate('search', { id: store.campaign.campaign_id });
-      }
-      // ⌘⇧J — quick capture into Inbox/ (Phase 8D).
-      else if ((e.metaKey || e.ctrlKey) && e.shiftKey && !e.altKey && (e.key === 'j' || e.key === 'J')) {
-        if (!store.campaign?.campaign_id || store.modal) return;
-        e.preventDefault();
-        openModal('quickCapture');
-      }
-      // ⌘[ / ⌘] — navigate back / forward (Phase 14E).
-      else if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key === '[') {
-        e.preventDefault();
-        navigateBack();
-      }
-      else if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key === ']') {
-        e.preventDefault();
-        navigateForward();
-      }
+      if (!(e.metaKey || e.ctrlKey) || e.altKey) return;
+      const id = MOD_SYMBOLS[e.key]
+        || (e.shiftKey ? MOD_SHIFT_KEYS[e.key.toLowerCase()] : MOD_KEYS[e.key.toLowerCase()]);
+      if (!id) return;
+      e.preventDefault();
+      runCommand(id);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -113,22 +98,10 @@ function CommandPalette() {
   const pages = store.vaultPages || [];
   const tags = store.vaultTags || [];
 
-  function newPage() {
-    openModal('textPrompt', {
-      title: 'New page', label: 'Page title', confirmLabel: 'Create',
-      onSubmit: async (title) => { const p = await createVaultPage(title, 'npc', ''); navigate('page', { path: p.path }); },
-    });
-  }
   function newEvent() {
     openModal('textPrompt', {
       title: 'New event page', label: 'Event title', confirmLabel: 'Create',
       onSubmit: async (title) => { const p = await createVaultPage(title, 'event', 'Events'); navigate('page', { path: p.path }); },
-    });
-  }
-  function newFolder() {
-    openModal('textPrompt', {
-      title: 'New folder', label: 'Folder name', confirmLabel: 'Create',
-      onSubmit: (name) => createVaultFolder(name),
     });
   }
   const go = (name, params) => () => { closeModal(); navigate(name, params); };
@@ -161,9 +134,9 @@ function CommandPalette() {
   }
 
   const actionDefs = cid ? [
-    { icon: 'plus', label: 'New page', run: () => { closeModal(); newPage(); } },
+    { icon: 'plus', label: 'New page', run: () => { closeModal(); promptNewPage(); } },
     { icon: 'cal', label: 'New event page', run: () => { closeModal(); newEvent(); } },
-    { icon: 'folder', label: 'New folder', run: () => { closeModal(); newFolder(); } },
+    { icon: 'folder', label: 'New folder', run: () => { closeModal(); promptNewFolder(); } },
     { icon: 'search', label: query ? `Search the world for “${q.trim()}”` : 'Search the world', run: () => { closeModal(); navigate('search', { id: cid, q: q.trim() }); } },
     { icon: 'book', label: 'Go to Codex', run: go('codex', { id: cid }) },
     { icon: 'map', label: 'Go to Atlas', run: go('atlas', { id: cid }) },

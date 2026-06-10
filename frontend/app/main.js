@@ -5,6 +5,7 @@ import { loadCampaigns, loadConfig, refreshProviderStatus, checkMigration } from
 import { Icon, Spinner, ContextMenuHost } from './ui.js';
 import { ModalHost } from './modals.js';
 import { useGlobalHotkeys } from './screens/palette.js';
+import { initMenuBridge } from './commands.js';
 import { LibraryScreen } from './screens/library.js';
 import { CampaignScreen } from './screens/campaign.js';
 import { SessionScreen } from './screens/session.js';
@@ -94,4 +95,5 @@ function App() {
 
 // ── Boot ──────────────────────────────────────────────────────────
 loadApiBase();                       // sync: resolve API base/token before any fetch
+initMenuBridge();                    // native menu → runCommand (no-op in the browser)
 render(html`<${App} />`, document.getElementById('root'));  // App's effect does the loads

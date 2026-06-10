@@ -604,8 +604,25 @@ export async function mountEditor(host, opts) {
   });
   view.focus();
   const bubble = bubbleToolbar(cm, view, opts);
+
+  // 14 D+E: commands routed from the native menu / global shortcuts.
+  const cmdRuns = {
+    'fmt-bold': wrapWith(cm, '**', '**'), 'fmt-italic': wrapWith(cm, '*', '*'),
+    'fmt-code': wrapWith(cm, '`', '`'), 'fmt-highlight': wrapWith(cm, '==', '=='),
+    'fmt-wikilink': wrapLink(cm),
+    'fmt-h1': turnInto('h1'), 'fmt-h2': turnInto('h2'), 'fmt-h3': turnInto('h3'),
+    'fmt-list': turnInto('list'), 'fmt-quote': turnInto('quote'), 'fmt-callout': turnInto('callout'),
+  };
+  const onCmd = (e) => {
+    const id = e.detail;
+    if (id === 'save') flush();
+    else if (id === 'find') { cm.openSearchPanel(view); }
+    else if (cmdRuns[id]) { cmdRuns[id](view); view.focus(); }
+  };
+  window.addEventListener('ck:cmd', onCmd);
+
   return {
     view,
-    destroy() { flush(); bubble.destroy(); view.destroy(); },
+    destroy() { window.removeEventListener('ck:cmd', onCmd); flush(); bubble.destroy(); view.destroy(); },
   };
 }

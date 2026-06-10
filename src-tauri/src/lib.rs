@@ -2,6 +2,8 @@ use std::net::SocketAddr;
 
 use tauri::{WebviewUrl, WebviewWindowBuilder};
 
+mod menu;
+
 /// Launch the embedded ck-core API on an ephemeral loopback port, then open the
 /// webview with the chosen base URL + a per-launch auth token injected before
 /// the page scripts run. The server is an in-process tokio task (no sidecar).
@@ -56,7 +58,12 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        // Phase 14F: windows remember size/position across launches.
+        .plugin(tauri_plugin_window_state::Builder::default().build())
+        .invoke_handler(tauri::generate_handler![menu::set_format_enabled])
+        .on_menu_event(menu::on_menu_event)
         .setup(move |app| {
+            menu::install(app.handle())?;
             WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
                 .title("Chronicle Keeper")
                 .inner_size(1200.0, 800.0)
