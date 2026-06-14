@@ -9,7 +9,7 @@ fn main() -> anyhow::Result<()> {
     let files: Vec<PathBuf> = std::env::args().skip(1).map(PathBuf::from).collect();
     let mut failed = false;
     for f in &files {
-        match decode::decode_to_mono(f) {
+        match decode::decode_to_mono(f, &ck_core::transcription::Watch::default()) {
             Ok((samples, sr)) => {
                 let secs = samples.len() as f64 / sr as f64;
                 println!(
