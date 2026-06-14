@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Maps, timeline &amp; graph · Chronicle Keeper docs</title>
+  <meta name="description" content="See your world four ways — pinned maps, a calendar timeline, a force-directed graph, and dataview-style queries — all driven by the same pages." />
+  <link rel="icon" href="../assets/favicon.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="../assets/style.css" />
+</head>
+<body>
+
+  <header class="topnav">
+    <div class="wrap">
+      <a class="brand" href="../">
+        <span class="mark" style="width:30px;height:30px"><svg width="17" height="17" viewBox="0 0 20 20"><path d="M14.5 6.5C13.5 5.5 12 5 10.5 5c-3 0-5 2-5 5s2 5 5 5c1.5 0 3-.5 4-1.5" stroke="#F2D9D2" stroke-width="1.8" stroke-linecap="round" fill="none"/></svg></span>
+        <span class="name">Chronicle Keeper<small>Docs</small></span>
+      </a>
+      <button class="nav-toggle btn btn-secondary btn-sm" aria-label="Toggle menu"><svg class="ic" viewBox="0 0 16 16"><path d="M2 4h12M2 8h12M2 12h12"/></svg></button>
+      <nav>
+        <a href="../#features">Features</a>
+        <a href="../#pipeline">How it works</a>
+        <a href="getting-started.html" class="is-active">Docs</a>
+        <a href="https://github.com/aronjanosch/chronicle-keeper-world">GitHub</a>
+        <a class="btn btn-primary btn-sm" href="https://github.com/aronjanosch/chronicle-keeper-world/releases" style="color:#FBF6E9">Download</a>
+      </nav>
+    </div>
+  </header>
+
+  <div class="docs">
+    <aside class="docs-sidebar">
+      <div class="group">
+        <h6>Start here</h6>
+        <a href="getting-started.html"><svg class="ic" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6"/><path d="m10.5 5.5-1.6 3.4-3.4 1.6 1.6-3.4 3.4-1.6Z"/></svg> Getting started</a>
+        <a href="install.html"><svg class="ic" viewBox="0 0 16 16"><path d="M8 3v8M5 8l3 3 3-3M3 13h10"/></svg> Install &amp; first launch</a>
+        <a href="llm-setup.html"><svg class="ic" viewBox="0 0 16 16"><path d="M8 2v4M8 10v4M2 8h4M10 8h4M4 4l2 2M10 10l2 2M4 12l2-2M10 6l2-2"/></svg> LLM setup</a>
+      </div>
+      <div class="group">
+        <h6>Worldbuilding</h6>
+        <a href="worlds.html"><svg class="ic" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6"/><path d="M2 8h12M8 2c2 2 2 10 0 12M8 2c-2 2-2 10 0 12"/></svg> Worlds &amp; pages</a>
+        <a href="editor.html"><svg class="ic" viewBox="0 0 16 16"><path d="M11 2l3 3-8 8-4 1 1-4 8-8Z"/></svg> The editor</a>
+        <a href="views.html" class="is-active"><svg class="ic" viewBox="0 0 16 16"><path d="m2 4 4-1 4 1 4-1v9l-4 1-4-1-4 1V4ZM6 3v10M10 4v10"/></svg> Maps, timeline &amp; graph</a>
+        <a href="keeper.html"><svg class="ic" viewBox="0 0 16 16"><path d="M2 3h12v8H6l-3 3V3Z"/></svg> The Keeper</a>
+      </div>
+      <div class="group">
+        <h6>Session notes</h6>
+        <a href="workflow.html"><svg class="ic" viewBox="0 0 16 16"><path d="M2 8h1M4 6v4M6 4v8M8 5v6M10 3v10M12 6v4M14 8h.5"/></svg> Recordings &amp; transcripts</a>
+      </div>
+      <div class="group">
+        <h6>Help</h6>
+        <a href="troubleshooting.html"><svg class="ic" viewBox="0 0 16 16"><path d="M8 1.5 3 3v5c0 3 2.4 5.5 5 6.5 2.6-1 5-3.5 5-6.5V3l-5-1.5Z"/></svg> Troubleshooting</a>
+        <a href="faq.html"><svg class="ic" viewBox="0 0 16 16"><path d="M3 2.5h7a2 2 0 0 1 2 2V14M3 2.5v11.5h7M3 2.5v11.5a1 1 0 0 0 1 1h8"/></svg> FAQ</a>
+      </div>
+    </aside>
+
+    <main class="docs-main">
+      <div class="crumb">Docs / Maps, timeline &amp; graph</div>
+      <h1>Maps, timeline &amp; graph</h1>
+      <p class="page-lede">Your pages are the source of truth; these are four lenses onto them. Pin a city on a map, plot an event on the calendar, watch the web of relationships, or query it like a database — nothing duplicated, all live.</p>
+
+      <div class="prose">
+        <h2 id="atlas">The Atlas</h2>
+        <p>Upload a map image and pan / zoom around it. Drop a <strong>pin</strong> anywhere and it mints (or links to) a codex page — each pin wears a wax-seal glyph for its kind. Hover a pin for a preview, click it to read the page in a side panel. Maps nest: descend from the continent to a region to a single city with a breadcrumb trail back up.</p>
+        <p>Any page that's pinned shows an <strong>"On the map"</strong> card in its right rail — click it to jump to the Atlas with that pin already open. The map and the wiki stay in sync because the pin <em>is</em> the page.</p>
+        <figure><img src="../assets/screenshots/atlas.jpeg" alt="A fantasy map with wax-seal pins and a Drop a pin button" /><figcaption>The Atlas — pin places onto your own maps; each pin is a codex page.</figcaption></figure>
+
+        <h2 id="timeline">Timeline &amp; calendar</h2>
+        <p>Give a page a <code>date:</code> and it plots on the world timeline. The dedicated <code>event</code> kind adds date, location and participants. Dates are written as <code>year[-month[-day]] [ERA]</code> and sort correctly — including negative years, era-only dates, and <code>~</code> / <code>c.</code> for "circa".</p>
+        <p>Worlds rarely run on the Gregorian calendar, so you define your own in <code>.ck/config.toml</code>:</p>
+        <pre><code>[calendar]
+months = ["Hammer", "Alturiak", "Ches", "Tarsakh", "…"]
+eras   = ["BR", "DR"]</code></pre>
+        <p>Then <code>1374-02-12 DR</code> renders as <strong>12 Alturiak 1374 DR</strong>. More ways to place things on the line:</p>
+        <ul>
+          <li><strong>Spans</strong> — add <code>end_date:</code> (or <code>until:</code>) for a duration bar; the card shows the length, e.g. <code>c. 890 → 902 (12 years)</code>.</li>
+          <li><strong>No calendar?</strong> Use <code>order:</code> (or <code>seq:</code>) integers to sort events relatively.</li>
+          <li><strong>GM-only</strong> — <code>gm_only: true</code> badges an event and hides it behind a toggle.</li>
+          <li><strong>Banner art</strong> — an <code>image:</code> on any page becomes a card banner on the timeline and a full-bleed hero atop the page.</li>
+        </ul>
+        <p>The rail groups by era and year with navigable participant and location chips, and filters by kind, tag, folder or entity. Sessions plot on their own lane and can join the world timeline by giving the session a <code>world_date</code>. The design intent: thin dated event pages <em>wikilink</em> to the entities involved — the entity pages keep the lore.</p>
+        <figure><img src="../assets/screenshots/timeline.png" alt="A timeline of event cards grouped by year with gap labels" /><figcaption>The Timeline — event cards on your world's calendar, with "years later" gap labels and banner art.</figcaption></figure>
+
+        <h2 id="graph">The graph</h2>
+        <p>The graph view draws your whole world as a force-directed canvas — nodes coloured by kind, sized by how connected they are, with typed edges drawn distinctly. It's the fastest way to spot an orphaned page or see which faction sits at the centre of everything. Every page also gets a <strong>1-hop local graph</strong> card showing its immediate neighbours.</p>
+        <figure><img src="../assets/screenshots/graph.png" alt="A force-directed graph of pages coloured by kind" /><figcaption>The graph — every page and link, coloured by kind, with a "hide orphans" toggle.</figcaption></figure>
+
+        <h2 id="relations">Typed relations</h2>
+        <p>A wikilink in frontmatter becomes a <strong>typed relationship</strong> — the field name is the relationship:</p>
+        <pre><code>---
+kind: npc
+location: "[[Ashfall]]"
+member_of: ["[[The Ashen Hand]]", "[[Smiths' Guild]]"]
+---</code></pre>
+        <p>Ashfall's page then shows Bram under an incoming <strong>location</strong> relation. Rename a page and these values are rewritten too.</p>
+
+        <h2 id="queries">Queries</h2>
+        <p>Build living lists with a <code>ck-query</code> code block — a small, read-only, dataview-style language evaluated live:</p>
+        <pre><code>```ck-query
+LIST FROM #ashfall AND kind:npc
+WHERE location = [[Ashfall]] AND status != dead
+```</code></pre>
+        <p>Supported clauses: <code>FROM #tag</code> / <code>kind:x</code>, and <code>WHERE field = [[Page]]</code>, <code>field != value</code>, <code>field contains value</code>. Drop one on a region page for an always-current roster of its inhabitants.</p>
+
+        <div class="callout callout-note">
+          <svg class="ic" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6"/><path d="M8 7v4M8 5h.01"/></svg>
+          <div class="c-body"><strong>One source, many views.</strong><p>You never maintain the map, the timeline or the graph separately. They're all computed from your pages' frontmatter and links — edit the page and every view updates.</p></div>
+        </div>
+      </div>
+
+      <div class="pager">
+        <a href="editor.html"><span class="dir">Previous</span><span class="ttl">← The editor</span></a>
+        <a class="next" href="keeper.html"><span class="dir">Next</span><span class="ttl">The Keeper →</span></a>
+      </div>
+    </main>
+
+    <aside class="docs-toc"></aside>
+  </div>
+
+  <footer class="footer">
+    <div class="wrap">
+      <div class="legal" style="border:0;margin:0;padding:0">
+        <span>© <span data-year>2026</span> Chronicle Keeper · MIT licensed · Built with ❤️ from Germany</span>
+        <span><a href="../">Home</a> · <a href="https://github.com/aronjanosch/chronicle-keeper-world">GitHub</a></span>
+      </div>
+    </div>
+  </footer>
+
+  <script src="../assets/site.js"></script>
+</body>
+</html>

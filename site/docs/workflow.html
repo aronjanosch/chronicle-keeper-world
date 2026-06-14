@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>The workflow · Chronicle Keeper docs</title>
+  <title>Recordings &amp; transcripts · Chronicle Keeper docs</title>
   <meta name="description" content="Upload a Craig recording, label speakers, transcribe on-device, summarize with your LLM, and export to Obsidian — the full Chronicle Keeper workflow, step by step." />
   <link rel="icon" href="../assets/favicon.svg" type="image/svg+xml" />
   <link rel="stylesheet" href="../assets/style.css" />
@@ -28,17 +28,23 @@
   </header>
 
   <div class="docs">
-    <aside class="docs-sidebar">
+        <aside class="docs-sidebar">
       <div class="group">
         <h6>Start here</h6>
         <a href="getting-started.html"><svg class="ic" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6"/><path d="m10.5 5.5-1.6 3.4-3.4 1.6 1.6-3.4 3.4-1.6Z"/></svg> Getting started</a>
         <a href="install.html"><svg class="ic" viewBox="0 0 16 16"><path d="M8 3v8M5 8l3 3 3-3M3 13h10"/></svg> Install &amp; first launch</a>
+        <a href="llm-setup.html"><svg class="ic" viewBox="0 0 16 16"><path d="M8 2v4M8 10v4M2 8h4M10 8h4M4 4l2 2M10 10l2 2M4 12l2-2M10 6l2-2"/></svg> LLM setup</a>
       </div>
       <div class="group">
-        <h6>Using it</h6>
-        <a href="workflow.html"><svg class="ic" viewBox="0 0 16 16"><path d="M2 8h1M4 6v4M6 4v8M8 5v6M10 3v10M12 6v4M14 8h.5"/></svg> The workflow</a>
-        <a href="llm-setup.html"><svg class="ic" viewBox="0 0 16 16"><path d="M8 2v4M8 10v4M2 8h4M10 8h4M4 4l2 2M10 10l2 2M4 12l2-2M10 6l2-2"/></svg> LLM setup</a>
-        <a href="codex.html"><svg class="ic" viewBox="0 0 16 16"><path d="m8 2 4 3-4 9-4-9 4-3ZM4 5h8M8 2v3M6 5l2 9M10 5l-2 9"/></svg> The Codex</a>
+        <h6>Worldbuilding</h6>
+        <a href="worlds.html"><svg class="ic" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6"/><path d="M2 8h12M8 2c2 2 2 10 0 12M8 2c-2 2-2 10 0 12"/></svg> Worlds &amp; pages</a>
+        <a href="editor.html"><svg class="ic" viewBox="0 0 16 16"><path d="M11 2l3 3-8 8-4 1 1-4 8-8Z"/></svg> The editor</a>
+        <a href="views.html"><svg class="ic" viewBox="0 0 16 16"><path d="m2 4 4-1 4 1 4-1v9l-4 1-4-1-4 1V4ZM6 3v10M10 4v10"/></svg> Maps, timeline &amp; graph</a>
+        <a href="keeper.html"><svg class="ic" viewBox="0 0 16 16"><path d="M2 3h12v8H6l-3 3V3Z"/></svg> The Keeper</a>
+      </div>
+      <div class="group">
+        <h6>Session notes</h6>
+        <a href="workflow.html" class="is-active"><svg class="ic" viewBox="0 0 16 16"><path d="M2 8h1M4 6v4M6 4v8M8 5v6M10 3v10M12 6v4M14 8h.5"/></svg> Recordings &amp; transcripts</a>
       </div>
       <div class="group">
         <h6>Help</h6>
@@ -47,10 +53,11 @@
       </div>
     </aside>
 
+
     <main class="docs-main">
-      <div class="crumb">Docs / The workflow</div>
-      <h1>The workflow</h1>
-      <p class="page-lede">One recording in, one finished session note out. Here's every stage of the pipeline, in the order you'll meet them.</p>
+      <div class="crumb">Docs / Recordings &amp; transcripts</div>
+      <h1>Recordings &amp; transcripts</h1>
+      <p class="page-lede">One recording in, one finished session note out — then folded back into your world. Here's every stage of the pipeline, in the order you'll meet them.</p>
 
       <div class="prose">
         <div class="pipeline" style="margin-bottom:8px">
@@ -103,8 +110,9 @@
         </div>
 
         <h2 id="summarize">5 · Summarize</h2>
-        <p>With transcripts ready, generate the summary using your chosen LLM. Chronicle Keeper builds a structured prompt and — crucially — injects your campaign's <a href="codex.html">Codex</a> so the model corrects names the transcriber mangled. The result is a clean recap: what happened, who did what, decisions, loose threads.</p>
-        <p>Read it over. The summary is yours to copy, tweak, or regenerate. Chronicle Keeper deliberately stays out of in-app editing — your vault is the place to polish.</p>
+        <p>With transcripts ready, generate the summary using your chosen LLM. Chronicle Keeper builds a structured prompt and — crucially — injects the <a href="worlds.html#summary">summaries</a> of your world's pages so the model corrects names the transcriber mangled and grounds the recap in your canon. The result is a clean write-up: what happened, who did what, decisions, loose threads.</p>
+        <p>Read it over and edit it in place. When you're happy, the <a href="keeper.html#update-codex">Keeper can fold the session into your world</a> — proposing page edits for the NPCs you met and the things that changed, each grounded in the transcript and applied only when you approve.</p>
+        <figure><img src="../assets/screenshots/session.png" alt="A session screen with recording, transcribed and summarized stages and an Update the Codex button" /><figcaption>A session: recording → transcribed → summarized, with "Update the Codex" to fold it into your world.</figcaption></figure>
 
         <h2 id="recap">Bonus · Story-so-far recap</h2>
         <p>Need to remind the table what happened last time? The <strong>recap</strong> stitches your past summaries into a short "previously on…" for the campaign — handy to read aloud at the start of a session.</p>
@@ -113,12 +121,12 @@
         <p>Export the finished note as <strong>Markdown with Obsidian frontmatter</strong> (YAML at the top with campaign, session number, date, players). Paste it into your vault or save the file. You can export the full transcript alongside the summary if you want the raw record too.</p>
 
         <h2 id="where-it-lives">Where everything lives</h2>
-        <p>State persists in a local SQLite database in your app-data folder — sessions, tracks, speaker labels, transcripts, summaries and the Codex all live there. There are no scattered loose files to manage, and nothing is uploaded.</p>
+        <p>Sessions are <a href="worlds.html#files-are-truth">plain files inside your world folder</a> — each one a <code>Sessions/&lt;NNN&gt;/</code> directory holding the audio, the transcript and the summary, right beside your wiki pages. A local index speeds up search, but the files are the truth, and nothing is uploaded.</p>
       </div>
 
       <div class="pager">
-        <a href="llm-setup.html"><span class="dir">Previous</span><span class="ttl">← LLM setup</span></a>
-        <a class="next" href="codex.html"><span class="dir">Next</span><span class="ttl">The Codex →</span></a>
+        <a href="keeper.html"><span class="dir">Previous</span><span class="ttl">← The Keeper</span></a>
+        <a class="next" href="troubleshooting.html"><span class="dir">Next</span><span class="ttl">Troubleshooting →</span></a>
       </div>
     </main>
 

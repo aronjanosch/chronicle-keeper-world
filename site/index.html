@@ -3,10 +3,10 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Chronicle Keeper — D&D session notes from your recordings, on your machine</title>
-  <meta name="description" content="Turn your D&D session recordings into clean, structured notes — local-first, offline, with whatever LLM you like. Drop in a Craig recording and Chronicle Keeper transcribes and writes up the session." />
+  <title>Chronicle Keeper — the local-first worldbuilding workspace for tabletop RPGs</title>
+  <meta name="description" content="An AI-assisted worldbuilding wiki for your campaign — Markdown pages, maps, a timeline and a graph, kept current by an AI that has read your whole world. Local-first, offline, bring-your-own-LLM. Turns session recordings into canon too." />
   <meta property="og:title" content="Chronicle Keeper" />
-  <meta property="og:description" content="Turn your D&D session recordings into clean, structured notes — on your own machine, offline, with whatever LLM you like." />
+  <meta property="og:description" content="The local-first worldbuilding workspace for tabletop RPGs — an AI-assisted wiki, maps and timeline that stay current, on your own machine." />
   <meta property="og:type" content="website" />
   <link rel="icon" href="assets/favicon.svg" type="image/svg+xml" />
   <link rel="stylesheet" href="assets/style.css" />
@@ -40,8 +40,8 @@
     <div class="wrap hero-grid">
       <div>
         <span class="chip chip-moss"><span class="dot dot-moss"></span> Local-first · Offline · Open source</span>
-        <h1>Turn session recordings into <span class="accent">chronicle-worthy</span> notes.</h1>
-        <p class="lede">Drop in a Craig Bot recording, label who's who, and Chronicle Keeper transcribes every track on your own machine and writes up the session — Markdown with Obsidian frontmatter, ready for your vault.</p>
+        <h1>The worldbuilding workspace your <span class="accent">campaign</span> deserves.</h1>
+        <p class="lede">Build your world as a wiki of Markdown pages — linked, mapped and plotted on a timeline — with an AI that has read all of it and keeps the canon current. Everything is plain files on your disk, and your recordings fold in as session notes too.</p>
         <div class="hero-actions">
           <a class="btn btn-primary btn-lg" href="https://github.com/aronjanosch/chronicle-keeper-world/releases">
             <svg class="ic" viewBox="0 0 16 16"><path d="M8 3v8M5 8l3 3 3-3M3 13h10"/></svg>
@@ -60,21 +60,20 @@
         <div class="winbar"><i></i><i></i><i></i><span>chronicle-keeper</span></div>
         <div class="winbody">
           <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
-            <span class="sigil sigil-burgundy"><svg class="ic" viewBox="0 0 16 16"><rect x="6" y="2" width="4" height="8" rx="2"/><path d="M3.5 8a4.5 4.5 0 0 0 9 0M8 12.5V14M5.5 14h5"/></svg></span>
+            <span class="sigil sigil-burgundy"><svg class="ic" viewBox="0 0 16 16"><circle cx="6" cy="6" r="2.4"/><path d="M2 13c0-2.4 1.8-4 4-4s4 1.6 4 4M10 6.5a2 2 0 1 0 0-4M14 13c0-2-1.4-3.4-3-3.8"/></svg></span>
             <div>
-              <div class="display" style="font-size:16px">The Sunless Citadel — Session 7</div>
-              <div class="muted" style="font-size:12px">4 tracks · 3h 12m · transcribed on-device</div>
+              <div class="display" style="font-size:16px">Meepo <span class="muted" style="font-weight:400">· npc</span></div>
+              <div class="muted" style="font-size:12px">Codex / Kobolds · linked from 6 pages</div>
             </div>
           </div>
-          <div class="pipeline" style="grid-template-columns:1fr 1fr;box-shadow:none">
-            <div class="step"><div class="n">01</div><h4>Upload</h4><p class="muted">Craig ZIP</p></div>
-            <div class="step"><div class="n">02</div><h4>Transcribe</h4><p class="muted">Parakeet · CPU</p></div>
-            <div class="step" style="border-top:1px solid var(--rule-soft)"><div class="n">03</div><h4>Summarize</h4><p class="muted">Your LLM</p></div>
-            <div class="step" style="border-top:1px solid var(--rule-soft)"><div class="n">04</div><h4>Export</h4><p class="muted">Obsidian MD</p></div>
+          <div style="padding:12px 14px;background:var(--surface-inset);border:1px solid var(--rule);border-radius:var(--r-md);font-size:13px;line-height:1.6;color:var(--ink-soft)">
+            Kobold keeper of the dead, ally of the party in the <strong style="color:var(--burgundy)">Sunless Citadel</strong>. Wants his dragon <strong style="color:var(--burgundy)">Calcryx</strong> back from the <strong style="color:var(--burgundy)">Durbuluk</strong> goblins.
           </div>
-          <div style="margin-top:14px;padding:14px;background:var(--surface-inset);border:1px solid var(--rule);border-radius:var(--r-md)">
-            <div class="eyebrow" style="margin-bottom:6px">Summary · excerpt</div>
-            <div class="display" style="font-size:14.5px;line-height:1.6;color:var(--ink-soft)">The party descended into the overgrown ravine, where <strong style="color:var(--burgundy)">Meepo</strong> the kobold begged their help against the goblins of the <strong style="color:var(--burgundy)">Durbuluk</strong> tribe…</div>
+          <div class="pipeline" style="grid-template-columns:1fr 1fr;box-shadow:none;margin-top:12px">
+            <div class="step"><div class="n" style="font-size:13px">⌘J</div><h4>The Keeper</h4><p class="muted">asks &amp; edits</p></div>
+            <div class="step"><div class="n" style="font-size:13px">🗺</div><h4>Atlas</h4><p class="muted">pinned maps</p></div>
+            <div class="step" style="border-top:1px solid var(--rule-soft)"><div class="n" style="font-size:13px">⏳</div><h4>Timeline</h4><p class="muted">world calendar</p></div>
+            <div class="step" style="border-top:1px solid var(--rule-soft)"><div class="n" style="font-size:13px">◈</div><h4>Graph</h4><p class="muted">every link</p></div>
           </div>
         </div>
       </div>
@@ -91,39 +90,39 @@
     <div class="wrap">
       <div class="section-head">
         <span class="eyebrow">Why Chronicle Keeper</span>
-        <h2>Your table's history, kept honestly.</h2>
-        <p>Built for one job: hours of messy audio in, a clean session write-up out — without sending your campaign anywhere you don't choose.</p>
+        <h2>One workspace for the whole world.</h2>
+        <p>A linked wiki, the maps, the timeline and an AI that knows all of it — kept as plain Markdown files you own, on a machine you control.</p>
       </div>
       <div class="cards">
         <div class="card">
-          <span class="sigil sigil-moss"><svg class="ic" viewBox="0 0 16 16"><path d="M8 1.5 3 3v5c0 3 2.4 5.5 5 6.5 2.6-1 5-3.5 5-6.5V3l-5-1.5Z"/></svg></span>
-          <h3>Local-first &amp; private</h3>
-          <p>Transcription runs on your device with a native speech model. The app binds to localhost and works fully offline — your audio never leaves your machine.</p>
+          <span class="sigil sigil-gilt"><svg class="ic" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6"/><path d="M2 8h12M8 2c2 2 2 10 0 12M8 2c-2 2-2 10 0 12"/></svg></span>
+          <h3>Your world as Markdown</h3>
+          <p>Every NPC, place and faction is an editable page with <code>[[wikilinks]]</code>, infoboxes and backlinks. Files are truth — a portable folder you can open in Obsidian or back up yourself.</p>
         </div>
         <div class="card">
-          <span class="sigil sigil-burgundy"><svg class="ic" viewBox="0 0 16 16"><path d="M8 2v4M8 10v4M2 8h4M10 8h4M4 4l2 2M10 10l2 2M4 12l2-2M10 6l2-2"/></svg></span>
+          <span class="sigil sigil-burgundy"><svg class="ic" viewBox="0 0 16 16"><path d="M2 3h12v8H6l-3 3V3Z"/></svg></span>
+          <h3>The Keeper, your AI</h3>
+          <p>An assistant that has read your whole world. Ask it anything and it answers with citations; let it update the codex after a session — every edit a reviewable diff with full undo.</p>
+        </div>
+        <div class="card">
+          <span class="sigil sigil-blue"><svg class="ic" viewBox="0 0 16 16"><path d="m2 4 4-1 4 1 4-1v9l-4 1-4-1-4 1V4ZM6 3v10M10 4v10"/></svg></span>
+          <h3>Maps, timeline &amp; graph</h3>
+          <p>Pin cities on your own maps, plot events on a custom calendar, and watch the whole web of relationships in a force-directed graph — all computed live from your pages.</p>
+        </div>
+        <div class="card">
+          <span class="sigil sigil-moss"><svg class="ic" viewBox="0 0 16 16"><path d="M8 1.5 3 3v5c0 3 2.4 5.5 5 6.5 2.6-1 5-3.5 5-6.5V3l-5-1.5Z"/></svg></span>
+          <h3>Local-first &amp; private</h3>
+          <p>Everything runs on your device and works fully offline. The app binds to localhost; your world, your audio and your keys never leave your machine.</p>
+        </div>
+        <div class="card">
+          <span class="sigil sigil-ochre"><svg class="ic" viewBox="0 0 16 16"><path d="M8 2v4M8 10v4M2 8h4M10 8h4M4 4l2 2M10 10l2 2M4 12l2-2M10 6l2-2"/></svg></span>
           <h3>Bring your own LLM</h3>
           <p>Run a local model with <strong>Ollama</strong> for free, or paste an Anthropic / OpenAI-compatible key. Your keys stay on-device and calls go straight from your machine.</p>
         </div>
         <div class="card">
-          <span class="sigil sigil-blue"><svg class="ic" viewBox="0 0 16 16"><path d="M3 2.5h7a2 2 0 0 1 2 2V14M3 2.5v11.5h7M3 2.5v11.5a1 1 0 0 0 1 1h8"/></svg></span>
-          <h3>Obsidian-ready export</h3>
-          <p>Notes land as clean Markdown with YAML frontmatter — paste straight into your vault, or export the full transcript alongside.</p>
-        </div>
-        <div class="card">
-          <span class="sigil sigil-gilt"><svg class="ic" viewBox="0 0 16 16"><path d="m8 2 4 3-4 9-4-9 4-3ZM4 5h8M8 2v3M6 5l2 9M10 5l-2 9"/></svg></span>
-          <h3>The Codex</h3>
-          <p>A per-campaign glossary of NPCs, places and factions. It's injected into every summary so the LLM auto-corrects names the transcriber mangled — "Mee-po" becomes <strong>Meepo</strong>.</p>
-        </div>
-        <div class="card">
-          <span class="sigil sigil-ochre"><svg class="ic" viewBox="0 0 16 16"><rect x="3.5" y="3.5" width="9" height="9" rx="1"/><rect x="6" y="6" width="4" height="4"/><path d="M6 1.5v2M10 1.5v2M6 12.5v2M10 12.5v2M1.5 6h2M1.5 10h2M12.5 6h2M12.5 10h2"/></svg></span>
-          <h3>No fuss, no GPU</h3>
-          <p>Native Parakeet TDT runs several× realtime on plain CPU across 25 European languages, German included. No Python, no CUDA, no cloud transcription bill.</p>
-        </div>
-        <div class="card">
-          <span class="sigil"><svg class="ic" viewBox="0 0 16 16"><path d="M4.5 12a3 3 0 0 1 0-6 3.5 3.5 0 0 1 6.7-1A2.8 2.8 0 0 1 12 12H4.5Z"/></svg></span>
-          <h3>Optional multi-device sync</h3>
-          <p>Keep notes in step across machines via a small self-hostable server. Text only, off by default — turn it on with a server URL when you want it.</p>
+          <span class="sigil"><svg class="ic" viewBox="0 0 16 16"><rect x="6" y="2" width="4" height="8" rx="2"/><path d="M3.5 8a4.5 4.5 0 0 0 9 0M8 12.5V14M5.5 14h5"/></svg></span>
+          <h3>Recordings become canon</h3>
+          <p>Drop in a Craig Bot recording and Chronicle Keeper transcribes it on-device (Parakeet, 25 languages, no GPU), writes the summary, then folds what happened back into your world.</p>
         </div>
       </div>
     </div>
@@ -133,9 +132,9 @@
   <section class="section alt" id="pipeline">
     <div class="wrap">
       <div class="section-head">
-        <span class="eyebrow">The pipeline</span>
-        <h2>Record → transcribe → summarize → export.</h2>
-        <p>Four steps from a pile of audio tracks to a finished session note. Most of it is one click.</p>
+        <span class="eyebrow">From the table to your world</span>
+        <h2>Record → transcribe → summarize → fold in.</h2>
+        <p>The session-notes side of Chronicle Keeper: a pile of audio tracks becomes a finished write-up, then the Keeper folds what happened back into your wiki. Most of it is one click.</p>
       </div>
       <div class="pipeline">
         <div class="step">
@@ -156,12 +155,12 @@
         <div class="step">
           <div class="n">04</div>
           <h4><svg class="ic" viewBox="0 0 16 16" style="color:var(--burgundy)"><path d="M8 2v4M8 10v4M2 8h4M10 8h4M4 4l2 2M10 10l2 2M4 12l2-2M10 6l2-2"/></svg> Summarize</h4>
-          <p>Your chosen LLM writes a structured recap, Codex-corrected names and all.</p>
+          <p>Your chosen LLM writes a structured recap, names corrected from your world.</p>
         </div>
         <div class="step">
           <div class="n">05</div>
-          <h4><svg class="ic" viewBox="0 0 16 16" style="color:var(--burgundy)"><path d="M8 2v8M5 5l3-3 3 3M3 9v4h10V9"/></svg> Export</h4>
-          <p>Markdown + Obsidian frontmatter, ready to drop into your vault.</p>
+          <h4><svg class="ic" viewBox="0 0 16 16" style="color:var(--burgundy)"><path d="M2 3h12v8H6l-3 3V3Z"/></svg> Fold in</h4>
+          <p>The Keeper proposes codex edits from the session — you approve what's canon.</p>
         </div>
       </div>
       <div style="text-align:center;margin-top:30px">
@@ -178,7 +177,7 @@
       <div class="section-head">
         <span class="eyebrow">Bring your own brain</span>
         <h2>Free and local, or any cloud key you like.</h2>
-        <p>Chronicle Keeper does the transcription. You decide which model does the writing — and the keys never leave your computer.</p>
+        <p>Transcription runs on-device; you decide which model powers the Keeper, the summaries and the codex edits — and the keys never leave your computer.</p>
       </div>
       <div class="cards">
         <div class="card">
@@ -227,15 +226,15 @@
             <span class="mark" style="width:28px;height:28px"><svg width="16" height="16" viewBox="0 0 20 20"><path d="M14.5 6.5C13.5 5.5 12 5 10.5 5c-3 0-5 2-5 5s2 5 5 5c1.5 0 3-.5 4-1.5" stroke="#F2D9D2" stroke-width="1.8" stroke-linecap="round" fill="none"/></svg></span>
             <span class="name">Chronicle Keeper</span>
           </a>
-          <p class="muted" style="font-size:13.5px">Local-first D&amp;D session notes from your recordings. Offline, private, bring-your-own-LLM.</p>
+          <p class="muted" style="font-size:13.5px">The local-first worldbuilding workspace for tabletop RPGs. An AI-assisted wiki, maps and timeline — offline, private, bring-your-own-LLM.</p>
         </div>
         <div>
           <h5>Documentation</h5>
           <a href="docs/getting-started.html">Getting started</a>
-          <a href="docs/install.html">Install</a>
-          <a href="docs/workflow.html">The workflow</a>
+          <a href="docs/worlds.html">Worlds &amp; pages</a>
+          <a href="docs/keeper.html">The Keeper</a>
+          <a href="docs/views.html">Maps, timeline &amp; graph</a>
           <a href="docs/llm-setup.html">LLM setup</a>
-          <a href="docs/codex.html">The Codex</a>
         </div>
         <div>
           <h5>Guides</h5>

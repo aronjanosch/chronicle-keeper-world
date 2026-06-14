@@ -29,17 +29,23 @@
 
   <div class="docs">
     <!-- ── Sidebar ───────────────────────────────────────────────── -->
-    <aside class="docs-sidebar">
+        <aside class="docs-sidebar">
       <div class="group">
         <h6>Start here</h6>
-        <a href="getting-started.html"><svg class="ic" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6"/><path d="m10.5 5.5-1.6 3.4-3.4 1.6 1.6-3.4 3.4-1.6Z"/></svg> Getting started</a>
+        <a href="getting-started.html" class="is-active"><svg class="ic" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6"/><path d="m10.5 5.5-1.6 3.4-3.4 1.6 1.6-3.4 3.4-1.6Z"/></svg> Getting started</a>
         <a href="install.html"><svg class="ic" viewBox="0 0 16 16"><path d="M8 3v8M5 8l3 3 3-3M3 13h10"/></svg> Install &amp; first launch</a>
+        <a href="llm-setup.html"><svg class="ic" viewBox="0 0 16 16"><path d="M8 2v4M8 10v4M2 8h4M10 8h4M4 4l2 2M10 10l2 2M4 12l2-2M10 6l2-2"/></svg> LLM setup</a>
       </div>
       <div class="group">
-        <h6>Using it</h6>
-        <a href="workflow.html"><svg class="ic" viewBox="0 0 16 16"><path d="M2 8h1M4 6v4M6 4v8M8 5v6M10 3v10M12 6v4M14 8h.5"/></svg> The workflow</a>
-        <a href="llm-setup.html"><svg class="ic" viewBox="0 0 16 16"><path d="M8 2v4M8 10v4M2 8h4M10 8h4M4 4l2 2M10 10l2 2M4 12l2-2M10 6l2-2"/></svg> LLM setup</a>
-        <a href="codex.html"><svg class="ic" viewBox="0 0 16 16"><path d="m8 2 4 3-4 9-4-9 4-3ZM4 5h8M8 2v3M6 5l2 9M10 5l-2 9"/></svg> The Codex</a>
+        <h6>Worldbuilding</h6>
+        <a href="worlds.html"><svg class="ic" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6"/><path d="M2 8h12M8 2c2 2 2 10 0 12M8 2c-2 2-2 10 0 12"/></svg> Worlds &amp; pages</a>
+        <a href="editor.html"><svg class="ic" viewBox="0 0 16 16"><path d="M11 2l3 3-8 8-4 1 1-4 8-8Z"/></svg> The editor</a>
+        <a href="views.html"><svg class="ic" viewBox="0 0 16 16"><path d="m2 4 4-1 4 1 4-1v9l-4 1-4-1-4 1V4ZM6 3v10M10 4v10"/></svg> Maps, timeline &amp; graph</a>
+        <a href="keeper.html"><svg class="ic" viewBox="0 0 16 16"><path d="M2 3h12v8H6l-3 3V3Z"/></svg> The Keeper</a>
+      </div>
+      <div class="group">
+        <h6>Session notes</h6>
+        <a href="workflow.html"><svg class="ic" viewBox="0 0 16 16"><path d="M2 8h1M4 6v4M6 4v8M8 5v6M10 3v10M12 6v4M14 8h.5"/></svg> Recordings &amp; transcripts</a>
       </div>
       <div class="group">
         <h6>Help</h6>
@@ -48,25 +54,28 @@
       </div>
     </aside>
 
+
     <!-- ── Main ──────────────────────────────────────────────────── -->
     <main class="docs-main">
       <div class="crumb">Docs / Getting started</div>
       <h1>Getting started</h1>
-      <p class="page-lede">From zero to your first finished session note in about ten minutes — most of which is the one-time downloads.</p>
+      <p class="page-lede">A local-first worldbuilding workspace for your campaign — an AI-assisted wiki, maps and a timeline, with session recordings folding in as notes. Here's how to get going.</p>
 
       <div class="prose">
-        <p>Chronicle Keeper is a desktop app that turns <a href="https://craig.chat" target="_blank" rel="noopener">Craig Bot</a> recordings of your D&amp;D sessions into clean, structured notes. Everything heavy — the transcription — happens <strong>on your own machine</strong>. You only reach the internet to download the app, the speech model (once), and to call a cloud LLM if you choose one over a local model.</p>
+        <p>Chronicle Keeper is a desktop app for building and running your tabletop world. Your campaign is a <a href="worlds.html">wiki of Markdown pages</a> you own — NPCs, places, factions, lore — linked together, pinned on <a href="views.html">maps</a> and plotted on a <a href="views.html#timeline">timeline</a>, with <a href="keeper.html">the Keeper</a> (an AI that has read all of it) to answer questions and keep the canon current. It also turns <a href="https://craig.chat" target="_blank" rel="noopener">Craig Bot</a> session recordings into clean notes that fold back into your world. Everything heavy runs <strong>on your own machine</strong>; you only reach the internet to download the app, the speech model (once), and to call a cloud LLM if you pick one over a local model.</p>
 
         <div class="callout callout-tip">
           <svg class="ic" viewBox="0 0 16 16"><path d="M8 1.5 3 3v5c0 3 2.4 5.5 5 6.5 2.6-1 5-3.5 5-6.5V3l-5-1.5Z"/></svg>
-          <div class="c-body"><strong>New to all this?</strong><p>You don't need to be technical. If you can install an app and copy-paste a key, you can run Chronicle Keeper. The <a href="workflow.html">workflow guide</a> walks every screen with pictures.</p></div>
+          <div class="c-body"><strong>New to all this?</strong><p>You don't need to be technical. If you can install an app and copy-paste a key, you can run Chronicle Keeper. Start with <a href="worlds.html">Worlds &amp; pages</a> to learn the wiki, or the <a href="workflow.html">recordings guide</a> for session notes.</p></div>
         </div>
+
+        <figure><img src="../assets/screenshots/overview.png" alt="A Chronicle Keeper world overview" /><figcaption>A world in Chronicle Keeper — the codex, the party and the story so far in one place.</figcaption></figure>
 
         <h2 id="what-you-need">What you'll need</h2>
         <ul>
-          <li>A <strong>Craig Bot recording</strong> of a session — the ZIP it emails you, with one audio track per speaker. (<a href="https://craig.chat" target="_blank" rel="noopener">How Craig works →</a>)</li>
           <li>A Mac, Windows PC, or Linux machine.</li>
-          <li>An <strong>LLM to do the writing</strong> — either <a href="llm-setup.html#ollama">Ollama running locally</a> (free) or an <a href="llm-setup.html#getting-keys">API key</a> from a cloud provider.</li>
+          <li>An <strong>LLM</strong> for the Keeper and the writing — either <a href="llm-setup.html#ollama">Ollama running locally</a> (free) or an <a href="llm-setup.html#getting-keys">API key</a> from a cloud provider.</li>
+          <li>Optional, for session notes: a <strong>Craig Bot recording</strong> — the ZIP it emails you, one audio track per speaker. (<a href="https://craig.chat" target="_blank" rel="noopener">How Craig works →</a>)</li>
         </ul>
 
         <h2 id="quick-start">Quick start</h2>
@@ -82,12 +91,12 @@
             <p><a href="llm-setup.html">Full LLM setup guide →</a></p>
           </li>
           <li>
-            <h4>Create a campaign &amp; upload</h4>
-            <p>Make a campaign, start a new session, and drop in your Craig ZIP. Label which track is which player.</p>
+            <h4>Create your world</h4>
+            <p>Start a fresh world (a portable folder on your disk) or open an existing one — even an Obsidian vault. Add your first <a href="worlds.html#pages">pages</a> for the people and places that matter, and ask <a href="keeper.html">the Keeper</a> anything.</p>
           </li>
           <li>
-            <h4>Transcribe</h4>
-            <p>Hit transcribe. On the very first run the speech model (Parakeet TDT v3) downloads once, then every track is transcribed on-device.</p>
+            <h4>Optional: add a session recording</h4>
+            <p>Start a session and drop in your Craig ZIP, then label which track is which player. On the very first transcription the speech model (Parakeet TDT v3) downloads once; after that every track is transcribed on-device.</p>
           </li>
           <li>
             <h4>Summarize &amp; export</h4>
@@ -103,10 +112,10 @@
 
         <h2 id="where-next">Where to go next</h2>
         <div class="cards" style="grid-template-columns:1fr 1fr">
-          <a class="card" href="install.html"><h3>Install &amp; first launch</h3><p>Per-OS steps and how to get past the "unknown developer" warning.</p></a>
+          <a class="card" href="worlds.html"><h3>Worlds &amp; pages</h3><p>Build your campaign wiki — pages, wikilinks, infoboxes — files-as-truth on your disk.</p></a>
+          <a class="card" href="keeper.html"><h3>The Keeper</h3><p>The AI that reads your whole world and keeps the codex current, under your control.</p></a>
           <a class="card" href="llm-setup.html"><h3>LLM setup</h3><p>Run Ollama free, or get an API key from Anthropic, OpenAI, Groq and friends.</p></a>
-          <a class="card" href="workflow.html"><h3>The workflow</h3><p>Upload → label → transcribe → summarize → export, screen by screen.</p></a>
-          <a class="card" href="codex.html"><h3>The Codex</h3><p>Teach the summarizer your NPC and place names so it stops mangling them.</p></a>
+          <a class="card" href="workflow.html"><h3>Recordings &amp; transcripts</h3><p>Turn a Craig recording into a transcript and summary, then fold it into your world.</p></a>
         </div>
       </div>
 

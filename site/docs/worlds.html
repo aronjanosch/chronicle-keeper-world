@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Worlds &amp; pages · Chronicle Keeper docs</title>
+  <meta name="description" content="Every world is a portable folder of Markdown pages. Wikilinks, frontmatter, infoboxes, templates, import and full-text search — your campaign wiki, files-as-truth." />
+  <link rel="icon" href="../assets/favicon.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="../assets/style.css" />
+</head>
+<body>
+
+  <header class="topnav">
+    <div class="wrap">
+      <a class="brand" href="../">
+        <span class="mark" style="width:30px;height:30px"><svg width="17" height="17" viewBox="0 0 20 20"><path d="M14.5 6.5C13.5 5.5 12 5 10.5 5c-3 0-5 2-5 5s2 5 5 5c1.5 0 3-.5 4-1.5" stroke="#F2D9D2" stroke-width="1.8" stroke-linecap="round" fill="none"/></svg></span>
+        <span class="name">Chronicle Keeper<small>Docs</small></span>
+      </a>
+      <button class="nav-toggle btn btn-secondary btn-sm" aria-label="Toggle menu"><svg class="ic" viewBox="0 0 16 16"><path d="M2 4h12M2 8h12M2 12h12"/></svg></button>
+      <nav>
+        <a href="../#features">Features</a>
+        <a href="../#pipeline">How it works</a>
+        <a href="getting-started.html" class="is-active">Docs</a>
+        <a href="https://github.com/aronjanosch/chronicle-keeper-world">GitHub</a>
+        <a class="btn btn-primary btn-sm" href="https://github.com/aronjanosch/chronicle-keeper-world/releases" style="color:#FBF6E9">Download</a>
+      </nav>
+    </div>
+  </header>
+
+  <div class="docs">
+    <aside class="docs-sidebar">
+      <div class="group">
+        <h6>Start here</h6>
+        <a href="getting-started.html"><svg class="ic" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6"/><path d="m10.5 5.5-1.6 3.4-3.4 1.6 1.6-3.4 3.4-1.6Z"/></svg> Getting started</a>
+        <a href="install.html"><svg class="ic" viewBox="0 0 16 16"><path d="M8 3v8M5 8l3 3 3-3M3 13h10"/></svg> Install &amp; first launch</a>
+        <a href="llm-setup.html"><svg class="ic" viewBox="0 0 16 16"><path d="M8 2v4M8 10v4M2 8h4M10 8h4M4 4l2 2M10 10l2 2M4 12l2-2M10 6l2-2"/></svg> LLM setup</a>
+      </div>
+      <div class="group">
+        <h6>Worldbuilding</h6>
+        <a href="worlds.html" class="is-active"><svg class="ic" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6"/><path d="M2 8h12M8 2c2 2 2 10 0 12M8 2c-2 2-2 10 0 12"/></svg> Worlds &amp; pages</a>
+        <a href="editor.html"><svg class="ic" viewBox="0 0 16 16"><path d="M11 2l3 3-8 8-4 1 1-4 8-8Z"/></svg> The editor</a>
+        <a href="views.html"><svg class="ic" viewBox="0 0 16 16"><path d="m2 4 4-1 4 1 4-1v9l-4 1-4-1-4 1V4ZM6 3v10M10 4v10"/></svg> Maps, timeline &amp; graph</a>
+        <a href="keeper.html"><svg class="ic" viewBox="0 0 16 16"><path d="M2 3h12v8H6l-3 3V3Z"/></svg> The Keeper</a>
+      </div>
+      <div class="group">
+        <h6>Session notes</h6>
+        <a href="workflow.html"><svg class="ic" viewBox="0 0 16 16"><path d="M2 8h1M4 6v4M6 4v8M8 5v6M10 3v10M12 6v4M14 8h.5"/></svg> Recordings &amp; transcripts</a>
+      </div>
+      <div class="group">
+        <h6>Help</h6>
+        <a href="troubleshooting.html"><svg class="ic" viewBox="0 0 16 16"><path d="M8 1.5 3 3v5c0 3 2.4 5.5 5 6.5 2.6-1 5-3.5 5-6.5V3l-5-1.5Z"/></svg> Troubleshooting</a>
+        <a href="faq.html"><svg class="ic" viewBox="0 0 16 16"><path d="M3 2.5h7a2 2 0 0 1 2 2V14M3 2.5v11.5h7M3 2.5v11.5a1 1 0 0 0 1 1h8"/></svg> FAQ</a>
+      </div>
+    </aside>
+
+    <main class="docs-main">
+      <div class="crumb">Docs / Worlds &amp; pages</div>
+      <h1>Worlds &amp; pages</h1>
+      <p class="page-lede">A world is a folder of Markdown pages on your disk — your campaign wiki, fully yours. Chronicle Keeper reads and writes those files directly; everything else is a rebuildable cache.</p>
+
+      <div class="prose">
+        <h2 id="files-are-truth">Files are truth</h2>
+        <p>Each world is one self-contained, portable folder. Pages are plain <code>.md</code> files you could open in any text editor — Chronicle Keeper is the comfortable way to work with them, not a lock-in. The app keeps a fast index alongside the files (full-text search, links, tags), but that index is <strong>derived</strong>: delete it and it rebuilds from the files. Your words live in the files.</p>
+
+        <div class="callout callout-note">
+          <svg class="ic" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6"/><path d="M8 7v4M8 5h.01"/></svg>
+          <div class="c-body"><strong>What a world folder holds.</strong><p><code>Codex/</code> — your wiki pages. <code>Sessions/</code> — recordings, transcripts and summaries. <code>Assets/</code> — images and files you embed. <code>Inbox/</code> — quick captures. <code>.ck/</code> — config, the index cache, templates, history and trash. Back the folder up, sync it with your own tool, or move it to another machine — it just works.</p></div>
+        </div>
+
+        <h2 id="new-world">Creating or opening a world</h2>
+        <p>From the New-World screen you can <strong>create a fresh world</strong> (empty, or seeded with a starter template) or <strong>open an existing folder in place</strong> — including an Obsidian vault you already keep. Opening adopts the folder as-is; nothing is moved or rewritten. Worlds are discovered by their <code>.ck/config.toml</code>, so you can keep several side by side.</p>
+        <figure><img src="../assets/screenshots/library.png" alt="The worlds library, showing campaign cards" /><figcaption>Your worlds, side by side — open one or begin a new chronicle.</figcaption></figure>
+        <p>Each world opens to an <strong>Overview</strong>: the story so far, the party, and a peek at the codex.</p>
+        <figure><img src="../assets/screenshots/overview.png" alt="A world overview with story-so-far, party and codex panels" /><figcaption>The world Overview pulls together the recap, the party and the codex.</figcaption></figure>
+
+        <h2 id="pages">Pages</h2>
+        <p>A page is Markdown for the body plus a little YAML <em>frontmatter</em> at the top for the structured bits:</p>
+        <pre><code>---
+kind: npc
+summary: Gruff dwarven smith who owes the party a favour.
+aliases: [Bram, The Smith]
+tags: [ashfall, allies]
+location: "[[Ashfall]]"
+---
+
+# Bram Ironhand
+
+Bram keeps the only forge in [[Ashfall]]…</code></pre>
+        <ul>
+          <li><strong><code>summary:</code></strong> — the one-liner the AI remembers. This single line is what gets injected into prompts when other features mention this page, so keep it crisp.</li>
+          <li><strong><code>kind:</code></strong> — what the page <em>is</em>: <code>pc</code>, <code>npc</code>, <code>place</code>, <code>faction</code>, <code>item</code>, <code>lore</code>, <code>event</code>, or your own custom kinds. Kind drives the infobox and the icon.</li>
+          <li><strong><code>aliases:</code></strong> — other names this page answers to, so wikilinks and search find it.</li>
+          <li><strong><code>tags:</code></strong> — free-form labels for filtering and queries.</li>
+        </ul>
+        <figure><img src="../assets/screenshots/codex.png" alt="The Codex screen with folder grid and Explorer sidebar" /><figcaption>The Codex — your pages organised in folders, with the Explorer on the left.</figcaption></figure>
+
+        <h2 id="wikilinks">Wikilinks &amp; backlinks</h2>
+        <p>Connect pages with <code>[[Name]]</code>. Links are alias-aware and case-insensitive, so <code>[[bram]]</code> finds <strong>Bram Ironhand</strong>. Point at a heading with <code>[[Page#heading]]</code>, or relabel with <code>[[Page|the old smith]]</code>. Link to a page that doesn't exist yet and Chronicle Keeper offers to create it.</p>
+        <p>Every page shows a <strong>Linked-from</strong> panel — who points here — so the web of your world is always navigable in both directions. Rename or move a page and every link to it is rewritten automatically.</p>
+
+        <h2 id="infoboxes">Infoboxes &amp; kinds</h2>
+        <p>Each kind has a small <strong>field schema</strong> — the labelled box on the right of a page (an NPC's race and age, a place's ruler, and so on). Fields can be text, lists, numbers, checkboxes or dates. Add your own fields per kind, or invent whole new kinds, in <code>.ck/config.toml</code>:</p>
+        <pre><code>[kinds.npc]
+fields = ["race", "age:number", "status"]
+
+[kinds.ship]
+fields = ["captain", "crew:number", "home_port"]</code></pre>
+        <figure><img src="../assets/screenshots/page.png" alt="A page in reading view with banner, infobox, AI-memory and tags rails" /><figcaption>A page in reading view: banner hero, the Infobox, "In the AI's memory" and tags on the right.</figcaption></figure>
+
+        <h2 id="templates">Templates &amp; new pages</h2>
+        <p>Creating a page (⌘N, the Explorer's + menu, or the command palette) asks for a title and a kind, then starts you from that kind's <strong>template</strong> — a sensible heading skeleton (an NPC gets Appearance / Motivation / Relationships / History, a place gets At a glance / Notable people / Hooks, and so on). Templates live in <code>.ck/templates/&lt;kind&gt;.md</code> and are yours to edit; once you've touched one, the app never overwrites it.</p>
+
+        <h2 id="promote">Capture now, shape later</h2>
+        <p>Jotting fast? Drop a rough note and <strong>promote</strong> it later: pick a kind and Chronicle Keeper rewrites the frontmatter, fills in the missing schema fields, appends the kind's template headings, drops the <code>#inbox</code> tag, and (optionally) files it in the right folder — links and all. Capture stays frictionless; structure comes when you're ready.</p>
+
+        <h2 id="import">Bringing in existing notes</h2>
+        <p>Already have lore? Two routes:</p>
+        <ul>
+          <li><strong>Open an Obsidian vault in place</strong> — adopt the whole folder, links intact.</li>
+          <li><strong>Paste-import</strong> — drop in a wall of notes and an LLM distills them into clean, kinded pages. You preview the proposed pages and commit the ones you want; nothing existing is ever overwritten.</li>
+        </ul>
+
+        <h2 id="search">Finding things</h2>
+        <p>Press <strong>⌘K</strong> for the command palette: jump to any page by name or alias, run a full-text search, filter by tag, hop to recents, or fire an action. The dedicated Search screen adds facets — narrow by kind, tag, folder, or edited-date, and toggle scope between pages, session summaries and transcripts.</p>
+        <figure><img src="../assets/screenshots/search.png" alt="Full-text search with kind, tag and edited-date facets" /><figcaption>Full-text search across pages, summaries and transcripts, with facets.</figcaption></figure>
+
+        <h2 id="trust">History, trash &amp; backups</h2>
+        <p>Everything is reversible, and the AI's edits are auditable.</p>
+        <ul>
+          <li><strong>Version history</strong> — every save snapshots the page first, tagged by who made it (you or the Keeper). See a line-by-line diff of any version and restore it. "The Keeper changed 12 pages — show me" is a single filter.</li>
+          <li><strong>Trash</strong> — deleted pages and folders land in the world's trash, restorable for 30 days before auto-pruning. Nothing vanishes by accident.</li>
+          <li><strong>Backups</strong> — zip the whole world to a <code>Backups/</code> folder on demand, and automatically when you close the app. The newest ten are kept.</li>
+        </ul>
+
+        <div class="callout callout-tip">
+          <svg class="ic" viewBox="0 0 16 16"><path d="M8 1.5 3 3v5c0 3 2.4 5.5 5 6.5 2.6-1 5-3.5 5-6.5V3l-5-1.5Z"/></svg>
+          <div class="c-body"><strong>Best practice</strong><p>Write a tight <code>summary:</code> on the pages that matter. It's the line the Keeper and the summarizer carry around in their head — a good one-liner makes every AI feature noticeably sharper.</p></div>
+        </div>
+      </div>
+
+      <div class="pager">
+        <a href="llm-setup.html"><span class="dir">Previous</span><span class="ttl">← LLM setup</span></a>
+        <a class="next" href="editor.html"><span class="dir">Next</span><span class="ttl">The editor →</span></a>
+      </div>
+    </main>
+
+    <aside class="docs-toc"></aside>
+  </div>
+
+  <footer class="footer">
+    <div class="wrap">
+      <div class="legal" style="border:0;margin:0;padding:0">
+        <span>© <span data-year>2026</span> Chronicle Keeper · MIT licensed · Built with ❤️ from Germany</span>
+        <span><a href="../">Home</a> · <a href="https://github.com/aronjanosch/chronicle-keeper-world">GitHub</a></span>
+      </div>
+    </div>
+  </footer>
+
+  <script src="../assets/site.js"></script>
+</body>
+</html>

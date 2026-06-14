@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>The editor · Chronicle Keeper docs</title>
+  <meta name="description" content="A real Markdown editor — source and reading views, a slash menu, transclusion, collapsible callouts, smart paste, snippets, quick capture and tabs." />
+  <link rel="icon" href="../assets/favicon.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="../assets/style.css" />
+</head>
+<body>
+
+  <header class="topnav">
+    <div class="wrap">
+      <a class="brand" href="../">
+        <span class="mark" style="width:30px;height:30px"><svg width="17" height="17" viewBox="0 0 20 20"><path d="M14.5 6.5C13.5 5.5 12 5 10.5 5c-3 0-5 2-5 5s2 5 5 5c1.5 0 3-.5 4-1.5" stroke="#F2D9D2" stroke-width="1.8" stroke-linecap="round" fill="none"/></svg></span>
+        <span class="name">Chronicle Keeper<small>Docs</small></span>
+      </a>
+      <button class="nav-toggle btn btn-secondary btn-sm" aria-label="Toggle menu"><svg class="ic" viewBox="0 0 16 16"><path d="M2 4h12M2 8h12M2 12h12"/></svg></button>
+      <nav>
+        <a href="../#features">Features</a>
+        <a href="../#pipeline">How it works</a>
+        <a href="getting-started.html" class="is-active">Docs</a>
+        <a href="https://github.com/aronjanosch/chronicle-keeper-world">GitHub</a>
+        <a class="btn btn-primary btn-sm" href="https://github.com/aronjanosch/chronicle-keeper-world/releases" style="color:#FBF6E9">Download</a>
+      </nav>
+    </div>
+  </header>
+
+  <div class="docs">
+    <aside class="docs-sidebar">
+      <div class="group">
+        <h6>Start here</h6>
+        <a href="getting-started.html"><svg class="ic" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6"/><path d="m10.5 5.5-1.6 3.4-3.4 1.6 1.6-3.4 3.4-1.6Z"/></svg> Getting started</a>
+        <a href="install.html"><svg class="ic" viewBox="0 0 16 16"><path d="M8 3v8M5 8l3 3 3-3M3 13h10"/></svg> Install &amp; first launch</a>
+        <a href="llm-setup.html"><svg class="ic" viewBox="0 0 16 16"><path d="M8 2v4M8 10v4M2 8h4M10 8h4M4 4l2 2M10 10l2 2M4 12l2-2M10 6l2-2"/></svg> LLM setup</a>
+      </div>
+      <div class="group">
+        <h6>Worldbuilding</h6>
+        <a href="worlds.html"><svg class="ic" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6"/><path d="M2 8h12M8 2c2 2 2 10 0 12M8 2c-2 2-2 10 0 12"/></svg> Worlds &amp; pages</a>
+        <a href="editor.html" class="is-active"><svg class="ic" viewBox="0 0 16 16"><path d="M11 2l3 3-8 8-4 1 1-4 8-8Z"/></svg> The editor</a>
+        <a href="views.html"><svg class="ic" viewBox="0 0 16 16"><path d="m2 4 4-1 4 1 4-1v9l-4 1-4-1-4 1V4ZM6 3v10M10 4v10"/></svg> Maps, timeline &amp; graph</a>
+        <a href="keeper.html"><svg class="ic" viewBox="0 0 16 16"><path d="M2 3h12v8H6l-3 3V3Z"/></svg> The Keeper</a>
+      </div>
+      <div class="group">
+        <h6>Session notes</h6>
+        <a href="workflow.html"><svg class="ic" viewBox="0 0 16 16"><path d="M2 8h1M4 6v4M6 4v8M8 5v6M10 3v10M12 6v4M14 8h.5"/></svg> Recordings &amp; transcripts</a>
+      </div>
+      <div class="group">
+        <h6>Help</h6>
+        <a href="troubleshooting.html"><svg class="ic" viewBox="0 0 16 16"><path d="M8 1.5 3 3v5c0 3 2.4 5.5 5 6.5 2.6-1 5-3.5 5-6.5V3l-5-1.5Z"/></svg> Troubleshooting</a>
+        <a href="faq.html"><svg class="ic" viewBox="0 0 16 16"><path d="M3 2.5h7a2 2 0 0 1 2 2V14M3 2.5v11.5h7M3 2.5v11.5a1 1 0 0 0 1 1h8"/></svg> FAQ</a>
+      </div>
+    </aside>
+
+    <main class="docs-main">
+      <div class="crumb">Docs / The editor</div>
+      <h1>The editor</h1>
+      <p class="page-lede">A proper Markdown editor built for worldbuilding — it edits your file's literal text, never mangles your formatting, and gets out of the way.</p>
+
+      <div class="prose">
+        <h2 id="two-views">Source &amp; reading views</h2>
+        <p>Every page has two faces. The <strong>source view</strong> is a real code editor (CodeMirror 6) with line numbers, code folding, multi-cursor, ⌘F find-and-replace and Markdown syntax highlighting. Toggle to the <strong>reading view</strong> for the clean, rendered page — transclusions expanded, callouts styled, images shown. Edits touch only the literal string in your file, so what you write is exactly what's saved.</p>
+        <figure><img src="../assets/screenshots/page.png" alt="A page in reading view with a Read/Edit toggle" /><figcaption>Reading view with the Read / Edit toggle top-right — switch to source any time.</figcaption></figure>
+
+        <h2 id="writing">Writing shortcuts</h2>
+        <ul>
+          <li><strong>⌘B</strong> / <strong>⌘I</strong> — bold / italic.</li>
+          <li><strong>⌘L</strong> — wrap the selection as a <code>[[wikilink]]</code>.</li>
+          <li><strong><code>[[</code></strong> — autocomplete page names and aliases as you type; <strong><code>#</code></strong> autocompletes tags.</li>
+          <li><strong>Smart lists</strong> — bullets, numbers and <code>- [ ]</code> tasks continue on Enter and out-dent when empty.</li>
+        </ul>
+
+        <h2 id="slash">The slash menu</h2>
+        <p>Type <strong><code>/</code></strong> at the start of a line for an insert menu: headings, lists, tables, callouts, an <code>/event</code> stub for the timeline, and your own snippets. No need to remember Markdown syntax for the fiddly bits.</p>
+
+        <h2 id="paste">Smart paste</h2>
+        <p>Paste does the obvious thing:</p>
+        <ul>
+          <li>A URL over selected text becomes a <strong>Markdown link</strong>.</li>
+          <li>Spreadsheet cells or an HTML table become a <strong>Markdown table</strong>.</li>
+          <li>An image is saved into <code>Assets/</code> and embedded as <code>![[name]]</code> — rendered in reading view, with <code>|width</code> honoured.</li>
+        </ul>
+
+        <h2 id="transclusion">Transclusion</h2>
+        <p>Pull one page (or one section) into another with <code>![[Page]]</code> or <code>![[Page#heading]]</code>. The content renders inline in reading view, so you can compose a region overview from its towns, or a faction page from its members, without copy-paste drift. Embeds nest a few levels deep and are cycle-guarded.</p>
+
+        <h2 id="callouts">Callouts &amp; secrets</h2>
+        <p>Set off asides with callouts:</p>
+        <pre><code>> [!note] Worth remembering
+> The duke's seal is a forgery.
+
+> [!secret]- GM eyes only
+> The duke is already dead.</code></pre>
+        <p>Types include <code>note</code>, <code>tip</code>, <code>warning</code> and <code>secret</code>. A <code>-</code> after the type makes the callout start collapsed (a <code>+</code> starts it open); <strong>secrets are collapsed by default</strong>, so spoilers stay hidden until you click.</p>
+
+        <h2 id="snippets">Snippets &amp; quick capture</h2>
+        <p>Reusable blocks live in <code>.ck/templates/snippets/</code> and appear in the slash menu — a stat block, a shop inventory, whatever you reach for often. And when an idea strikes mid-session, <strong>⌘⇧J</strong> quick-captures it straight to your <code>Inbox/</code> tagged <code>#inbox</code>, ready to <a href="worlds.html#promote">promote</a> later.</p>
+
+        <h2 id="selection">Selection toolbar</h2>
+        <p>Select text in the editor for a bubble toolbar: format it, turn it into a heading or list, wrap it as a wikilink, <strong>extract it to a new page</strong> (leaving a <code>[[link]]</code> behind), or send it to the Keeper as a quote to ask about.</p>
+
+        <h2 id="tabs">Tabs &amp; focus</h2>
+        <p>Open several pages at once in <strong>tabs</strong>, with the browser muscle memory you'd expect: ⌘-click a link to open it in a background tab, ⌘W to close, ⌘⇧T to reopen, ⌘1–9 to jump, middle-click to close, drag to reorder. Each tab remembers its cursor, scroll and read/edit mode. For deep work, <strong>Zen mode</strong> strips everything but the page.</p>
+
+        <div class="callout callout-tip">
+          <svg class="ic" viewBox="0 0 16 16"><path d="M8 1.5 3 3v5c0 3 2.4 5.5 5 6.5 2.6-1 5-3.5 5-6.5V3l-5-1.5Z"/></svg>
+          <div class="c-body"><strong>It's just Markdown.</strong><p>Nothing here is a proprietary format. The slash menu, callouts and transclusion all write plain Markdown an Obsidian user would recognise — so your world stays portable no matter what you edit it with.</p></div>
+        </div>
+      </div>
+
+      <div class="pager">
+        <a href="worlds.html"><span class="dir">Previous</span><span class="ttl">← Worlds &amp; pages</span></a>
+        <a class="next" href="views.html"><span class="dir">Next</span><span class="ttl">Maps, timeline &amp; graph →</span></a>
+      </div>
+    </main>
+
+    <aside class="docs-toc"></aside>
+  </div>
+
+  <footer class="footer">
+    <div class="wrap">
+      <div class="legal" style="border:0;margin:0;padding:0">
+        <span>© <span data-year>2026</span> Chronicle Keeper · MIT licensed · Built with ❤️ from Germany</span>
+        <span><a href="../">Home</a> · <a href="https://github.com/aronjanosch/chronicle-keeper-world">GitHub</a></span>
+      </div>
+    </div>
+  </footer>
+
+  <script src="../assets/site.js"></script>
+</body>
+</html>

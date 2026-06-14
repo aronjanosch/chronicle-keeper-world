@@ -280,6 +280,9 @@ pre:hover .copy-btn { opacity: 1; }
 .prose a { text-decoration: underline; text-underline-offset: 2px; }
 .prose hr { border: 0; height: 1px; background: var(--rule); margin: 32px 0; }
 .prose img { border: 1px solid var(--rule); border-radius: var(--r-md); box-shadow: var(--shadow-card); margin: 18px 0; }
+.prose figure { margin: 22px 0; }
+.prose figure img { margin: 0; }
+.prose figcaption { margin-top: 8px; font-size: 13px; color: var(--ink-muted); text-align: center; font-style: italic; }
 .prose h2 .anchor, .prose h3 .anchor { opacity: 0; color: var(--ink-faint); margin-left: 8px; font-weight: 400; }
 .prose h2:hover .anchor, .prose h3:hover .anchor { opacity: 1; }
 
