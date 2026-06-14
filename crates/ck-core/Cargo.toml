@@ -45,6 +45,21 @@ futures-util = "0.3"
 
 # transcription feature (heavy; dropped from the server build)
 sherpa-onnx = { version = "1.13.2", default-features = false, features = ["static"], optional = true }
-symphonia = { version = "0.5", default-features = false, features = ["flac"], optional = true }
+symphonia = { version = "0.5", default-features = false, features = [
+    # Containers: Craig exports + common single-file recordings (mp3/m4a/wav/ogg).
+    "isomp4",
+    "ogg",
+    "wav",
+    "aiff",
+    "caf",
+    # Codecs.
+    "aac",
+    "adpcm",
+    "alac",
+    "flac",
+    "mp3",
+    "pcm",
+    "vorbis",
+], optional = true }
 tar = { version = "0.4", optional = true }
 bzip2 = { version = "0.4", optional = true }
