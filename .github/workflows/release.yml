@@ -44,7 +44,7 @@ jobs:
 
     runs-on: ${{ matrix.platform }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install Rust (stable)
         uses: dtolnay/rust-toolchain@stable
@@ -100,7 +100,7 @@ jobs:
       # Always keep the installers as run artifacts — the only output on manual
       # dispatch, and a convenient mirror of the Release on tag builds.
       - name: Upload installers
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: chronicle-keeper-${{ matrix.label }}
           if-no-files-found: error

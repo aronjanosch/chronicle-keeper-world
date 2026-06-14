@@ -18,7 +18,7 @@ jobs:
     name: rust check / fmt / clippy
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install Rust (stable + rustfmt + clippy)
         uses: dtolnay/rust-toolchain@stable
@@ -48,8 +48,8 @@ jobs:
     name: frontend syntax
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
         with:
           node-version: 20
       # No build step (vendored ESM bundle) — just parse-check every module.
