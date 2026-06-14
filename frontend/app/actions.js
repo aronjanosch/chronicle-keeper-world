@@ -54,7 +54,8 @@ export function generateCampaignId(name) {
 
 export async function createCampaign(form) {
   const id = generateCampaignId(form.name);
-  await apiJson('/campaigns', 'POST', { campaign_id: id, name: form.name, start_session_number: Number(form.start) || 1 });
+  const start = form.start === '' || form.start == null ? 0 : Number(form.start);
+  await apiJson('/campaigns', 'POST', { campaign_id: id, name: form.name, start_session_number: start });
   await apiJson(`/campaigns/${id}`, 'PUT', {
     name: form.name, system: form.system, setting: form.setting,
     default_language: form.default_language, gm: form.gm, gm_pronouns: form.gm_pronouns,

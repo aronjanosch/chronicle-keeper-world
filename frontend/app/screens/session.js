@@ -190,7 +190,7 @@ export function SessionScreen({ store }) {
     topbar=${html`<${Topbar} crumbs=${[
       { label: 'Campaigns', onClick: () => navigate('library') },
       c && { label: c.name, onClick: () => openCampaign(c.campaign_id) },
-      `Session ${cam.session_number || '?'}`,
+      `Session ${cam.session_number ?? '?'}`,
     ]} right=${html`
       <div style=${{ display: 'flex', gap: 8, alignItems: 'center' }}>
         <${Btn} kind="ghost" icon="edit" onClick=${() => openModal('session', { session: sess })}>Edit</${Btn}>
@@ -200,6 +200,7 @@ export function SessionScreen({ store }) {
           onConfirm: () => deleteSession(sess.session_id),
         })} />
         ${tracks.length > 0 && !hasT ? html`<${Btn} kind="secondary" icon="users" onClick=${() => navigate('newSession', { id: cam.campaign_id, attach: sess.session_id })}>Label speakers</${Btn}>` : ''}
+        ${tracks.length > 0 ? html`<${Btn} kind="ghost" icon="upload" title="Replace the uploaded recording" onClick=${() => navigate('newSession', { id: cam.campaign_id, attach: sess.session_id })}>Replace recording</${Btn}>` : ''}
         <${Btn} kind="secondary" icon="export" disabled=${!hasS} onClick=${() => openModal('export', {})}>Export</${Btn}>
         ${primary}
       </div>`} />`}
@@ -208,7 +209,7 @@ export function SessionScreen({ store }) {
       <div style=${{ width: 64, height: 64, flex: '0 0 auto', background: 'var(--burgundy-50)', color: 'var(--burgundy-700)', borderRadius: 8, border: '1px solid rgba(122,46,31,.18)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'var(--font-display)' }}>
         <div style=${{ textAlign: 'center', lineHeight: 1 }}>
           <div style=${{ fontSize: 10, fontWeight: 600, letterSpacing: '0.12em', textTransform: 'uppercase' }}>Session</div>
-          <div style=${{ fontSize: 24, fontWeight: 500, marginTop: 4 }}>${cam.session_number || '?'}</div>
+          <div style=${{ fontSize: 24, fontWeight: 500, marginTop: 4 }}>${cam.session_number ?? '?'}</div>
         </div>
       </div>
       <div style=${{ flex: 1 }}>

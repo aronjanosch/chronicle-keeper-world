@@ -76,7 +76,7 @@ function SessionRow({ s, onClick }) {
     onMouseEnter=${(e) => { e.currentTarget.style.background = 'var(--paper)'; }}
     onMouseLeave=${(e) => { e.currentTarget.style.background = 'transparent'; }}>
     <div style=${{ width: 38, textAlign: 'center', fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--ink-faint)' }}>
-      <div style=${{ fontSize: 16, color: 'var(--ink)', fontWeight: 500 }}>${String(s.session_number || 0).padStart(2, '0')}</div>
+      <div style=${{ fontSize: 16, color: 'var(--ink)', fontWeight: 500 }}>${String(s.session_number ?? 0).padStart(2, '0')}</div>
       <div style=${{ marginTop: -2 }}>session</div>
     </div>
     <div style=${{ width: 1, height: 36, background: 'var(--rule-soft)' }} />
@@ -195,7 +195,7 @@ export function CampaignScreen({ store }) {
         <div style=${{ display: 'flex', gap: 22, marginTop: 16 }}>
           <${Stat} value=${sessions.length} label="Sessions" />
           <${Stat} value=${players.length} label="Players" />
-          <${Stat} value=${`#${c.next_session_number || 1}`} label="Next session" />
+          <${Stat} value=${`#${c.next_session_number ?? 1}`} label="Next session" />
         </div>
       </div>
       ${latest && html`<div style=${{ width: 260, padding: 16, borderRadius: 6, background: 'var(--paper)', border: '1px solid var(--rule-soft)' }}>
