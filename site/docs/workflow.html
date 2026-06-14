@@ -55,7 +55,7 @@
 
       <div class="prose">
         <div class="pipeline" style="margin-bottom:8px">
-          <div class="step"><div class="n">01</div><h4>Upload</h4><p>Craig ZIP</p></div>
+          <div class="step"><div class="n">01</div><h4>Upload</h4><p>Craig ZIP or audio</p></div>
           <div class="step"><div class="n">02</div><h4>Label</h4><p>who's who</p></div>
           <div class="step"><div class="n">03</div><h4>Transcribe</h4><p>on-device</p></div>
           <div class="step"><div class="n">04</div><h4>Summarize</h4><p>your LLM</p></div>
@@ -66,7 +66,7 @@
         <ul>
           <li>You've <a href="install.html">installed the app</a>.</li>
           <li>You've <a href="llm-setup.html">set up an LLM</a> in Settings and the Test passed.</li>
-          <li>You have a <strong>Craig Bot recording</strong> downloaded — the multi-track ZIP, ideally with one track per player.</li>
+          <li>You have a <strong>recording</strong> downloaded — ideally a Craig Bot multi-track ZIP with one track per player, but a single audio file works too.</li>
         </ul>
 
         <h2 id="record">0 · Record with Craig</h2>
@@ -81,7 +81,7 @@
         <h2 id="upload">2 · Start a session &amp; upload</h2>
         <ol class="steps">
           <li><h4>New session</h4><p>Inside the campaign, start a new session. The session number is suggested automatically.</p></li>
-          <li><h4>Drop in the Craig ZIP</h4><p>Upload the recording. Chronicle Keeper unpacks the tracks and lists them.</p></li>
+          <li><h4>Drop in the recording</h4><p>Upload a Craig ZIP and Chronicle Keeper unpacks the tracks and lists them. A bare audio file (MP3, WAV, FLAC, M4A or OGG) works too — it becomes a single-track session, you just lose the per-speaker attribution Craig gives you.</p></li>
         </ol>
 
         <h2 id="label">3 · Label the speakers</h2>
@@ -104,8 +104,9 @@
         </div>
 
         <h2 id="summarize">5 · Summarize</h2>
-        <p>With transcripts ready, generate the summary using your chosen LLM. Chronicle Keeper builds a structured prompt and — crucially — injects your campaign's <a href="codex.html">Codex</a> so the model corrects names the transcriber mangled. The result is a clean recap: what happened, who did what, decisions, loose threads.</p>
-        <p>Read it over. The summary is yours to copy, tweak, or regenerate. Chronicle Keeper deliberately stays out of in-app editing — your vault is the place to polish.</p>
+        <p>With transcripts ready, generate the summary using your chosen LLM. Chronicle Keeper builds a structured prompt and — crucially — injects your campaign's <a href="codex.html">Codex</a> so the model corrects names the transcriber mangled. The summary <strong>streams in live</strong>, token by token, so you can read along as it's written. The result is a clean recap: what happened, who did what, decisions, loose threads.</p>
+        <p>Want a different style of write-up? Pick a <strong>prompt template</strong> on the Summarize screen — the built-in templates cover common styles, and you can create and edit your own in Settings (with a restore-defaults if you break something).</p>
+        <p>Read it over. The summary is yours to copy, tweak, or regenerate, and the extracted <strong>"what happened"</strong> details (characters, locations, quests, items) are editable inline on the session. The prose itself stays out of in-app editing — your vault is the place to polish.</p>
 
         <h2 id="recap">Bonus · Story-so-far recap</h2>
         <p>Need to remind the table what happened last time? The <strong>recap</strong> stitches your past summaries into a short "previously on…" for the campaign — handy to read aloud at the start of a session.</p>

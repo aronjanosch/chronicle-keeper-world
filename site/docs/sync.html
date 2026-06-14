@@ -76,6 +76,13 @@
           <li><h4>Repeat on your other devices</h4><p>Point each machine at the same server. They'll converge on the same campaigns and notes.</p></li>
         </ol>
 
+        <h2 id="force-sync">Recovering from a bad sync: Force sync</h2>
+        <p>If the server ends up with data you don't want — say a botched merge or a device that pushed stale notes — <strong>Settings → Sync → Force sync</strong> overwrites the server with this device's data. The server becomes an exact copy of the machine you ran it from, and every other device converges on that state the next time it syncs.</p>
+        <div class="callout callout-warn">
+          <svg class="ic" viewBox="0 0 16 16"><path d="M8 2 1.5 13.5h13L8 2Z"/><path d="M8 6.5v3.5M8 12h.01"/></svg>
+          <div class="c-body"><strong>This is destructive and irreversible.</strong><p>Anything on the server that isn't on this device — and, after their next sync, on every other device — is deleted. Use it only when this device holds the version you want to keep. The app asks for confirmation before doing anything.</p></div>
+        </div>
+
         <h2 id="protocol">For the technically curious</h2>
         <p>The push/pull protocol — change tracking, conflict handling, and the row format — is defined by the code on both ends: the client in <code>crates/ck-core/src/sync.rs</code> and the open-source reference server <a href="https://github.com/aronjanosch/chronicle-keeper-sync-server" target="_blank" rel="noopener">chronicle-keeper-sync-server</a> (<code>app/sync.py</code>).</p>
       </div>
