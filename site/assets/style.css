@@ -280,6 +280,11 @@ pre:hover .copy-btn { opacity: 1; }
 .prose a { text-decoration: underline; text-underline-offset: 2px; }
 .prose hr { border: 0; height: 1px; background: var(--rule); margin: 32px 0; }
 .prose img { border: 1px solid var(--rule); border-radius: var(--r-md); box-shadow: var(--shadow-card); margin: 18px 0; }
+.shot { border: 1px solid var(--rule); border-radius: var(--r-md); box-shadow: var(--shadow-card); width: 100%; display: block; }
+.shot-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 26px 24px; }
+.shot-item h4 { font-family: var(--font-display, inherit); font-size: 16px; margin: 14px 0 4px; }
+.shot-item p { font-size: 14px; color: var(--ink-muted); margin: 0; }
+@media (max-width: 760px) { .shot-grid { grid-template-columns: 1fr; } }
 .prose figure { margin: 22px 0; }
 .prose figure img { margin: 0; }
 .prose figcaption { margin-top: 8px; font-size: 13px; color: var(--ink-muted); text-align: center; font-style: italic; }

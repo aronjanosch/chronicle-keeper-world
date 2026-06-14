@@ -60,6 +60,9 @@
       <p class="page-lede">The questions people ask before they download.</p>
 
       <div class="prose">
+        <h2 id="what-is-it">Is this a session-notes app or a worldbuilding app?</h2>
+        <p>Both — it's a <strong>worldbuilding workspace</strong> first. Your campaign is a <a href="worlds.html">wiki of Markdown pages</a> with maps, a timeline, a graph and an <a href="keeper.html">AI assistant</a>. Chronicle Keeper began as a session-notes tool, and that pipeline is still built in: <a href="workflow.html">recordings</a> transcribe and summarize on-device, then fold back into your world.</p>
+
         <h2 id="free">Is it free?</h2>
         <p>The app is free and open source (MIT). Transcription is free and runs on your machine. The only money involved is optional: if you choose a <em>cloud</em> LLM, you pay that provider per use. Use <a href="llm-setup.html#ollama">Ollama</a> locally and it's free end to end.</p>
 
@@ -78,14 +81,17 @@
         <h2 id="craig">Do I have to use Craig Bot?</h2>
         <p>Chronicle Keeper is built around <a href="https://craig.chat" target="_blank" rel="noopener">Craig</a>'s multi-track recordings — one audio file per speaker — because that gives the cleanest, speaker-attributed transcripts without diarization. That's the supported path.</p>
 
-        <h2 id="editing">Can I edit notes in the app?</h2>
-        <p>Deliberately not. Chronicle Keeper generates the note and exports it; polishing happens in your editor or Obsidian vault. Keeping the app simple is a core design goal.</p>
+        <h2 id="editing">Can I edit pages in the app?</h2>
+        <p>Yes — there's a full <a href="editor.html">Markdown editor</a> with a source and reading view, a slash menu, wikilink autocomplete, transclusion, callouts and tabs. Pages are plain files, so you can edit in Chronicle Keeper, in Obsidian, or in any text editor interchangeably.</p>
 
         <h2 id="obsidian">Do I need Obsidian?</h2>
-        <p>No. Exports are plain Markdown with YAML frontmatter — they open in any text editor. The frontmatter is just a bonus for Obsidian users.</p>
+        <p>No. A world is just a folder of Markdown with YAML frontmatter — Chronicle Keeper reads and writes it directly, and it opens in any editor. You <em>can</em> point it at an existing Obsidian vault if you keep one, but Obsidian isn't required.</p>
+
+        <h2 id="sync">How do I sync my world across devices?</h2>
+        <p>Chronicle Keeper has <strong>no built-in sync</strong> — by design, it stays strictly local-first. Because a world is an ordinary folder of files, use any folder-sync tool you already trust: <a href="https://syncthing.net" target="_blank" rel="noopener">Syncthing</a> (free, open source, peer-to-peer, no cloud) works great, as does iCloud Drive, Dropbox or a git repo. Sync the world folder; the per-world index cache rebuilds itself on each machine.</p>
 
         <h2 id="model-quality">Which LLM gives the best summaries?</h2>
-        <p>Generally, larger cloud models (e.g. Anthropic's Claude) write the most polished recaps. Local models are very usable and improving fast — try a 7–8B model with Ollama and step up to cloud only if you want more. The <a href="worlds.html#summary">page summaries</a> improves name accuracy regardless of model.</p>
+        <p>Generally, larger cloud models (e.g. Anthropic's Claude) write the most polished recaps. Local models are very usable and improving fast — try a 7–8B model with Ollama and step up to cloud only if you want more. Your <a href="worlds.html#summary">page summaries</a> improve name accuracy regardless of model. Tool-using features like the Keeper benefit most from a capable model.</p>
 
         <h2 id="opensource">Is it open source? Can I contribute?</h2>
         <p>Yes — MIT licensed. The Rust core lives in <code>crates/ck-core</code> inside a Tauri shell. PRs welcome; see <a href="https://github.com/aronjanosch/chronicle-keeper-world/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener">CONTRIBUTING.md</a>.</p>

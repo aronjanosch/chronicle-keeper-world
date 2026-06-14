@@ -27,7 +27,8 @@
       </button>
       <nav>
         <a href="#features">Features</a>
-        <a href="#pipeline">How it works</a>
+        <a href="#tour">Tour</a>
+        <a href="#pipeline">Session notes</a>
         <a href="docs/">Docs</a>
         <a href="https://github.com/aronjanosch/chronicle-keeper-world">GitHub</a>
         <a class="btn btn-primary btn-sm" href="https://github.com/aronjanosch/chronicle-keeper-world/releases" style="color:#FBF6E9">Download</a>
@@ -112,7 +113,7 @@
         <div class="card">
           <span class="sigil sigil-moss"><svg class="ic" viewBox="0 0 16 16"><path d="M8 1.5 3 3v5c0 3 2.4 5.5 5 6.5 2.6-1 5-3.5 5-6.5V3l-5-1.5Z"/></svg></span>
           <h3>Local-first &amp; private</h3>
-          <p>Everything runs on your device and works fully offline. The app binds to localhost; your world, your audio and your keys never leave your machine.</p>
+          <p>Everything runs on your device and works fully offline — no Chronicle Keeper server, ever. Your world is a plain folder, so sync it across machines with <a href="https://syncthing.net" target="_blank" rel="noopener">Syncthing</a> or any tool you trust.</p>
         </div>
         <div class="card">
           <span class="sigil sigil-ochre"><svg class="ic" viewBox="0 0 16 16"><path d="M8 2v4M8 10v4M2 8h4M10 8h4M4 4l2 2M10 10l2 2M4 12l2-2M10 6l2-2"/></svg></span>
@@ -128,13 +129,61 @@
     </div>
   </section>
 
-  <!-- ── Pipeline ────────────────────────────────────────────────── -->
-  <section class="section alt" id="pipeline">
+  <!-- ── World tour (screenshots) ────────────────────────────────── -->
+  <section class="section alt" id="tour">
     <div class="wrap">
       <div class="section-head">
-        <span class="eyebrow">From the table to your world</span>
-        <h2>Record → transcribe → summarize → fold in.</h2>
-        <p>The session-notes side of Chronicle Keeper: a pile of audio tracks becomes a finished write-up, then the Keeper folds what happened back into your wiki. Most of it is one click.</p>
+        <span class="eyebrow">A look inside</span>
+        <h2>Your whole world, in one app.</h2>
+        <p>Pages, maps, a timeline and a graph — every view computed live from the same Markdown files. Here's what that looks like.</p>
+      </div>
+      <div class="shot-grid">
+        <div class="shot-item">
+          <a href="docs/worlds.html"><img class="shot" src="assets/screenshots/codex.png" alt="The Codex — folders of wiki pages" loading="lazy" /></a>
+          <h4>The Codex</h4>
+          <p>Your world as a folder of wiki pages — NPCs, places, factions, lore — linked with <code>[[wikilinks]]</code>.</p>
+        </div>
+        <div class="shot-item">
+          <a href="docs/worlds.html#infoboxes"><img class="shot" src="assets/screenshots/page.png" alt="A wiki page with banner, infobox and AI memory" loading="lazy" /></a>
+          <h4>Pages</h4>
+          <p>Editable Markdown with an infobox, backlinks, banner art and the one-liner the AI remembers.</p>
+        </div>
+        <div class="shot-item">
+          <a href="docs/views.html#atlas"><img class="shot" src="assets/screenshots/atlas.jpeg" alt="The Atlas — a map with pins" loading="lazy" /></a>
+          <h4>The Atlas</h4>
+          <p>Pin places onto your own maps. Each pin is a codex page; maps nest from continent to city.</p>
+        </div>
+        <div class="shot-item">
+          <a href="docs/views.html#timeline"><img class="shot" src="assets/screenshots/timeline.png" alt="The Timeline on an in-world calendar" loading="lazy" /></a>
+          <h4>The Timeline</h4>
+          <p>Dated pages on your world's own calendar — eras, spans and "years later" gaps.</p>
+        </div>
+        <div class="shot-item">
+          <a href="docs/views.html#graph"><img class="shot" src="assets/screenshots/graph.png" alt="The graph of pages and links" loading="lazy" /></a>
+          <h4>The Graph</h4>
+          <p>The whole web of characters, factions and places — coloured by kind, linked by relation.</p>
+        </div>
+        <div class="shot-item">
+          <a href="docs/keeper.html"><img class="shot" src="assets/screenshots/keeper.png" alt="The Keeper AI assistant" loading="lazy" /></a>
+          <h4>The Keeper</h4>
+          <p>An AI that has read your whole world — answers with citations and edits the codex with your approval.</p>
+        </div>
+      </div>
+      <div style="text-align:center;margin-top:34px">
+        <a class="btn btn-primary btn-lg" href="docs/worlds.html">Explore the docs
+          <svg class="ic" viewBox="0 0 16 16"><path d="M3 8h10M9 4l4 4-4 4"/></svg>
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Pipeline (session notes — secondary) ────────────────────── -->
+  <section class="section" id="pipeline">
+    <div class="wrap">
+      <div class="section-head">
+        <span class="eyebrow">Also built in · session notes</span>
+        <h2>Recordings become canon, automatically.</h2>
+        <p>Chronicle Keeper started as a session-notes tool, and that pipeline is still here — now it feeds your world. Drop in a Craig recording and it transcribes on-device, summarizes, and the Keeper folds what happened into your wiki. Most of it is one click.</p>
       </div>
       <div class="pipeline">
         <div class="step">
@@ -172,7 +221,7 @@
   </section>
 
   <!-- ── LLM choices ─────────────────────────────────────────────── -->
-  <section class="section" id="llm">
+  <section class="section alt" id="llm">
     <div class="wrap">
       <div class="section-head">
         <span class="eyebrow">Bring your own brain</span>
@@ -203,11 +252,11 @@
   </section>
 
   <!-- ── Final CTA ───────────────────────────────────────────────── -->
-  <section class="section alt">
+  <section class="section">
     <div class="wrap" style="text-align:center;max-width:640px">
       <div class="flourish" style="margin-bottom:22px">✦</div>
-      <h2 class="display" style="font-size:36px">Keep the chronicle.</h2>
-      <p class="lede" style="margin:12px auto 26px">Free, open source, and built with ❤️ from Germany. Your campaign deserves better notes than nobody-took-any.</p>
+      <h2 class="display" style="font-size:36px">Build the world. Keep the chronicle.</h2>
+      <p class="lede" style="margin:12px auto 26px">Free, open source, and built with ❤️ from Germany. An AI-assisted home for your campaign — files you own, on a machine you control.</p>
       <div class="hero-actions" style="justify-content:center">
         <a class="btn btn-primary btn-lg" href="https://github.com/aronjanosch/chronicle-keeper-world/releases">
           <svg class="ic" viewBox="0 0 16 16"><path d="M8 3v8M5 8l3 3 3-3M3 13h10"/></svg> Download free
@@ -238,8 +287,9 @@
         </div>
         <div>
           <h5>Guides</h5>
+          <a href="docs/editor.html">The editor</a>
           <a href="docs/llm-setup.html#ollama">Run Ollama locally</a>
-          <a href="docs/llm-setup.html#getting-keys">Get an API key</a>
+          <a href="docs/faq.html#sync">Sync across devices</a>
           <a href="docs/troubleshooting.html">Troubleshooting</a>
           <a href="docs/faq.html">FAQ</a>
         </div>
