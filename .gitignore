@@ -13,5 +13,9 @@ debug-exports/
 node_modules/
 frontend/dist/
 
-# Internal docs — kept private, must never be committed here
+# Internal docs — kept private, must never be committed here.
+# docs/internal/ is a separate PRIVATE repo (chronicle-keeper-internal) cloned in;
+# CLAUDE.md is a symlink into it. Both stay out of the public product repo.
 GIT_WORKFLOW.md
+/docs/internal/
+/CLAUDE.md

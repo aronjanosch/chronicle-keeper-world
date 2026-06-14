@@ -13,7 +13,7 @@ The results land as Markdown with Obsidian frontmatter, ready to paste into your
 - **Bring your own LLM.** Local [Ollama](https://ollama.com), Anthropic, and OpenAI-compatible providers.
 - **Built for continuity.** Keep characters, places, factions, and items consistent across sessions.
 
-📖 **[Read the docs →](https://aronjanosch.github.io/chronicle-keeper/)** — install guides, LLM
+📖 **[Read the docs →](https://aronjanosch.github.io/chronicle-keeper-world/)** — install guides, LLM
 setup (Ollama + getting API keys), the full workflow, and FAQ.
 
 ## Features
@@ -26,7 +26,6 @@ setup (Ollama + getting API keys), the full workflow, and FAQ.
 - **Prompt template library.** Use built-in prompts or create your own summary styles.
 - **Markdown + Obsidian export.** Export notes in a format that drops directly into your vault.
 - **Artifact management.** Keep transcript and summary artifacts per session with in-app retrieval.
-- **Optional multi-device sync.** Sync text data across devices using a small self-hosted sync server.
 
 ## Screenshots
 <img width="305" height="218" alt="image" src="https://github.com/user-attachments/assets/437e6911-d5da-439c-b5bc-1e99ee6bba49" />
@@ -36,7 +35,7 @@ setup (Ollama + getting API keys), the full workflow, and FAQ.
 ## Download & install
 
 Grab the installer for your OS
-[**Releases**](https://github.com/aronjanosch/chronicle-keeper/releases) page.
+[**Releases**](https://github.com/aronjanosch/chronicle-keeper-world/releases) page.
 
 > **Heads up:** the app isn't code-signed yet (signing is planned), so your OS will show a
 > one-time "unknown developer" warning on first launch.
@@ -66,7 +65,7 @@ Open **Settings** and pick one:
   context to your full session, so local summaries are complete but take a few minutes.
 - **Cloud:** paste an Anthropic or any OpenAI-compatible API key. Keys stay on your machine. Faster, pay per use.
 
-See the [LLM setup guide](https://aronjanosch.github.io/chronicle-keeper/docs/llm-setup.html) for model recommendations and tuning.
+See the [LLM setup guide](https://aronjanosch.github.io/chronicle-keeper-world/docs/llm-setup.html) for model recommendations and tuning.
 
 ## How it works
 
@@ -74,9 +73,7 @@ See the [LLM setup guide](https://aronjanosch.github.io/chronicle-keeper/docs/ll
 Upload Craig ZIP → label speakers → transcribe on-device → summarize (your LLM) → export
 ```
 
-Optional **multi-device sync** keeps your notes in step across machines via a small self-hostable
-server ([chronicle-keeper-sync-server](https://github.com/aronjanosch/chronicle-keeper-sync-server)).
-Only text sync. Sync is off until you add a server URL in Settings.
+Everything runs on-device and offline-capable; your recordings and notes never leave your machine.
 
 ## Build from source
 
@@ -88,9 +85,6 @@ cargo tauri build                        # build installers for your OS
 cargo run -p ck-core --bin ck-serve      # core API only, no window (http://127.0.0.1:8000)
 RUST_LOG=debug cargo run -p ck-core --bin ck-serve   # verbose logs
 ```
-The sync wire format is defined by the code on both ends: the client in
-[`crates/ck-core/src/sync.rs`](crates/ck-core/src/sync.rs) and the open-source reference server
-[`chronicle-keeper-sync-server`](https://github.com/aronjanosch/chronicle-keeper-sync-server).
 Contributions welcome — see [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 ## License
