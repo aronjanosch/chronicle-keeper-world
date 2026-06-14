@@ -64,7 +64,7 @@ export function NewSessionScreen({ store }) {
   // (upload-later flow) rather than creating a fresh draft.
   const attachId = store.route?.params?.attach || null;
   const [sid, setSid] = useState(null);
-  const [number, setNumber] = useState(c?.next_session_number || '');
+  const [number, setNumber] = useState(c?.next_session_number ?? '');
   const [tracks, setTracks] = useState([]);
   const [speakers, setSpeakers] = useState({}); // track_id -> {player_name,character_name,pronouns}
   const [title, setTitle] = useState('');
@@ -87,7 +87,7 @@ export function NewSessionScreen({ store }) {
           const cam = s.campaign || {};
           sidRef.current = s.session_id;
           setSid(s.session_id);
-          setNumber(cam.session_number || c?.next_session_number || '');
+          setNumber(cam.session_number ?? c?.next_session_number ?? '');
           setTitle(cam.title || '');
           setDate(cam.date || new Date().toISOString().slice(0, 10));
           setNotes(cam.notes || '');
@@ -103,7 +103,7 @@ export function NewSessionScreen({ store }) {
           if (!live) return;
           sidRef.current = null;
           setSid(null);
-          setNumber(c?.next_session_number || '');
+          setNumber(c?.next_session_number ?? '');
           setTitle('');
           setDate(new Date().toISOString().slice(0, 10));
           setNotes('');
@@ -121,7 +121,7 @@ export function NewSessionScreen({ store }) {
     const created = await createSession();
     sidRef.current = created.session_id;
     setSid(created.session_id);
-    if (created.session_number) setNumber((n) => n || created.session_number);
+    if (created.session_number != null) setNumber((n) => (n === '' || n == null ? created.session_number : n));
     return created.session_id;
   }
 
@@ -158,7 +158,7 @@ export function NewSessionScreen({ store }) {
         await saveSpeakers(id, tracks.map((t) => speakers[t.id] || { track_id: t.id, player_name: '', character_name: '', pronouns: '' }));
       }
       await saveSessionMetadata({
-        session_id: id, campaign_id: c.campaign_id, session_number: Number(number) || null,
+        session_id: id, campaign_id: c.campaign_id, session_number: (number === '' || number == null ? null : Number(number)),
         title: title.trim() || null, date: date || null,
         metadata: meta || EMPTY_META, notes: notes.trim() || null,
       });
@@ -187,7 +187,7 @@ export function NewSessionScreen({ store }) {
     <div style=${{ marginBottom: 18 }}>
       <div style=${{ fontSize: 10.5, fontWeight: 600, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--ink-faint)' }}>${attachId ? 'Add recording' : 'New session'} · ${c?.name}</div>
       <h1 style=${{ fontFamily: 'var(--font-display)', fontSize: 28, fontWeight: 500, letterSpacing: '-0.015em', color: 'var(--ink)', lineHeight: 1.15, marginTop: 2 }}>
-        Session <span style=${{ color: 'var(--ink-muted)', fontStyle: 'italic' }}>#${number || '…'}</span>
+        Session <span style=${{ color: 'var(--ink-muted)', fontStyle: 'italic' }}>#${number === '' || number == null ? '…' : number}</span>
       </h1>
     </div>
 

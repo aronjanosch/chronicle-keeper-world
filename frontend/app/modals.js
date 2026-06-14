@@ -78,8 +78,8 @@ function CampaignModal({ edit }) {
   const [f, setF] = useState(() => edit ? {
     name: edit.name || '', system: edit.system || '', setting: edit.setting || '',
     default_language: edit.default_language || '', gm: edit.gm || '', gm_pronouns: edit.gm_pronouns || '',
-    players: edit.players?.length ? edit.players : [], extra_info: edit.extra_info || '', start: edit.next_session_number || 1,
-  } : { name: '', system: '', setting: '', default_language: '', gm: '', gm_pronouns: '', players: [{ player_name: '', character_name: '', pronouns: '' }], extra_info: '', start: 1 });
+    players: edit.players?.length ? edit.players : [], extra_info: edit.extra_info || '', start: edit.next_session_number ?? 1,
+  } : { name: '', system: '', setting: '', default_language: '', gm: '', gm_pronouns: '', players: [{ player_name: '', character_name: '', pronouns: '' }], extra_info: '', start: 0 });
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
   const set = (k, v) => setF((s) => ({ ...s, [k]: v }));
@@ -124,7 +124,7 @@ function SessionModal({ session }) {
   // metadata untouched (the backend replaces metadata wholesale on save).
   const md = session.metadata || {};
   const [f, setF] = useState({
-    title: cam.title || '', date: cam.date || '', number: cam.session_number || '', notes: cam.notes || '',
+    title: cam.title || '', date: cam.date || '', number: cam.session_number ?? '', notes: cam.notes || '',
   });
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
@@ -135,7 +135,7 @@ function SessionModal({ session }) {
     try {
       await saveSessionMetadata({
         session_id: session.session_id, campaign_id: cam.campaign_id || null,
-        session_number: Number(f.number) || null, title: f.title.trim() || null, date: f.date || null,
+        session_number: (f.number === '' || f.number == null ? null : Number(f.number)), title: f.title.trim() || null, date: f.date || null,
         metadata: md,
         notes: f.notes.trim() || null,
       });

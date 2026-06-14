@@ -60,10 +60,11 @@ export function generateCampaignId(name) {
 
 export async function createCampaign(form) {
   const id = generateCampaignId(form.name);
+  const start = form.start === '' || form.start == null ? 0 : Number(form.start);
   await apiJson('/campaigns', 'POST', {
     campaign_id: id,
     name: form.name,
-    start_session_number: Number(form.start) || 1,
+    start_session_number: start,
     vault_path: form.vault_path || null,
     scaffold: form.scaffold || false,
     adopt: form.adopt || false,
