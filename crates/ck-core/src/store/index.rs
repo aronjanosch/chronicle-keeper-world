@@ -749,6 +749,7 @@ pub fn tag_counts(conn: &Connection) -> AppResult<Vec<(String, i64)>> {
 }
 
 /// path → (aliases beyond the title, tags) for enriching page lists.
+#[allow(clippy::type_complexity)]
 pub fn page_meta(conn: &Connection) -> AppResult<HashMap<String, (Vec<String>, Vec<String>)>> {
     let mut out: HashMap<String, (Vec<String>, Vec<String>)> = HashMap::new();
     {

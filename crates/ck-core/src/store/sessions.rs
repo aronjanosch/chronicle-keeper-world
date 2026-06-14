@@ -248,7 +248,7 @@ pub fn list_campaign_sessions(
             campaign_session_info(dir, &st)
         })
         .collect();
-    out.sort_by(|a, b| b.session_number.cmp(&a.session_number));
+    out.sort_by_key(|s| std::cmp::Reverse(s.session_number));
     Ok(out)
 }
 

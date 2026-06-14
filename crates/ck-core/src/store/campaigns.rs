@@ -100,7 +100,7 @@ pub(crate) fn worlds(conn: &Connection) -> AppResult<Vec<(PathBuf, WorldConfig)>
             Err(e) => tracing::warn!("unreadable world config at {}: {e}", root.display()),
         }
     }
-    out.sort_by(|a, b| a.1.name.to_lowercase().cmp(&b.1.name.to_lowercase()));
+    out.sort_by_key(|p| p.1.name.to_lowercase());
     Ok(out)
 }
 

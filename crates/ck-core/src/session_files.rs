@@ -232,6 +232,7 @@ pub fn write_transcript_md(session_path: &Path, text: &str) -> std::io::Result<(
 }
 
 /// Write `summary.md` with Obsidian-compatible frontmatter.
+#[allow(clippy::too_many_arguments)]
 pub fn write_summary_md(
     session_path: &Path,
     text: &str,

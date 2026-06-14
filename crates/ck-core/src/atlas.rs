@@ -92,7 +92,7 @@ pub fn list_maps(world_root: &Path) -> AppResult<Vec<MapDoc>> {
             maps.push(doc);
         }
     }
-    maps.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    maps.sort_by_key(|m| m.name.to_lowercase());
     Ok(maps)
 }
 

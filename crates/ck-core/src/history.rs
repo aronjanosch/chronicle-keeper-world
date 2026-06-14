@@ -245,7 +245,7 @@ pub fn recent(world_root: &Path, origin: Option<&str>, limit: usize) -> Vec<Rece
         }
     }
     walk(&root, &root, origin, &mut out);
-    out.sort_by(|a, b| b.ts.cmp(&a.ts));
+    out.sort_by_key(|h| std::cmp::Reverse(h.ts));
     out.truncate(limit);
     out
 }
