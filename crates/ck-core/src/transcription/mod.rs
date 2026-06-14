@@ -1,7 +1,7 @@
 //! Native transcription engine (Parakeet TDT v3 via sherpa-onnx). Compiled
 //! only with the `transcription` feature; the server build omits it.
 
-mod decode;
+pub mod decode;
 pub mod model;
 
 use std::path::{Path, PathBuf};

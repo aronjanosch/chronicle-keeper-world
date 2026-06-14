@@ -30,15 +30,10 @@ pub fn decode_to_mono(path: &Path, watch: &super::Watch) -> Result<(Vec<f32>, u3
 
     let track = format.default_track().context("no default track")?;
     let track_id = track.id;
-    let sample_rate = track
-        .codec_params
-        .sample_rate
-        .context("track missing sample rate")?;
-    let channels = track
-        .codec_params
-        .channels
-        .context("track missing channel layout")?
-        .count();
+    // Sample rate and channel layout aren't always in codec_params (e.g. AAC in
+    // mp4 only reveals them once a packet decodes), so treat these as hints and
+    // fall back to each decoded buffer's spec below.
+    let mut sample_rate = track.codec_params.sample_rate;
 
     let mut decoder =
         symphonia::default::get_codecs().make(&track.codec_params, &DecoderOptions::default())?;
@@ -64,11 +59,11 @@ pub fn decode_to_mono(path: &Path, watch: &super::Watch) -> Result<(Vec<f32>, u3
             continue;
         }
         let decoded = decoder.decode(&packet)?;
+        let spec = *decoded.spec();
+        sample_rate.get_or_insert(spec.rate);
+        let channels = spec.channels.count().max(1);
         if sample_buf.is_none() {
-            sample_buf = Some(SampleBuffer::<f32>::new(
-                decoded.capacity() as u64,
-                *decoded.spec(),
-            ));
+            sample_buf = Some(SampleBuffer::<f32>::new(decoded.capacity() as u64, spec));
         }
         let buf = sample_buf.as_mut().unwrap();
         buf.copy_interleaved_ref(decoded);
@@ -78,5 +73,6 @@ pub fn decode_to_mono(path: &Path, watch: &super::Watch) -> Result<(Vec<f32>, u3
         }
     }
 
+    let sample_rate = sample_rate.context("could not determine sample rate")?;
     Ok((mono, sample_rate))
 }
