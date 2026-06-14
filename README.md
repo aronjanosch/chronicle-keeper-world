@@ -1,5 +1,6 @@
 # Chronicle Keeper
-<img width="611" height="369" alt="SCR-20260601-paxt" src="https://github.com/user-attachments/assets/231952c8-b26a-455b-bb55-3325a88c372c" />
+
+![Chronicle Keeper — world overview](docs/screenshots/SCR-20260614-ndhu.png)
 
 > 🚧 **Public beta (1.0.0-beta).** The bigger version of Chronicle Keeper. Unsigned builds —
 > see [install](#download--install). Bugs & feedback → [Issues](https://github.com/aronjanosch/chronicle-keeper-world/issues).
@@ -43,9 +44,25 @@ setup (Ollama + getting API keys), the full workflow, and FAQ.
 - **Markdown + Obsidian export.** Notes drop straight into your vault.
 
 ## Screenshots
-<img width="305" height="218" alt="image" src="https://github.com/user-attachments/assets/437e6911-d5da-439c-b5bc-1e99ee6bba49" />
-<img width="305" height="218" alt="image" src="https://github.com/user-attachments/assets/0cfd2ced-eb97-4843-bed3-22fd6e2ce49f" />
-<img width="305" height="218" alt="image" src="https://github.com/user-attachments/assets/c3bcb845-bff1-4730-96da-b9c57b1b517d" />
+
+<table>
+  <tr>
+    <td width="50%"><img alt="Atlas — maps with pins" src="docs/screenshots/SCR-20260614-nenw.jpeg" /><br/><sub><b>Atlas</b> — maps with pins for your places</sub></td>
+    <td width="50%"><img alt="Graph — relationship view" src="docs/screenshots/SCR-20260614-nfsd.png" /><br/><sub><b>Graph</b> — how characters, factions & places connect</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img alt="Timeline on an in-world calendar" src="docs/screenshots/SCR-20260614-nevf.png" /><br/><sub><b>Timeline</b> — dated pages on your world's calendar</sub></td>
+    <td width="50%"><img alt="Wiki page with infobox and AI memory" src="docs/screenshots/SCR-20260614-ndxe.png" /><br/><sub><b>Pages</b> — editable Markdown, infobox, backlinks, AI memory</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img alt="The Keeper AI assistant" src="docs/screenshots/SCR-20260614-nflt.png" /><br/><sub><b>The Keeper</b> — AI assistant that reads & edits your world</sub></td>
+    <td width="50%"><img alt="Session pipeline" src="docs/screenshots/SCR-20260614-nexh.png" /><br/><sub><b>Sessions</b> — record → transcribe → summarize → update the codex</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img alt="The Codex world wiki" src="docs/screenshots/SCR-20260614-ndqr.png" /><br/><sub><b>The Codex</b> — your world as a folder of wiki pages</sub></td>
+    <td width="50%"><img alt="Full-text search with facets" src="docs/screenshots/SCR-20260614-nfaf.png" /><br/><sub><b>Search</b> — full-text across pages, summaries & transcripts</sub></td>
+  </tr>
+</table>
 
 ## Download & install
 
