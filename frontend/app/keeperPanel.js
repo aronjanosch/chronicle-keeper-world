@@ -4,7 +4,7 @@
 // 6.4: structural/shell permission cards, attachments (picker + drag-drop),
 // [[ autocomplete in the composer.
 import { html, useState, useEffect, useRef } from '../vendor/htm-preact-standalone.mjs';
-import { apiFetch, apiJson, apiStream, bump, setOp, setState, store } from './core.js';
+import { apiFetch, apiJson, apiStream, bump, navigate, setOp, setState, store } from './core.js';
 import { Icon, Spinner, renderBlockHtml, wikilinkClick, openContextMenu } from './ui.js';
 import { caretCoords } from './screens/page.js';
 import { loadLlmProviders, fetchLlmModels, loadVaultTree, copyText } from './actions.js';
@@ -585,7 +585,13 @@ export function Transcript({ k, empty }) {
 /// Shared conversation column: transcript + composer + drop-to-attach overlay.
 export function Conversation({ k, empty }) {
   const { dragging, bind } = useDropAttachments();
+  const noProvider = !configuredProviders().length;
   return html`<div style=${{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, position: 'relative' }} ...${bind}>
+    ${noProvider && html`<div style=${{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', borderBottom: '1px solid var(--rule-soft)', background: 'var(--paper-deep)', fontSize: 12.5, color: 'var(--ink-muted)' }}>
+      <${Icon} name="feather" size=${13} />
+      <span style=${{ flex: 1 }}>The Keeper needs a language model. Set one up in Settings — Ollama is free and runs locally.</span>
+      <button class="ck-btn" onClick=${() => navigate('settings')}>Open Settings</button>
+    </div>`}
     <${Transcript} k=${k} empty=${empty} />
     ${k.undoable > 0 && !k.live && html`<div style=${{ display: 'flex', alignItems: 'center', gap: 7, padding: '4px 12px', borderTop: '1px solid var(--rule-soft)', fontSize: 12, color: 'var(--ink-muted)' }}>
       <span style=${{ flex: 1 }}>The Keeper changed ${k.undoable} ${k.undoable === 1 ? 'file' : 'files'} in this chat.</span>
