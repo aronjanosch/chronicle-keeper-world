@@ -280,6 +280,17 @@ function storeSavedSearches(campaignId, list) {
   try { localStorage.setItem(savedSearchKey(campaignId), JSON.stringify(list)); } catch (_) { /* private mode */ }
 }
 
+// Stub-suggestion bar: dismissable per world. We store the suggestion count at
+// dismiss time so the bar re-surfaces only when new links/orphans appear (no
+// red-link nagging — akhier's "no red links" rule).
+function diagDismissKey(campaignId) { return `ck_diag_dismissed_${campaignId}`; }
+function loadDiagDismissed(campaignId) {
+  try { return Number(localStorage.getItem(diagDismissKey(campaignId))) || 0; } catch (_) { return 0; }
+}
+function storeDiagDismissed(campaignId, n) {
+  try { localStorage.setItem(diagDismissKey(campaignId), String(n)); } catch (_) { /* private mode */ }
+}
+
 // The vault file browser — search, tree, diagnostics, vault-path footer. Filling
 // the rest of the FileTree aside below the brand + world nav.
 function VaultPanel({ campaign, tree, active, onOpen, act }) {
@@ -290,6 +301,7 @@ function VaultPanel({ campaign, tree, active, onOpen, act }) {
   const [saved, setSaved] = useState(() => loadSavedSearches(campaign?.campaign_id));
   const [renPath, setRenPath] = useState(null);
   const [tplOpen, setTplOpen] = useState(false);
+  const [diagDismissed, setDiagDismissed] = useState(() => loadDiagDismissed(campaign?.campaign_id));
   const ftsTimer = useRef(null);
   // Inline rename (file-browser style) replaces the modal inside the tree.
   const ren = {
@@ -415,13 +427,24 @@ function VaultPanel({ campaign, tree, active, onOpen, act }) {
             ${tree.pages.map((p) => html`<${PageLeaf} key=${p.path} page=${p} depth=${0} active=${active} onOpen=${(e) => onOpen(p, e)} act=${act} ren=${ren} dnd=${dnd} />`)}
           </div>`}
     </div>
-    ${diag && (diag.unresolved > 0 || diag.orphans > 0 || diag.issues > 0) && html`<div title="Vault diagnostics — click for the full list"
-      onClick=${() => openModal('vaultDiag')}
-      style=${{ margin: '0 -12px', borderTop: '1px solid var(--rule-soft)', padding: '7px 12px', display: 'flex', alignItems: 'center', gap: 10, fontSize: 10.5, color: 'var(--ink-faint)', fontFamily: 'var(--font-mono)', cursor: 'pointer' }}>
-      ${diag.unresolved > 0 && html`<span style=${{ display: 'flex', alignItems: 'center', gap: 4 }}><span style=${{ width: 6, height: 6, borderRadius: '50%', background: 'var(--ochre)' }} />${diag.unresolved} broken link${diag.unresolved === 1 ? '' : 's'}</span>`}
-      ${diag.orphans > 0 && html`<span style=${{ display: 'flex', alignItems: 'center', gap: 4 }}><span style=${{ width: 6, height: 6, borderRadius: '50%', background: 'var(--rule-strong)' }} />${diag.orphans} orphan${diag.orphans === 1 ? '' : 's'}</span>`}
-      ${diag.issues > 0 && html`<span style=${{ display: 'flex', alignItems: 'center', gap: 4 }}><span style=${{ width: 6, height: 6, borderRadius: '50%', background: 'var(--burgundy)' }} />${diag.issues} file issue${diag.issues === 1 ? '' : 's'}</span>`}
-    </div>`}
+    ${diag && (() => {
+      const suggestions = diag.unresolved + diag.orphans;
+      const showSuggest = suggestions > 0 && suggestions > diagDismissed;
+      if (!showSuggest && diag.issues === 0) return null;
+      const dismiss = (e) => { e.stopPropagation(); storeDiagDismissed(campaign?.campaign_id, suggestions); setDiagDismissed(suggestions); };
+      const rowStyle = { margin: '0 -12px', borderTop: '1px solid var(--rule-soft)', padding: '7px 12px', display: 'flex', alignItems: 'center', gap: 10, fontSize: 10.5, color: 'var(--ink-faint)', fontFamily: 'var(--font-mono)', cursor: 'pointer' };
+      return html`<div>
+        ${showSuggest && html`<div title="Linked pages not written yet — click to create them" onClick=${() => openModal('vaultDiag')} style=${rowStyle}>
+          ${diag.unresolved > 0 && html`<span style=${{ display: 'flex', alignItems: 'center', gap: 4 }}><${Icon} name="plus" size=${10} className="ck-ink-faint" />${diag.unresolved} to write</span>`}
+          ${diag.orphans > 0 && html`<span style=${{ display: 'flex', alignItems: 'center', gap: 4 }}><span style=${{ width: 6, height: 6, borderRadius: '50%', background: 'var(--rule-strong)' }} />${diag.orphans} unlinked</span>`}
+          <span style=${{ flex: 1 }} />
+          <span title="Dismiss until new links appear" onClick=${dismiss} style=${{ padding: '0 2px', opacity: 0.6 }}><${Icon} name="x" size=${11} /></span>
+        </div>`}
+        ${diag.issues > 0 && html`<div title="Vault diagnostics — click for the full list" onClick=${() => openModal('vaultDiag')} style=${rowStyle}>
+          <span style=${{ display: 'flex', alignItems: 'center', gap: 4 }}><span style=${{ width: 6, height: 6, borderRadius: '50%', background: 'var(--burgundy)' }} />${diag.issues} file issue${diag.issues === 1 ? '' : 's'}</span>
+        </div>`}
+      </div>`;
+    })()}
     <div style=${{ margin: '0 -12px', borderTop: '1px solid var(--rule-soft)' }}>
       <div style=${{ padding: '7px 12px', display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, color: 'var(--ink-faint)', cursor: 'pointer' }}>
         <span onClick=${() => setTplOpen((o) => !o)} style=${{ flex: 1, display: 'flex', alignItems: 'center', gap: 6 }}>

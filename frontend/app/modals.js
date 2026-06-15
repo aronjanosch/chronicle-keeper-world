@@ -464,10 +464,10 @@ function kindOptions() {
 
 // ── New page (Phase 16): title + template — the template's frontmatter
 // picks the kind. Falls back to a kind picker when a world has no templates.
-function NewPageModal({ folder = '', kind: presetKind = 'npc', onCreated }) {
+function NewPageModal({ folder = '', kind: presetKind = 'npc', title: initialTitle = '', onCreated }) {
   const templates = store.templates || [];
   const defaultTpl = (templates.find((t) => t.kind === presetKind) || templates[0])?.name || '';
-  const [title, setTitle] = useState('');
+  const [title, setTitle] = useState(initialTitle);
   const [tpl, setTpl] = useState(defaultTpl);
   const [kind, setKind] = useState(presetKind);
   const [busy, setBusy] = useState(false);
@@ -1090,17 +1090,18 @@ function VaultDiagnosticsModal() {
     ${!diag && html`<${Spinner} />`}
     ${empty && html`<div style=${{ fontSize: 13, color: 'var(--ink-muted)' }}>All clear — no broken links, orphans, or conflicts.</div>`}
     ${diag && html`<div style=${{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-      <${DiagSection} title="Broken links" items=${diag.broken_links} render=${(b, i) => html`<${DiagRow} key=${i} onClick=${() => open(b.source_path)} title="Open the page containing this link">
-        <span style=${{ width: 6, height: 6, borderRadius: '50%', background: 'var(--ochre)', flex: '0 0 auto' }} />
+      <${DiagSection} title="Pages to write (links with no page yet)" items=${diag.broken_links} render=${(b, i) => html`<${DiagRow} key=${i} onClick=${() => open(b.source_path)} title="Open the page that links here">
+        <${Icon} name="plus" size=${11} className="ck-ink-faint" />
         <span style=${{ fontFamily: 'var(--font-mono)', fontSize: 12 }}>[[${b.link_text}]]</span>
         <span style=${{ flex: 1 }} /><span style=${mono}>${b.source_path}</span>
+        <${Btn} kind="ghost" size="sm" onClick=${(e) => { e.stopPropagation(); openModal('newPage', { title: b.link_text }); }}>Create page</${Btn}>
       </${DiagRow}>`} />
       <${DiagSection} title="Broken image embeds" items=${diag.broken_media} render=${(m, i) => html`<${DiagRow} key=${i} onClick=${() => open(m.source_path)} title="Open the page containing this embed">
         <span style=${{ width: 6, height: 6, borderRadius: '50%', background: 'var(--ochre)', flex: '0 0 auto' }} />
         <span style=${{ fontFamily: 'var(--font-mono)', fontSize: 12 }}>![[${m.target}]]</span>
         <span style=${{ flex: 1 }} /><span style=${mono}>${m.source_path}</span>
       </${DiagRow}>`} />
-      <${DiagSection} title="Orphan pages (nothing links here)" items=${diag.orphans} render=${(o) => html`<${DiagRow} key=${o.path} onClick=${() => open(o.path)}>
+      <${DiagSection} title="Unlinked pages (nothing links here yet)" items=${diag.orphans} render=${(o) => html`<${DiagRow} key=${o.path} onClick=${() => open(o.path)}>
         <span style=${{ width: 6, height: 6, borderRadius: '50%', background: 'var(--rule-strong)', flex: '0 0 auto' }} />
         <span>${o.title}</span>
         <span style=${{ flex: 1 }} /><span style=${mono}>${o.path}</span>
