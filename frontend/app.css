@@ -248,7 +248,7 @@ span.ck-embed-src.ck-wikilink:hover { color: var(--burgundy); }
 .ck-ac { position: fixed; width: 264px; background: var(--surface-raised); border: 1px solid var(--rule-strong); border-radius: 8px; box-shadow: var(--shadow-raised); overflow: hidden; z-index: 50; }
 .ck-ac-head { padding: 7px 11px; font-size: 10.5px; color: var(--ink-faint); font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; border-bottom: 1px solid var(--rule-soft); }
 .ck-ac-item { display: flex; align-items: center; gap: 9px; padding: 7px 11px; cursor: pointer; }
-.ck-ac-item.on { background: var(--burgundy-50); }
+.ck-ac-item.on, .ck-ac-item:hover { background: var(--burgundy-50); }
 .ck-ac-glyph { width: 22px; height: 22px; flex: 0 0 auto; display: flex; align-items: center; justify-content: center; border-radius: 5px; background: var(--paper-deep); color: var(--ink-muted); }
 .ck-ac-name { font-size: 12.5px; font-weight: 500; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ck-ac-sub { font-size: 10.5px; color: var(--ink-faint); }

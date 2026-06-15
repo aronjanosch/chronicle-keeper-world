@@ -6,8 +6,7 @@
 import { html, useState, useEffect, useRef } from '../vendor/htm-preact-standalone.mjs';
 import { apiFetch, apiJson, apiStream, bump, navigate, setOp, setState, store } from './core.js';
 import { Icon, Spinner, renderBlockHtml, wikilinkClick, openContextMenu } from './ui.js';
-import { caretCoords } from './screens/page.js';
-import { loadLlmProviders, fetchLlmModels, loadVaultTree, copyText } from './actions.js';
+import { loadLlmProviders, fetchLlmModels, loadVaultTree, loadSkills, copyText } from './actions.js';
 
 // store.keeper = { open, chatId, campaignId, events[], attachments[],
 //                  live: {text, tools[], ask}|null, error, mode }
@@ -43,6 +42,28 @@ export function defaultPick() {
   return { provider, model: (p && (p.saved_model || p.default_model)) || '' };
 }
 
+// Kind of the page currently open in the editor (drives suggestion chips).
+function currentPageKind() {
+  if (store.route?.name !== 'page') return '';
+  const p = (store.vaultPages || []).find((x) => x.path === store.route?.params?.path);
+  return p?.kind || '';
+}
+
+// Skills whose kinds: match a page kind — pure string match, zero inference.
+function skillsForKind(kind) {
+  if (!kind) return [];
+  const k = kind.toLowerCase();
+  return (store.keeperSkills || []).filter((s) => (s.kinds || []).some((x) => String(x).toLowerCase() === k));
+}
+
+// The composer text a chip / command seeds: a plain user directive that makes
+// the Keeper pull the skill via use_skill. On a page, point it at that page.
+function skillDirective(skill, onPage) {
+  return onPage
+    ? `Use the "${skill.name}" skill to help me develop this page.`
+    : `Use the "${skill.name}" skill. `;
+}
+
 async function fetchChatInto(chatId) {
   const cid = store.campaign?.campaign_id;
   if (!cid || !chatId) return;
@@ -67,6 +88,7 @@ export async function openPanel() {
   }
   patchKeeper({ open: true, error: null });
   loadLlmProviders();
+  loadSkills(cid);
   const k = keeperState();
   if (k.chatId) return;
   try {
@@ -258,30 +280,44 @@ function AttachChips({ attachments }) {
   </div>`;
 }
 
-function AttachPicker({ onClose }) {
+// Popover above the composer. Default: attach pages/sessions as chips (the +
+// button). Link mode (onPickPage set, from @): pages only, insert a wikilink.
+function AttachPicker({ onClose, onPickPage }) {
   const [q, setQ] = useState('');
+  const [sel, setSel] = useState(0);
+  const linkMode = !!onPickPage;
   const ql = q.trim().toLowerCase();
   const pages = (store.vaultPages || [])
     .filter((p) => p.title && (!ql || p.title.toLowerCase().includes(ql)))
     .slice(0, 8);
-  const sessions = (store.campaignSessions || [])
+  const sessions = linkMode ? [] : (store.campaignSessions || [])
     .filter((s) => !ql || String(s.session_number || '').includes(ql) || (s.title || '').toLowerCase().includes(ql))
     .slice(0, 6);
-  const pick = async (body) => { onClose(); await addRefAttachment(body); };
+  const rows = [
+    ...pages.map((p) => ({ key: p.path, icon: 'book', label: p.title, run: () => (linkMode ? onPickPage(p) : addRefAttachment({ kind: 'page', path: p.path })) })),
+    ...sessions.map((s) => ({ key: `s${s.session_id}`, icon: 'mic', label: `Session ${String(s.session_number || 0).padStart(2, '0')}${s.title ? ` — ${s.title}` : ''}`, run: () => addRefAttachment({ kind: 'session', session: s.session_number }) })),
+  ];
+  const at = Math.min(sel, rows.length - 1);
+  const pick = (row) => { onClose(); row.run(); };
+  const onKey = (e) => {
+    if (e.key === 'ArrowDown') { e.preventDefault(); setSel((i) => (i + 1) % rows.length); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); setSel((i) => (i - 1 + rows.length) % rows.length); }
+    else if (e.key === 'Enter') { e.preventDefault(); if (rows[at]) pick(rows[at]); }
+    else if (e.key === 'Escape') { e.preventDefault(); onClose(); }
+  };
   return html`<div style=${{
     position: 'absolute', bottom: 'calc(100% + 6px)', left: 10, right: 10, zIndex: 5,
     background: 'var(--paper)', border: '1px solid var(--rule)', borderRadius: 8,
     boxShadow: 'var(--shadow-raised)', maxHeight: 280, overflow: 'auto', padding: 6,
   }}>
-    <input autofocus value=${q} placeholder="Attach a page or session…" onInput=${(e) => setQ(e.target.value)}
+    <input autofocus value=${q} placeholder=${linkMode ? 'Link a page…' : 'Attach a page or session…'}
+      onInput=${(e) => { setQ(e.target.value); setSel(0); }} onKeyDown=${onKey}
       style=${{ width: '100%', boxSizing: 'border-box', fontSize: 12.5, padding: '6px 8px', marginBottom: 4, borderRadius: 5, border: '1px solid var(--rule)', background: 'var(--surface)', color: 'var(--ink)' }} />
-    ${pages.map((p) => html`<div key=${p.path} onClick=${() => pick({ kind: 'page', path: p.path })} class="ck-ac-item" style=${pickRow}>
-      <${Icon} name="book" size=${12} /> ${p.title}
+    ${rows.map((row, i) => html`<div key=${row.key} onClick=${() => pick(row)} onMouseEnter=${() => setSel(i)}
+      class=${`ck-ac-item${i === at ? ' on' : ''}`} style=${pickRow}>
+      <${Icon} name=${row.icon} size=${12} /> ${row.label}
     </div>`)}
-    ${sessions.map((s) => html`<div key=${s.session_id} onClick=${() => pick({ kind: 'session', session: s.session_number })} class="ck-ac-item" style=${pickRow}>
-      <${Icon} name="mic" size=${12} /> Session ${String(s.session_number || 0).padStart(2, '0')}${s.title ? ` — ${s.title}` : ''}
-    </div>`)}
-    ${!pages.length && !sessions.length && html`<div style=${{ padding: 8, fontSize: 12, color: 'var(--ink-faint)' }}>Nothing matches. Drop a text file to attach it.</div>`}
+    ${!rows.length && html`<div style=${{ padding: 8, fontSize: 12, color: 'var(--ink-faint)' }}>${linkMode ? 'No page matches.' : 'Nothing matches. Drop a text file to attach it.'}</div>`}
   </div>`;
 }
 const pickRow = { display: 'flex', alignItems: 'center', gap: 7, padding: '6px 8px', fontSize: 12.5, cursor: 'pointer', borderRadius: 5, color: 'var(--ink)' };
@@ -408,7 +444,8 @@ function EventRow({ ev }) {
   return null;
 }
 
-const pickSelect = { fontSize: 11.5, padding: '4px 5px', borderRadius: 6, border: '1px solid var(--rule)', background: 'var(--surface)', color: 'var(--ink-muted)', cursor: 'pointer', maxWidth: 150 };
+// Compact overrides on the themed .select class (theme = border/focus/colors).
+const pickSelect = { fontSize: 11.5, padding: '4px 6px', width: 'auto', maxWidth: 150, cursor: 'pointer' };
 
 // Provider + model selects for the active chat — embedded in the composer
 // footer. Resets to the global default on a new chat; the choice rides along in
@@ -441,10 +478,10 @@ export function PickerControls({ k }) {
   };
 
   return html`
-    ${provs.length > 1 && html`<select value=${provId} onChange=${(e) => onProvider(e.target.value)} title="Provider" style=${pickSelect}>
+    ${provs.length > 1 && html`<select class="select" value=${provId} onChange=${(e) => onProvider(e.target.value)} title="Provider" style=${pickSelect}>
       ${provs.map((p) => html`<option key=${p.id} value=${p.id}>${p.name}</option>`)}
     </select>`}
-    <select value=${k.model || ''} onChange=${(e) => patchKeeper({ model: e.target.value })} title="Model"
+    <select class="select" value=${k.model || ''} onChange=${(e) => patchKeeper({ model: e.target.value })} title="Model"
       style=${{ ...pickSelect, flex: 1, minWidth: 0, maxWidth: 'none' }}>
       ${!list.length && html`<option value=${k.model || ''}>${k.model || 'default'}</option>`}
       ${list.map((m) => html`<option key=${m} value=${m}>${m}</option>`)}
@@ -454,11 +491,20 @@ export function PickerControls({ k }) {
 export function Composer({ busy }) {
   const [text, setText] = useState('');
   const [images, setImages] = useState([]);
-  const [picker, setPicker] = useState(false);
-  const [ac, setAc] = useState(null);
+  const [picker, setPicker] = useState(null); // 'attach' | 'link' | null
+  const [linkAt, setLinkAt] = useState(-1); // index of the @ that opened link mode
   const [mentions, setMentions] = useState([]); // titles picked via @, rewritten to [[…]] on send
+  const [slash, setSlash] = useState(null); // { q, index } when /command active
   const taRef = useRef(null);
   const k = keeperState();
+  const onPage = store.route?.name === 'page';
+
+  // /command menu: skills filtered by what's typed after the slash.
+  const slashItems = slash
+    ? (store.keeperSkills || [])
+      .filter((s) => !slash.q || s.slug.includes(slash.q) || (s.name || '').toLowerCase().includes(slash.q))
+      .slice(0, 8)
+    : [];
 
   function autoGrow(ta) {
     if (!ta) return;
@@ -485,7 +531,7 @@ export function Composer({ busy }) {
     [...mentions].sort((a, b) => b.length - a.length)
       .forEach((m) => { out = out.split(`@${m}`).join(`[[${m}]]`); });
     const imgs = images;
-    setText(''); setImages([]); setAc(null); setMentions([]);
+    setText(''); setImages([]); setPicker(null); setMentions([]);
     sendMessage(out, imgs);
   };
 
@@ -508,66 +554,79 @@ export function Composer({ busy }) {
     });
   }
 
-  // Page-link autocomplete fires on @ (the AI-app convention) or [[ (Obsidian
-  // muscle memory). @ is the visible trigger; both end up as [[links]] on send.
-  function updateAc(ta) {
-    try {
-      const before = ta.value.slice(0, ta.selectionStart);
-      const br = before.lastIndexOf('[[');
-      const at = before.lastIndexOf('@');
-      let kind = null;
-      let open = -1;
-      let ql = '';
-      if (br >= 0 && br >= at) {
-        const between = before.slice(br + 2);
-        if (!between.includes(']]') && !between.includes('\n')) { kind = '[['; open = br; ql = between.toLowerCase(); }
-      }
-      if (!kind && at >= 0) {
-        const prev = at === 0 ? '' : before[at - 1];
-        const between = before.slice(at + 1);
-        if ((at === 0 || /\s/.test(prev)) && !/\s/.test(between)) { kind = '@'; open = at; ql = between.toLowerCase(); }
-      }
-      if (!kind) { setAc(null); return; }
-      const items = (store.vaultPages || [])
-        .filter((p) => p.title && (p.title.toLowerCase().includes(ql) || (p.aliases || []).some((a) => a.includes(ql))))
-        .slice(0, 6);
-      const co = caretCoords(ta);
-      setAc({ kind, open, items, index: 0, top: co.top + co.lineHeight, left: co.left });
-    } catch (_) { setAc(null); }
+  // @ at a word boundary opens the same picker the + button uses (above the
+  // composer, always visible). [[ typed by hand still works — the backend
+  // resolves wikilinks, so Obsidian muscle memory needs no UI.
+  function onInput(e) {
+    const ta = e.target;
+    setText(ta.value);
+    autoGrow(ta);
+    const caret = ta.selectionStart;
+    const prev = caret >= 2 ? ta.value[caret - 2] : '';
+    if (ta.value[caret - 1] === '@' && (caret === 1 || /\s/.test(prev))) {
+      setLinkAt(caret - 1);
+      setPicker('link');
+    }
+    // /command: only while the whole composer is the slash token (no space yet).
+    const m = /^\/([\w-]*)$/.exec(ta.value);
+    if (m) setSlash({ q: m[1].toLowerCase(), index: 0 });
+    else if (slash) setSlash(null);
   }
 
-  function accept(choice) {
+  // Pick a skill from /command → replace the composer with a directive that
+  // makes the Keeper pull it. User can keep typing or send as-is.
+  function pickSkill(skill) {
+    setSlash(null);
+    const dir = skillDirective(skill, onPage);
+    setText(dir);
+    requestAnimationFrame(() => {
+      const ta = taRef.current;
+      if (ta) { ta.focus(); ta.setSelectionRange(dir.length, dir.length); autoGrow(ta); }
+    });
+  }
+
+  // Replace the trigger @ with the visible @Title; rewritten to [[Title]] on send.
+  function insertLink(p) {
     const ta = taRef.current;
-    if (!ac || !ta) return;
-    const title = (choice.title || '').trim();
-    if (!title) { setAc(null); return; }
-    const insert = ac.kind === '@' ? `@${title}` : `[[${title}]]`;
+    const title = (p.title || '').trim();
+    setPicker(null);
+    if (!ta || !title) return;
     const v = ta.value;
-    const next = v.slice(0, ac.open) + insert + v.slice(ta.selectionStart);
-    setText(next); setAc(null);
-    if (ac.kind === '@') setMentions((m) => (m.includes(title) ? m : [...m, title]));
-    const caret = ac.open + insert.length;
+    const at = linkAt >= 0 && v[linkAt] === '@' ? linkAt : v.length;
+    const next = v.slice(0, at) + `@${title}` + v.slice(v[at] === '@' ? at + 1 : at);
+    setText(next);
+    setMentions((m) => (m.includes(title) ? m : [...m, title]));
+    const caret = at + title.length + 1;
     requestAnimationFrame(() => { if (taRef.current) { taRef.current.focus(); taRef.current.setSelectionRange(caret, caret); autoGrow(taRef.current); } });
   }
 
   function onKeyDown(e) {
-    if (ac && ac.items.length) {
-      if (e.key === 'ArrowDown') { e.preventDefault(); setAc({ ...ac, index: (ac.index + 1) % ac.items.length }); return; }
-      if (e.key === 'ArrowUp') { e.preventDefault(); setAc({ ...ac, index: (ac.index - 1 + ac.items.length) % ac.items.length }); return; }
-      if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); accept(ac.items[ac.index]); return; }
-      if (e.key === 'Escape') { e.preventDefault(); setAc(null); return; }
+    if (slash && slashItems.length) {
+      const at = Math.min(slash.index, slashItems.length - 1);
+      if (e.key === 'ArrowDown') { e.preventDefault(); setSlash({ ...slash, index: (at + 1) % slashItems.length }); return; }
+      if (e.key === 'ArrowUp') { e.preventDefault(); setSlash({ ...slash, index: (at - 1 + slashItems.length) % slashItems.length }); return; }
+      if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); pickSkill(slashItems[at]); return; }
+      if (e.key === 'Escape') { e.preventDefault(); setSlash(null); return; }
     }
+    if (e.key === 'Escape' && picker) { e.preventDefault(); setPicker(null); return; }
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
   }
 
   return html`<div style=${{ borderTop: '1px solid var(--rule)', position: 'relative' }}>
     <${AttachChips} attachments=${k.attachments} />
-    ${picker && html`<${AttachPicker} onClose=${() => setPicker(false)} />`}
-    ${ac && html`<div class="ck-ac" style=${{ top: ac.top, left: ac.left }}>
-      <div class="ck-ac-head">Link a page</div>
-      ${ac.items.map((it, i) => html`<div key=${it.path} class=${`ck-ac-item${i === ac.index ? ' on' : ''}`}
-        onMouseDown=${(e) => { e.preventDefault(); accept(it); }}><span class="ck-ac-name">${it.title}</span></div>`)}
-      ${!ac.items.length && html`<div class="ck-ac-item" style=${{ color: 'var(--ink-faint)' }}>No match</div>`}
+    ${picker && html`<${AttachPicker} onClose=${() => setPicker(null)} onPickPage=${picker === 'link' ? insertLink : null} />`}
+    ${slash && html`<div style=${{
+      position: 'absolute', bottom: 'calc(100% + 6px)', left: 10, right: 10, zIndex: 5,
+      background: 'var(--paper)', border: '1px solid var(--rule)', borderRadius: 8,
+      boxShadow: 'var(--shadow-raised)', maxHeight: 280, overflow: 'auto', padding: 6,
+    }}>
+      <div style=${{ padding: '3px 8px 5px', fontSize: 11, color: 'var(--ink-faint)' }}>Skills</div>
+      ${slashItems.map((s, i) => html`<div key=${s.slug} onClick=${() => pickSkill(s)} onMouseEnter=${() => setSlash({ ...slash, index: i })}
+        class=${`ck-ac-item${i === Math.min(slash.index, slashItems.length - 1) ? ' on' : ''}`} style=${{ ...pickRow, display: 'block' }}>
+        <div style=${{ display: 'flex', alignItems: 'center', gap: 7 }}><${Icon} name="feather" size=${12} /> ${s.name}</div>
+        ${s.description && html`<div style=${{ fontSize: 11, color: 'var(--ink-faint)', marginLeft: 19, marginTop: 1, whiteSpace: 'normal' }}>${s.description}</div>`}
+      </div>`)}
+      ${!slashItems.length && html`<div style=${{ padding: 8, fontSize: 12, color: 'var(--ink-faint)' }}>No skill matches.</div>`}
     </div>`}
     ${images.length > 0 && html`<div style=${{ display: 'flex', flexWrap: 'wrap', gap: 6, padding: '0 10px 6px' }}>
       ${images.map((img, i) => html`<div key=${i} style=${{ position: 'relative', width: 52, height: 52, borderRadius: 6, overflow: 'hidden', border: '1px solid var(--rule)' }}>
@@ -577,13 +636,13 @@ export function Composer({ busy }) {
       </div>`)}
     </div>`}
     <div style=${{ margin: 10, border: '1px solid var(--rule)', borderRadius: 10, background: 'var(--surface)', display: 'flex', flexDirection: 'column' }}>
-      <textarea ref=${taRef} value=${text} placeholder="Ask the Keeper… (@ to link a page, paste images, drop files)" rows=${1}
-        onInput=${(e) => { setText(e.target.value); updateAc(e.target); autoGrow(e.target); }}
+      <textarea ref=${taRef} value=${text} placeholder="Ask the Keeper… (@ link a page, / a skill, paste images)" rows=${1}
+        onInput=${onInput}
         onKeyDown=${onKeyDown}
         onPaste=${onPaste}
         style=${{ resize: 'none', fontSize: 13, padding: '9px 10px 4px', border: 'none', outline: 'none', background: 'transparent', color: 'var(--ink)', fontFamily: 'inherit', minHeight: 40, maxHeight: 168, overflowY: 'auto' }} />
       <div style=${{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 6px 6px' }}>
-        <button class="btn btn-ghost" title="Attach a page, session or file" onClick=${() => setPicker(!picker)}
+        <button class="btn btn-ghost" title="Attach a page, session or file" onClick=${() => setPicker(picker === 'attach' ? null : 'attach')}
           style=${{ padding: '6px 7px' }}><${Icon} name="plus" size=${14} /></button>
         <${PickerControls} k=${k} />
         ${busy
@@ -617,6 +676,21 @@ export function Transcript({ k, empty }) {
   </div>`;
 }
 
+// Suggestion chips: on a page of kind X, the skills that fit it (kinds: match,
+// zero inference). Click seeds the composer with a pull directive. Pure
+// discovery — nothing fires until the user sends.
+function SkillChips() {
+  const skills = skillsForKind(currentPageKind());
+  if (!skills.length) return null;
+  return html`<div style=${{ display: 'flex', flexWrap: 'wrap', gap: 6, padding: '6px 12px', borderTop: '1px solid var(--rule-soft)' }}>
+    ${skills.map((s) => html`<button key=${s.slug} class="btn btn-ghost" title=${s.description}
+      onClick=${() => patchKeeper({ draft: skillDirective(s, true) })}
+      style=${{ fontSize: 11.5, padding: '3px 9px', borderRadius: 999, border: '1px solid var(--rule)', color: 'var(--ink-muted)', display: 'flex', alignItems: 'center', gap: 5 }}>
+      <${Icon} name="feather" size=${11} /> ${s.name}
+    </button>`)}
+  </div>`;
+}
+
 /// Shared conversation column: transcript + composer + drop-to-attach overlay.
 export function Conversation({ k, empty }) {
   const { dragging, bind } = useDropAttachments();
@@ -634,6 +708,7 @@ export function Conversation({ k, empty }) {
         <${Icon} name="undo" size=${12} /> Undo last change
       </button>
     </div>`}
+    ${!k.live && html`<${SkillChips} />`}
     <${Composer} busy=${!!k.live} />
     ${dragging && html`<div style=${{
       position: 'absolute', inset: 0, zIndex: 8, display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -644,9 +719,8 @@ export function Conversation({ k, empty }) {
 }
 
 export function ModeSelect({ mode }) {
-  return html`<select value=${mode} onChange=${(e) => setMode(e.target.value)}
-    title="What the Keeper may do without asking"
-    style=${{ fontSize: 11.5, padding: '3px 4px', borderRadius: 5, border: '1px solid var(--rule)', background: 'var(--surface)', color: 'var(--ink-muted)' }}>
+  return html`<select class="select" value=${mode} onChange=${(e) => setMode(e.target.value)}
+    title="What the Keeper may do without asking" style=${pickSelect}>
     ${MODES.map((m) => html`<option key=${m.id} value=${m.id}>${m.label}</option>`)}
   </select>`;
 }

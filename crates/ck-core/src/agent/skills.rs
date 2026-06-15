@@ -49,11 +49,15 @@ pub struct Skill {
     pub slug: String,
     pub name: String,
     pub description: String,
+    /// Page kinds this skill suits (`kinds: [place, region]`) — powers the
+    /// zero-inference chips. Empty = model-pullable only, no chip.
+    pub kinds: Vec<String>,
 }
 
 fn parse(slug: &str, raw: &str) -> Skill {
     let mut name = String::new();
     let mut description = String::new();
+    let mut kinds = Vec::new();
     if let Some(rest) = raw.strip_prefix("---\n") {
         if let Some(end) = rest.find("\n---") {
             for line in rest[..end].lines() {
@@ -61,6 +65,15 @@ fn parse(slug: &str, raw: &str) -> Skill {
                     name = v.trim().to_string();
                 } else if let Some(v) = line.strip_prefix("description:") {
                     description = v.trim().to_string();
+                } else if let Some(v) = line.strip_prefix("kinds:") {
+                    kinds = v
+                        .trim()
+                        .trim_start_matches('[')
+                        .trim_end_matches(']')
+                        .split(',')
+                        .map(|k| k.trim().trim_matches(['"', '\'']).to_lowercase())
+                        .filter(|k| !k.is_empty())
+                        .collect();
                 }
             }
         }
@@ -72,6 +85,7 @@ fn parse(slug: &str, raw: &str) -> Skill {
         slug: slug.to_string(),
         name,
         description,
+        kinds,
     }
 }
 
@@ -162,6 +176,37 @@ pub fn read(root: &Path, name: &str) -> Result<String, String> {
     Ok(strip_frontmatter(&raw))
 }
 
+/// Skills suited to a page `kind` (case-insensitive `kinds:` match). Pure string
+/// match, no inference — feeds the suggestion chips. Empty kind → no chips.
+pub fn for_kind(root: &Path, kind: &str) -> Vec<Skill> {
+    let want = kind.trim().to_lowercase();
+    if want.is_empty() {
+        return Vec::new();
+    }
+    list(root)
+        .into_iter()
+        .filter(|s| s.kinds.iter().any(|k| *k == want))
+        .collect()
+}
+
+/// JSON list (slug/name/description/kinds) for `GET /agent/skills` — feeds the
+/// composer `/command` menu and the kind chips.
+pub fn list_json(root: &Path) -> serde_json::Value {
+    serde_json::Value::Array(
+        list(root)
+            .into_iter()
+            .map(|s| {
+                serde_json::json!({
+                    "slug": s.slug,
+                    "name": s.name,
+                    "description": s.description,
+                    "kinds": s.kinds,
+                })
+            })
+            .collect(),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -191,6 +236,21 @@ mod tests {
         assert!(read(&root, "Flesh out a character")
             .unwrap()
             .contains("What do they want most"));
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn for_kind_matches_kinds_frontmatter() {
+        let root = tmp("kind");
+        let place = for_kind(&root, "Place"); // case-insensitive
+        assert_eq!(place.len(), 1);
+        assert_eq!(place[0].slug, "flesh-out-a-place");
+        assert!(for_kind(&root, "npc")
+            .iter()
+            .any(|s| s.slug == "flesh-out-a-character"));
+        // The syntax skill has no kinds → never chips.
+        assert!(for_kind(&root, "lore").is_empty());
+        assert!(for_kind(&root, "").is_empty());
         std::fs::remove_dir_all(&root).ok();
     }
 

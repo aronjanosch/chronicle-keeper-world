@@ -209,6 +209,12 @@ pub async fn delete_memory(
     Ok(Json(json!({ "ok": true })))
 }
 
+pub async fn list_skills(State(state): State<AppState>) -> AppResult<Json<Value>> {
+    Ok(Json(agent::skills::list_json(&agent::skills::skills_root(
+        &state,
+    ))))
+}
+
 pub async fn get_brief(
     State(state): State<AppState>,
     Path(campaign_id): Path<String>,

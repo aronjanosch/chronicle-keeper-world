@@ -329,7 +329,7 @@ pub async fn run_turn<L: AgentLlm, G: PermissionGate, F: FnMut(TurnEvent) + Send
     // Pinned attachments are re-read live each turn (files-as-truth).
     sys.push_str(&attachments::context_block(world_root, chat_id, cfg));
     if let Some(f) = focus {
-        sys.push_str(&attachments::focus_block(world_root, cfg, f));
+        sys.push_str(&attachments::focus_block(world_root, chat_id, cfg, f));
     }
 
     let mut msgs: Vec<Msg> = Vec::with_capacity(history.len() + 1);

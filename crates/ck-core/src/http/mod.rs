@@ -165,6 +165,7 @@ pub fn router(state: AppState) -> Router {
             axum::routing::delete(agent::delete_attachment),
         )
         // the Keeper's memory + World Brief
+        .route("/campaigns/:id/agent/skills", get(agent::list_skills))
         .route("/campaigns/:id/agent/memory", get(agent::list_memory))
         .route(
             "/campaigns/:id/agent/memory/:name",

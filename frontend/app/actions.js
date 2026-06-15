@@ -256,6 +256,15 @@ export async function loadVaultTree(campaignId) {
   return r;
 }
 
+// Keeper skills (app-global, same list for every world). Cached once — feeds the
+// composer /command menu and the per-kind suggestion chips. Pull, never push.
+export async function loadSkills(campaignId) {
+  const id = campaignId || store.campaign?.campaign_id;
+  if (!id || store.keeperSkills) return;
+  const r = await apiFetch(`/campaigns/${id}/agent/skills`).catch(() => null);
+  if (Array.isArray(r)) setState({ keeperSkills: r });
+}
+
 // Per-kind infobox field schemas (.ck/config.toml overrides merged with built-ins).
 export async function loadKindSchemas(campaignId) {
   const id = campaignId || store.campaign?.campaign_id;

@@ -403,40 +403,6 @@ function autoGrow(ta) {
   ta.style.height = ta.scrollHeight + 'px';
 }
 
-// Pixel position of the textarea caret (mirror-div trick) for the [[ autocomplete.
-export function caretCoords(ta) {
-  try {
-    const s = getComputedStyle(ta);
-    const div = document.createElement('div');
-    ['fontFamily', 'fontSize', 'fontWeight', 'letterSpacing', 'paddingTop', 'paddingRight',
-      'paddingBottom', 'paddingLeft', 'borderWidth', 'boxSizing'].forEach((p) => { div.style[p] = s[p]; });
-    div.style.position = 'absolute';
-    div.style.visibility = 'hidden';
-    div.style.whiteSpace = 'pre-wrap';
-    div.style.wordWrap = 'break-word';
-    div.style.lineHeight = s.lineHeight;
-    div.style.width = ta.clientWidth + 'px';
-    document.body.appendChild(div);
-    div.textContent = ta.value.slice(0, ta.selectionStart);
-    const span = document.createElement('span');
-    span.textContent = '​';
-    div.appendChild(span);
-    const top = span.offsetTop;
-    const left = span.offsetLeft;
-    const lh = parseFloat(s.lineHeight) || 18;
-    document.body.removeChild(div);
-    const rect = ta.getBoundingClientRect();
-    return {
-      top: rect.top + top - ta.scrollTop,
-      left: Math.min(rect.left + left - ta.scrollLeft, window.innerWidth - 280),
-      lineHeight: lh,
-    };
-  } catch (_) {
-    const r = ta.getBoundingClientRect();
-    return { top: r.top, left: r.left, lineHeight: 18 };
-  }
-}
-
 // CodeMirror 6 source editor — edits the whole .md (frontmatter + body) as literal
 // text. The view itself is an app-wide singleton (cm.js); this component just
 // re-parents it and swaps in this tab's cached EditorState (keyed by uiKey).
