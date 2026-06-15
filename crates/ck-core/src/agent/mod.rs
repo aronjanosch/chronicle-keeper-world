@@ -293,6 +293,8 @@ pub struct TurnCtx<'a> {
     pub cfg: &'a WorldConfig,
     pub chat_id: &'a str,
     pub mode: Mode,
+    /// What the user has open in the editor this turn (ephemeral, not pinned).
+    pub focus: Option<&'a attachments::Focus>,
 }
 
 /// One user turn: persist the message, loop the LLM over the tools until it
@@ -313,6 +315,7 @@ pub async fn run_turn<L: AgentLlm, G: PermissionGate, F: FnMut(TurnEvent) + Send
         cfg,
         chat_id,
         mode,
+        focus,
     } = *turn_ctx;
     chats::append(world_root, chat_id, &chats::user_event(user_text, images))?;
     let events = chats::load_chat(world_root, chat_id)?;
@@ -325,6 +328,9 @@ pub async fn run_turn<L: AgentLlm, G: PermissionGate, F: FnMut(TurnEvent) + Send
     let mut sys = system_prompt(world_root, &skills::skills_root(state), cfg, mode);
     // Pinned attachments are re-read live each turn (files-as-truth).
     sys.push_str(&attachments::context_block(world_root, chat_id, cfg));
+    if let Some(f) = focus {
+        sys.push_str(&attachments::focus_block(world_root, cfg, f));
+    }
 
     let mut msgs: Vec<Msg> = Vec::with_capacity(history.len() + 1);
     msgs.push(Msg::System(sys));

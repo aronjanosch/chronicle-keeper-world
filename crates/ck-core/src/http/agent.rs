@@ -285,6 +285,9 @@ pub struct MessageRequest {
     pub base_url: Option<String>,
     #[serde(default)]
     pub images: Vec<crate::llm::agent::Image>,
+    /// Editor state this turn — focused page + open tabs. Ephemeral context.
+    #[serde(default)]
+    pub focus: Option<agent::attachments::Focus>,
 }
 
 /// Production gate: emit a `permission_request` SSE frame, park on a oneshot
@@ -382,6 +385,7 @@ pub async fn send_message(
             cfg: &cfg,
             chat_id: &chat_id,
             mode: agent::Mode::parse(req.mode.as_deref()),
+            focus: req.focus.as_ref(),
         };
         let result = agent::run_turn(
             &turn_ctx,

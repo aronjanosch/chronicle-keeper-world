@@ -104,6 +104,9 @@ export async function sendMessage(text, images = []) {
     if (images.length) body.images = images.map((i) => ({ media_type: i.media_type, data: i.data }));
     if (k.provider) body.provider = k.provider;
     if (k.model) body.model = k.model;
+    // Silently hand the Keeper the editor state — the open page + other tabs.
+    const focusPath = store.route?.name === 'page' ? store.route?.params?.path : null;
+    if (focusPath) body.focus = { path: focusPath, tabs: store.tabs || [] };
     await apiStream(`/campaigns/${cid}/agent/chats/${k.chatId}/messages`, body, (ev) => {
       const cur = keeperState();
       const live = cur.live || { text: '', tools: [] };
@@ -453,8 +456,16 @@ export function Composer({ busy }) {
   const [images, setImages] = useState([]);
   const [picker, setPicker] = useState(false);
   const [ac, setAc] = useState(null);
+  const [mentions, setMentions] = useState([]); // titles picked via @, rewritten to [[…]] on send
   const taRef = useRef(null);
   const k = keeperState();
+
+  function autoGrow(ta) {
+    if (!ta) return;
+    ta.style.height = 'auto';
+    ta.style.height = `${Math.min(ta.scrollHeight, 168)}px`;
+  }
+  useEffect(() => { autoGrow(taRef.current); }, [text]);
 
   // One-shot prefill (e.g. "Ask Keeper about this" in the Explorer): consume
   // store.keeper.draft into the local text, never overwriting typed input.
@@ -468,9 +479,14 @@ export function Composer({ busy }) {
   const send = () => {
     const t = text.trim();
     if ((!t && !images.length) || busy) return;
+    // @Title is display sugar — the Keeper speaks [[wikilinks]]. Rewrite the
+    // titles the user actually picked (longest first, so overlaps don't clash).
+    let out = t;
+    [...mentions].sort((a, b) => b.length - a.length)
+      .forEach((m) => { out = out.split(`@${m}`).join(`[[${m}]]`); });
     const imgs = images;
-    setText(''); setImages([]); setAc(null);
-    sendMessage(t, imgs);
+    setText(''); setImages([]); setAc(null); setMentions([]);
+    sendMessage(out, imgs);
   };
 
   function onPaste(e) {
@@ -492,19 +508,31 @@ export function Composer({ busy }) {
     });
   }
 
+  // Page-link autocomplete fires on @ (the AI-app convention) or [[ (Obsidian
+  // muscle memory). @ is the visible trigger; both end up as [[links]] on send.
   function updateAc(ta) {
     try {
       const before = ta.value.slice(0, ta.selectionStart);
-      const open = before.lastIndexOf('[[');
-      if (open < 0) { setAc(null); return; }
-      const between = before.slice(open + 2);
-      if (between.includes(']]') || between.includes('\n')) { setAc(null); return; }
-      const ql = between.toLowerCase();
+      const br = before.lastIndexOf('[[');
+      const at = before.lastIndexOf('@');
+      let kind = null;
+      let open = -1;
+      let ql = '';
+      if (br >= 0 && br >= at) {
+        const between = before.slice(br + 2);
+        if (!between.includes(']]') && !between.includes('\n')) { kind = '[['; open = br; ql = between.toLowerCase(); }
+      }
+      if (!kind && at >= 0) {
+        const prev = at === 0 ? '' : before[at - 1];
+        const between = before.slice(at + 1);
+        if ((at === 0 || /\s/.test(prev)) && !/\s/.test(between)) { kind = '@'; open = at; ql = between.toLowerCase(); }
+      }
+      if (!kind) { setAc(null); return; }
       const items = (store.vaultPages || [])
         .filter((p) => p.title && (p.title.toLowerCase().includes(ql) || (p.aliases || []).some((a) => a.includes(ql))))
         .slice(0, 6);
       const co = caretCoords(ta);
-      setAc({ open, items, index: 0, top: co.top + co.lineHeight, left: co.left });
+      setAc({ kind, open, items, index: 0, top: co.top + co.lineHeight, left: co.left });
     } catch (_) { setAc(null); }
   }
 
@@ -513,10 +541,13 @@ export function Composer({ busy }) {
     if (!ac || !ta) return;
     const title = (choice.title || '').trim();
     if (!title) { setAc(null); return; }
+    const insert = ac.kind === '@' ? `@${title}` : `[[${title}]]`;
     const v = ta.value;
-    const next = v.slice(0, ac.open) + `[[${title}]]` + v.slice(ta.selectionStart);
+    const next = v.slice(0, ac.open) + insert + v.slice(ta.selectionStart);
     setText(next); setAc(null);
-    requestAnimationFrame(() => { if (taRef.current) { taRef.current.focus(); const p = ac.open + title.length + 4; taRef.current.setSelectionRange(p, p); } });
+    if (ac.kind === '@') setMentions((m) => (m.includes(title) ? m : [...m, title]));
+    const caret = ac.open + insert.length;
+    requestAnimationFrame(() => { if (taRef.current) { taRef.current.focus(); taRef.current.setSelectionRange(caret, caret); autoGrow(taRef.current); } });
   }
 
   function onKeyDown(e) {
@@ -546,11 +577,11 @@ export function Composer({ busy }) {
       </div>`)}
     </div>`}
     <div style=${{ margin: 10, border: '1px solid var(--rule)', borderRadius: 10, background: 'var(--surface)', display: 'flex', flexDirection: 'column' }}>
-      <textarea ref=${taRef} value=${text} placeholder="Ask the Keeper… ([[ to link, paste images, drop files)" rows=${2}
-        onInput=${(e) => { setText(e.target.value); updateAc(e.target); }}
+      <textarea ref=${taRef} value=${text} placeholder="Ask the Keeper… (@ to link a page, paste images, drop files)" rows=${1}
+        onInput=${(e) => { setText(e.target.value); updateAc(e.target); autoGrow(e.target); }}
         onKeyDown=${onKeyDown}
         onPaste=${onPaste}
-        style=${{ resize: 'none', fontSize: 13, padding: '9px 10px 4px', border: 'none', outline: 'none', background: 'transparent', color: 'var(--ink)', fontFamily: 'inherit' }} />
+        style=${{ resize: 'none', fontSize: 13, padding: '9px 10px 4px', border: 'none', outline: 'none', background: 'transparent', color: 'var(--ink)', fontFamily: 'inherit', minHeight: 40, maxHeight: 168, overflowY: 'auto' }} />
       <div style=${{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 6px 6px' }}>
         <button class="btn btn-ghost" title="Attach a page, session or file" onClick=${() => setPicker(!picker)}
           style=${{ padding: '6px 7px' }}><${Icon} name="plus" size=${14} /></button>

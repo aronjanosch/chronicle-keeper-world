@@ -662,12 +662,11 @@ function RailTab({ icon, label, active, onClick }) {
 function RailChat() {
   const k = keeperState();
   useEffect(() => { if (!k.chatId) openPanel(); }, []);
-  const iconBtn = { display: 'flex', alignItems: 'center', justifyContent: 'center', width: 26, height: 26, borderRadius: 6, border: 'none', background: 'none', color: 'var(--ink-muted)', cursor: 'pointer' };
   return html`<div style=${{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-    <div style=${{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 8px', borderBottom: '1px solid var(--rule-soft)' }}>
+    <div style=${{ display: 'flex', alignItems: 'center', gap: 4, padding: '5px 8px', borderBottom: '1px solid var(--rule-soft)' }}>
       <span style=${{ flex: 1, minWidth: 0 }}><${ModeSelect} mode=${k.mode} /></span>
-      <button title="New chat" class="ck-chat-row" style=${iconBtn} onClick=${() => newChat()}><${Icon} name="plus" size=${15} /></button>
-      <button title="Open the Keeper full-screen" class="ck-chat-row" style=${iconBtn} onClick=${() => navigate('keeper', { id: k.campaignId })}><${Icon} name="export" size=${14} /></button>
+      <button title="New chat" class="btn btn-icon" onClick=${() => newChat()}><${Icon} name="plus" size=${15} /></button>
+      <button title="Open the Keeper full-screen" class="btn btn-icon" onClick=${() => navigate('keeper', { id: k.campaignId })}><${Icon} name="export" size=${14} /></button>
     </div>
     <${Conversation} k=${k} />
   </div>`;

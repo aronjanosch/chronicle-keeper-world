@@ -16,10 +16,24 @@ const MAX_SKILLS: usize = 50;
 
 /// Bundled defaults: (vault-relative path, file content). Authored as real
 /// files in `skills_default/` and baked at compile time — no new dependency.
-const DEFAULT_SKILLS: &[(&str, &str)] = &[(
-    "writing-codex-syntax/SKILL.md",
-    include_str!("skills_default/writing-codex-syntax/SKILL.md"),
-)];
+const DEFAULT_SKILLS: &[(&str, &str)] = &[
+    (
+        "writing-codex-syntax/SKILL.md",
+        include_str!("skills_default/writing-codex-syntax/SKILL.md"),
+    ),
+    (
+        "flesh-out-a-place/SKILL.md",
+        include_str!("skills_default/flesh-out-a-place/SKILL.md"),
+    ),
+    (
+        "flesh-out-a-character/SKILL.md",
+        include_str!("skills_default/flesh-out-a-character/SKILL.md"),
+    ),
+    (
+        "flesh-out-a-culture/SKILL.md",
+        include_str!("skills_default/flesh-out-a-culture/SKILL.md"),
+    ),
+];
 
 /// `<output_root>/Skills` — the app-global skills library.
 pub fn skills_root(state: &AppState) -> PathBuf {
@@ -165,11 +179,18 @@ mod tests {
         let block = index_block(&root);
         assert!(block.contains("use_skill"));
         assert!(block.contains("Writing Codex page syntax"));
+        assert!(block.contains("Flesh out a place"));
+        assert!(block.contains("Flesh out a character"));
+        assert!(block.contains("Flesh out a culture"));
 
         let body = read(&root, "Writing Codex page syntax").unwrap();
         assert!(body.contains("## Page syntax"));
         assert!(body.contains("ck-query"));
         assert!(!body.starts_with("---")); // frontmatter stripped
+        // A question-bank skill loads its curated prompts.
+        assert!(read(&root, "Flesh out a character")
+            .unwrap()
+            .contains("What do they want most"));
         std::fs::remove_dir_all(&root).ok();
     }
 
