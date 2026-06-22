@@ -127,7 +127,9 @@ impl FoundryClient {
             .map(|_| ())
     }
 
-    /// Creates a gridless `Scene` with the given background; returns its id.
+    /// Creates a gridless `Scene` whose background lives on a base `Level`
+    /// (Foundry v14 moved `Scene#background` onto `Level#background`). `level_id`
+    /// is the caller-chosen id of that base level, also set as `initialLevel`.
     pub async fn create_scene(
         &mut self,
         name: &str,
@@ -135,6 +137,7 @@ impl FoundryClient {
         width: u32,
         height: u32,
         map_id: &str,
+        level_id: &str,
     ) -> AppResult<String> {
         let resp = self
             .modify_document(
@@ -145,8 +148,14 @@ impl FoundryClient {
                     "width": width,
                     "height": height,
                     "padding": 0.0,
-                    "background": { "src": bg_src },
                     "grid": { "type": 0, "size": 100 },
+                    "levels": [{
+                        "_id": level_id,
+                        "name": "Base",
+                        "elevation": 0,
+                        "background": { "src": bg_src },
+                    }],
+                    "initialLevel": level_id,
                     "flags": { "chronicle-keeper": { "map_id": map_id } },
                 }] }),
             )
@@ -154,10 +163,11 @@ impl FoundryClient {
         first_id(&resp)
     }
 
-    /// Updates a `Scene`'s background art and dimensions in place.
+    /// Updates a `Scene`'s dimensions and its base level's background in place.
     pub async fn update_scene(
         &mut self,
         scene_id: &str,
+        level_id: &str,
         bg_src: &str,
         width: u32,
         height: u32,
@@ -169,7 +179,7 @@ impl FoundryClient {
                 "_id": scene_id,
                 "width": width,
                 "height": height,
-                "background": { "src": bg_src },
+                "levels": [{ "_id": level_id, "background": { "src": bg_src } }],
             }] }),
         )
         .await
@@ -257,6 +267,9 @@ pub struct MapEntry {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SceneEntry {
     pub scene_id: String,
+    /// The scene's base `Level` id (carries the background in v14).
+    #[serde(default)]
+    pub level_id: String,
     #[serde(default)]
     pub note_ids: Vec<String>,
 }
