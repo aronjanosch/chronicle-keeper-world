@@ -502,21 +502,24 @@ pub async fn chat(req: &ChatRequest<'_>, json_mode: bool) -> Result<String, LlmE
             Ok(extract_openai_content(&v))
         }
         Transport::Anthropic => {
-            // Native Messages API. There is no `response_format`; to force JSON
-            // we prefill the assistant turn with "{" and prepend it back on.
+            // Native Messages API. There is no `response_format`. We can't prefill
+            // the assistant turn to force JSON — newer models reject prefill
+            // ("does not support assistant message prefill") — so we instruct via
+            // the user turn and let callers parse leniently.
             let base = if api_base.is_empty() {
                 "https://api.anthropic.com"
             } else {
                 api_base
             };
-            let mut messages = vec![json!({ "role": "user", "content": prompt })];
-            if json_mode {
-                messages.push(json!({ "role": "assistant", "content": "{" }));
-            }
+            let content = if json_mode {
+                format!("{prompt}\n\nRespond with only the raw JSON, no prose or code fences.")
+            } else {
+                prompt.to_string()
+            };
             let body = json!({
                 "model": model,
                 "max_tokens": 8192,
-                "messages": messages,
+                "messages": [{ "role": "user", "content": content }],
             });
             let url = format!("{}/v1/messages", base.trim_end_matches('/'));
             let resp = client
@@ -529,13 +532,7 @@ pub async fn chat(req: &ChatRequest<'_>, json_mode: bool) -> Result<String, LlmE
                 .map_err(|e| LlmError(e.to_string()))?;
             let resp = error_for_status(resp).await?;
             let v: Value = resp.json().await.map_err(|e| LlmError(e.to_string()))?;
-            let text = extract_anthropic_content(&v);
-            // Prefill ate the opening brace; the model emits the rest incl. "}".
-            Ok(if json_mode {
-                format!("{{{text}").trim().to_string()
-            } else {
-                text
-            })
+            Ok(extract_anthropic_content(&v))
         }
         Transport::Unsupported => Err(LlmError(
             "This provider's native client is not yet available in this build.".into(),
