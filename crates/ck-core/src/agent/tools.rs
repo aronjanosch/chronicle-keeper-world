@@ -319,11 +319,12 @@ pub fn structural_tools() -> Vec<ToolDef> {
 pub fn foundry_tools() -> Vec<ToolDef> {
     vec![ToolDef {
         name: "sync_foundry".into(),
-        description: "Push the whole Codex to the connected FoundryVTT world as Journal entries \
-                      (one-way projection — CK stays the source of truth, Foundry is never read \
-                      back). Pages map to journals, folders to journal folders, [[wikilinks]] to \
-                      @UUID links; removed pages are deleted from Foundry. Always asks first, and \
-                      there is no remote undo. Only offered when the Foundry bridge is configured."
+        description: "Push the whole world to the connected FoundryVTT world (one-way projection — \
+                      CK stays the source of truth, Foundry is never read back). Codex pages map to \
+                      journals, folders to journal folders, [[wikilinks]] to @UUID links; atlas maps \
+                      become scenes (art uploaded as the background) with a linked note per pin. \
+                      Removed pages/maps are deleted from Foundry. Always asks first, and there is \
+                      no remote undo. Only offered when the Foundry bridge is configured."
             .into(),
         schema: json!({ "type": "object", "properties": {}, "required": [] }),
     }]
@@ -488,8 +489,19 @@ fn foundry_preview(ctx: &ToolCtx<'_>) -> Result<Value, String> {
     } else {
         format!(" ({})", parts.join(", "))
     };
+    let maps = crate::atlas::list_maps(ctx.world_root)
+        .map(|m| m.len())
+        .unwrap_or(0);
+    let maps_clause = if maps == 0 {
+        String::new()
+    } else {
+        format!(
+            " + {maps} atlas map{} as scenes",
+            if maps == 1 { "" } else { "s" }
+        )
+    };
     let summary = format!(
-        "push {} Codex page{} to FoundryVTT{detail} — one-way, no remote undo",
+        "push {} Codex page{}{maps_clause} to FoundryVTT{detail} — one-way, no remote undo",
         pages.len(),
         if pages.len() == 1 { "" } else { "s" },
     );
@@ -515,6 +527,12 @@ pub async fn run_foundry_sync(ctx: &ToolCtx<'_>) -> Result<String, String> {
         "Synced the Codex to FoundryVTT — {} created, {} updated, {} deleted.",
         report.created, report.updated, report.deleted
     );
+    if report.scenes > 0 {
+        out.push_str(&format!(
+            " Projected {} atlas map(s) as scenes.",
+            report.scenes
+        ));
+    }
     if !report.errors.is_empty() {
         out.push_str(&format!("\n{} page(s) failed:", report.errors.len()));
         for e in report.errors.iter().take(20) {

@@ -20,9 +20,12 @@ way back is another sync. Say so plainly if the user seems to expect a safety ne
 - Each Codex folder → a Foundry journal **folder**, nested to match the vault tree.
 - `[[wikilinks]]` → Foundry `@UUID` links when the target page is also synced; otherwise
   they fall back to plain text (no broken-link noise). `[[Page|Label]]` keeps the label.
-- A page deleted from the Codex is **deleted** from Foundry on the next sync.
-- Re-syncing is idempotent: CK owns a `path → journalId` map (`.ck/foundry-map.json`), so
-  pages are updated in place — never duplicated.
+- Each Atlas **map** → a Foundry **Scene**: the map art is uploaded as the scene background,
+  and every pin whose page is also synced becomes a map **Note** on the scene, linked to that
+  page's journal. Pins without a linked page are skipped.
+- A page or map deleted from the Codex is **deleted** from Foundry on the next sync.
+- Re-syncing is idempotent: CK owns the identity map (`.ck/foundry-map.json`: pages, folders,
+  scenes), so journals and scenes are updated in place — never duplicated.
 
 Only the page **body** is projected. Frontmatter (kind, summary, typed relations) is not
 sent; infoboxes and the Relations panel are CK-side surfaces.

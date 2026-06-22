@@ -82,6 +82,7 @@ pub async fn sync(
         "created": report.created,
         "updated": report.updated,
         "deleted": report.deleted,
+        "scenes": report.scenes,
         "errors": report.errors,
     })))
 }
