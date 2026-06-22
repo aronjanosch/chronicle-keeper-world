@@ -18,6 +18,14 @@ export const MODES = [
 ];
 
 const MAX_FILE_BYTES = 256 * 1024;
+
+// Tools that mutate vault pages — a successful result means the open page may
+// now be stale, so refresh it mid-stream instead of waiting for run end.
+const VAULT_WRITE_TOOLS = new Set([
+  'create_page', 'edit_page', 'multi_edit_page', 'append_to_page',
+  'insert_under_heading', 'write_page', 'rename_page', 'move_page',
+  'delete_page', 'create_folder',
+]);
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 
 export function keeperState() {
@@ -178,6 +186,7 @@ export async function sendMessage(text, images = []) {
         if (live.text.trim()) {
           patchKeeper({ events: [...keeperState().events, { type: 'assistant', text: live.text }] });
         }
+        if (!ev.is_error && VAULT_WRITE_TOOLS.has(ev.name)) { loadVaultTree(cid); bump('vault'); }
       } else if (ev.type === 'notice') {
         // Mode change (e.g. grounded fallback) — show it inline right away;
         // the post-stream reload picks up the persisted event.
