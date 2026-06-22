@@ -161,7 +161,9 @@ impl FoundryClient {
             m.entry("modifiedTime").or_insert(json!(now_ms()));
         }
         let resp = self
-            .emit_ack(json!(["modifyDocument", { "type": doc_type, "action": action, "operation": op }]))
+            .emit_ack(
+                json!(["modifyDocument", { "type": doc_type, "action": action, "operation": op }]),
+            )
             .await?;
         if let Some(err) = resp.get("error").and_then(|e| e.as_str()) {
             return Err(AppError::Internal(anyhow::anyhow!(
