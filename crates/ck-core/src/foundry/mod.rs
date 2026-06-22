@@ -126,6 +126,106 @@ impl FoundryClient {
             .await
             .map(|_| ())
     }
+
+    /// Creates a gridless `Scene` with the given background; returns its id.
+    pub async fn create_scene(
+        &mut self,
+        name: &str,
+        bg_src: &str,
+        width: u32,
+        height: u32,
+        map_id: &str,
+    ) -> AppResult<String> {
+        let resp = self
+            .modify_document(
+                "Scene",
+                "create",
+                json!({ "data": [{
+                    "name": name,
+                    "width": width,
+                    "height": height,
+                    "padding": 0.0,
+                    "background": { "src": bg_src },
+                    "grid": { "type": 0, "size": 100 },
+                    "flags": { "chronicle-keeper": { "map_id": map_id } },
+                }] }),
+            )
+            .await?;
+        first_id(&resp)
+    }
+
+    /// Updates a `Scene`'s background art and dimensions in place.
+    pub async fn update_scene(
+        &mut self,
+        scene_id: &str,
+        bg_src: &str,
+        width: u32,
+        height: u32,
+    ) -> AppResult<()> {
+        self.modify_document(
+            "Scene",
+            "update",
+            json!({ "updates": [{
+                "_id": scene_id,
+                "width": width,
+                "height": height,
+                "background": { "src": bg_src },
+            }] }),
+        )
+        .await
+        .map(|_| ())
+    }
+
+    /// Deletes a `Scene` (its embedded notes go with it).
+    pub async fn delete_scene(&mut self, scene_id: &str) -> AppResult<()> {
+        self.modify_document("Scene", "delete", json!({ "ids": [scene_id] }))
+            .await
+            .map(|_| ())
+    }
+
+    /// Places a map `Note` on a scene linking to a journal entry; returns its id.
+    pub async fn create_note(
+        &mut self,
+        scene_id: &str,
+        x: i64,
+        y: i64,
+        entry_id: &str,
+        label: &str,
+    ) -> AppResult<String> {
+        let resp = self
+            .modify_document(
+                "Note",
+                "create",
+                json!({
+                    "parentUuid": format!("Scene.{scene_id}"),
+                    "data": [{
+                        "x": x,
+                        "y": y,
+                        "entryId": entry_id,
+                        "text": label,
+                        "fontSize": 24,
+                        "iconSize": 40,
+                        "texture": { "src": "icons/svg/book.svg" },
+                    }],
+                }),
+            )
+            .await?;
+        first_id(&resp)
+    }
+
+    /// Deletes the given notes from a scene.
+    pub async fn delete_notes(&mut self, scene_id: &str, ids: &[String]) -> AppResult<()> {
+        if ids.is_empty() {
+            return Ok(());
+        }
+        self.modify_document(
+            "Note",
+            "delete",
+            json!({ "parentUuid": format!("Scene.{scene_id}"), "ids": ids }),
+        )
+        .await
+        .map(|_| ())
+    }
 }
 
 fn first_id(resp: &Value) -> AppResult<String> {
@@ -152,14 +252,26 @@ pub struct MapEntry {
     pub page_id: String,
 }
 
+/// One synced atlas map's Foundry coordinates: the Scene and the Note ids it
+/// currently carries (recreated each sync, so they are tracked to be cleared).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct SceneEntry {
+    pub scene_id: String,
+    #[serde(default)]
+    pub note_ids: Vec<String>,
+}
+
 /// CK-owned identity map persisted at `.ck/foundry-map.json`: vault page path →
-/// Foundry journal/page ids, and vault folder path → Foundry folder id.
+/// Foundry journal/page ids, vault folder path → Foundry folder id, and atlas
+/// map id → Foundry scene/notes.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct FoundryMap {
     #[serde(default)]
     pub pages: HashMap<String, MapEntry>,
     #[serde(default)]
     pub folders: HashMap<String, String>,
+    #[serde(default)]
+    pub scenes: HashMap<String, SceneEntry>,
 }
 
 fn map_path(world_root: &Path) -> std::path::PathBuf {

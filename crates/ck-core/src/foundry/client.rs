@@ -29,6 +29,8 @@ type Ws = WebSocketStream<MaybeTlsStream<TcpStream>>;
 pub struct FoundryClient {
     ws: Ws,
     ack: u64,
+    base: String,
+    session: String,
 }
 
 impl FoundryClient {
@@ -56,9 +58,59 @@ impl FoundryClient {
             .await
             .map_err(|e| AppError::Internal(anyhow::anyhow!("foundry websocket: {e}")))?;
 
-        let mut client = Self { ws, ack: 1 };
+        let mut client = Self {
+            ws,
+            ack: 1,
+            base: base.to_string(),
+            session,
+        };
         client.handshake().await?;
         Ok(client)
+    }
+
+    /// Uploads file bytes into Foundry's user data under `target` (a directory
+    /// relative to the data root, e.g. `chronicle-keeper/myworld`), returning
+    /// the stored path usable as a Scene `background.src`. Uses the HTTP
+    /// `/upload` route (the websocket op can't move files), session-authed.
+    pub async fn upload_file(
+        &self,
+        target: &str,
+        filename: &str,
+        bytes: Vec<u8>,
+    ) -> AppResult<String> {
+        let http = reqwest::Client::builder()
+            .build()
+            .map_err(|e| AppError::Internal(anyhow::anyhow!("http client: {e}")))?;
+        let part = reqwest::multipart::Part::bytes(bytes)
+            .file_name(filename.to_string())
+            .mime_str("application/octet-stream")
+            .map_err(|e| AppError::Internal(anyhow::anyhow!("upload part: {e}")))?;
+        let form = reqwest::multipart::Form::new()
+            .text("source", "data")
+            .text("target", target.to_string())
+            .part("upload", part);
+        let resp = http
+            .post(format!("{}/upload", self.base))
+            .header("Cookie", format!("session={}", self.session))
+            .multipart(form)
+            .send()
+            .await
+            .map_err(|e| AppError::BadRequest(format!("foundry upload: {e}")))?;
+        let body: Value = resp
+            .json()
+            .await
+            .map_err(|e| AppError::Internal(anyhow::anyhow!("foundry upload body: {e}")))?;
+        if body.get("status").and_then(|s| s.as_str()) != Some("success") {
+            let msg = body
+                .get("message")
+                .and_then(|m| m.as_str())
+                .unwrap_or("upload failed");
+            return Err(AppError::Internal(anyhow::anyhow!("foundry upload: {msg}")));
+        }
+        body.get("path")
+            .and_then(|p| p.as_str())
+            .map(|s| s.to_string())
+            .ok_or_else(|| AppError::Internal(anyhow::anyhow!("foundry upload: no path returned")))
     }
 
     /// Completes the Engine.IO/Socket.IO handshake: wait for the engine open
@@ -72,6 +124,24 @@ impl FoundryClient {
                 return Ok(());
             }
             // Ignore anything else (e.g. an early `2["session",...]`).
+        }
+    }
+
+    /// Emits a Socket.IO event with arguments and returns the first element of
+    /// its ack array. Pings are answered transparently while waiting.
+    async fn emit_ack(&mut self, args: Value) -> AppResult<Value> {
+        let ack_id = self.ack;
+        self.ack += 1;
+        self.send(&format!("42{ack_id}{args}")).await?;
+        let prefix = format!("43{ack_id}");
+        loop {
+            let frame = self.read_frame().await?;
+            if let Some(rest) = frame.strip_prefix(&prefix) {
+                let arr: Value = serde_json::from_str(rest)
+                    .map_err(|e| AppError::Internal(anyhow::anyhow!("foundry ack json: {e}")))?;
+                return Ok(arr.get(0).cloned().unwrap_or(Value::Null));
+            }
+            // Other acks / event broadcasts are not ours — keep waiting.
         }
     }
 
@@ -90,28 +160,44 @@ impl FoundryClient {
             m.entry("pack").or_insert(Value::Null);
             m.entry("modifiedTime").or_insert(json!(now_ms()));
         }
-        let ack_id = self.ack;
-        self.ack += 1;
-        let payload =
-            json!(["modifyDocument", { "type": doc_type, "action": action, "operation": op }]);
-        self.send(&format!("42{ack_id}{payload}")).await?;
+        let resp = self
+            .emit_ack(json!(["modifyDocument", { "type": doc_type, "action": action, "operation": op }]))
+            .await?;
+        if let Some(err) = resp.get("error").and_then(|e| e.as_str()) {
+            return Err(AppError::Internal(anyhow::anyhow!(
+                "foundry rejected {action} {doc_type}: {err}"
+            )));
+        }
+        Ok(resp)
+    }
 
-        let prefix = format!("43{ack_id}");
-        loop {
-            let frame = self.read_frame().await?;
-            if let Some(rest) = frame.strip_prefix(&prefix) {
-                let arr: Value = serde_json::from_str(rest)
-                    .map_err(|e| AppError::Internal(anyhow::anyhow!("foundry ack json: {e}")))?;
-                let resp = arr.get(0).cloned().unwrap_or(Value::Null);
-                if let Some(err) = resp.get("error").and_then(|e| e.as_str()) {
+    /// Creates a directory under the user data root (`storage = "data"`),
+    /// building each path level. The `/upload` route won't create dirs, so the
+    /// scene-art target must be made first. An already-existing level is fine.
+    pub async fn create_directory(&mut self, path: &str) -> AppResult<()> {
+        let mut cumulative = String::new();
+        for comp in path.split('/').filter(|c| !c.is_empty()) {
+            if !cumulative.is_empty() {
+                cumulative.push('/');
+            }
+            cumulative.push_str(comp);
+            let resp = self
+                .emit_ack(json!([
+                    "manageFiles",
+                    { "action": "createDirectory", "storage": "data", "target": cumulative },
+                    {}
+                ]))
+                .await?;
+            if let Some(err) = resp.get("error").and_then(|e| e.as_str()) {
+                // Foundry reports an existing dir as an error; that is success.
+                if !err.contains("EEXIST") && !err.to_lowercase().contains("exist") {
                     return Err(AppError::Internal(anyhow::anyhow!(
-                        "foundry rejected {action} {doc_type}: {err}"
+                        "foundry create dir {cumulative}: {err}"
                     )));
                 }
-                return Ok(resp);
             }
-            // Other acks / event broadcasts are not ours — keep waiting.
         }
+        Ok(())
     }
 
     pub async fn close(mut self) {
