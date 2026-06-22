@@ -1,6 +1,6 @@
 // All data operations. Thin wrappers over the HTTP client that update the store.
 // Ported 1:1 from the legacy app.js so the backend contract is unchanged.
-import { store, setState, setOp, navigate, apiFetch, apiJson, apiText, apiStream, apiUrl, slugify, toneFor, initials, loadWorldTabs, remapTabs, pruneTabs } from './core.js';
+import { store, setState, setOp, bump, navigate, apiFetch, apiJson, apiText, apiStream, apiUrl, slugify, toneFor, initials, loadWorldTabs, remapTabs, pruneTabs } from './core.js';
 
 // ── Campaigns ─────────────────────────────────────────────────────
 export async function loadCampaigns() {
@@ -824,6 +824,7 @@ export async function runSummarize({ transcriptId, provider, model, title, conte
     // Auto-extract may have created stub pages; refresh so a later codex visit
     // shows them without a manual reload.
     await loadVaultTree(store.campaign?.campaign_id);
+    bump('vault'); // an open extracted page should refresh its body
     setOp('Summary complete', 'done');
   } catch (e) {
     setState({ summaryStreaming: null });
@@ -887,6 +888,7 @@ export async function commitCodexUpdate(ids) {
     const r = await apiJson(`/sessions/${sid}/codex-update/commit`, 'POST', { ids });
     await loadCodexUpdate(sid);
     await loadVaultTree(store.campaign?.campaign_id);
+    bump('vault'); // a committed page open in a tab should refresh its body
     const stale = r.stale?.length ? ` · ${r.stale.length} stale (page changed)` : '';
     setOp(`Updated ${r.applied} page${r.applied === 1 ? '' : 's'}${stale}`, r.stale?.length ? 'err' : 'done');
     return r;
