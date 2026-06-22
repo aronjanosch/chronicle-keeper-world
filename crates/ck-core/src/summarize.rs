@@ -395,7 +395,10 @@ fn parse_metadata(text: &str) -> Option<Value> {
         .or_else(|| t.strip_prefix("```"))
         .unwrap_or(t);
     let t = t.strip_suffix("```").unwrap_or(t).trim();
-    serde_json::from_str(t).ok()
+    serde_json::from_str(t).ok().or_else(|| {
+        let (start, end) = (t.find('{')?, t.rfind('}')?);
+        (end > start).then(|| serde_json::from_str(&t[start..=end]).ok())?
+    })
 }
 
 /// Replace the session's metadata (session.toml) with the LLM-extracted lists.
