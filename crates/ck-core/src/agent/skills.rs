@@ -37,6 +37,10 @@ const DEFAULT_SKILLS: &[(&str, &str)] = &[
         "foundry-bridge/SKILL.md",
         include_str!("skills_default/foundry-bridge/SKILL.md"),
     ),
+    (
+        "check-consistency/SKILL.md",
+        include_str!("skills_default/check-consistency/SKILL.md"),
+    ),
 ];
 
 /// `<output_root>/Skills` — the app-global skills library.

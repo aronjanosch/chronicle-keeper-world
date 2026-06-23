@@ -161,8 +161,8 @@ pub fn system_prompt(
              frontmatter so the infobox fields match the kind. Read a page before editing it.\n\
              - Reach for the most targeted write tool: edit_page (one exact string; set \
              replace_all to change every occurrence), multi_edit_page (several edits in one \
-             call — prefer this over repeated edit_page), append_to_page / insert_under_heading \
-             to add content, create_page for a new page. Use write_page (full overwrite) only \
+             call — prefer this over repeated edit_page), insert_into_page \
+             to add content (optionally under a heading), create_page for a new page. Use write_page (full overwrite) only \
              as a last resort. For pattern-based or bulk text surgery, run_command with sed/awk \
              is available (it always asks).\n\
              - To nest a place inside a larger one (a tavern in a city, a city in a kingdom), \

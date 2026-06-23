@@ -22,8 +22,8 @@ const MAX_FILE_BYTES = 256 * 1024;
 // Tools that mutate vault pages — a successful result means the open page may
 // now be stale, so refresh it mid-stream instead of waiting for run end.
 const VAULT_WRITE_TOOLS = new Set([
-  'create_page', 'edit_page', 'multi_edit_page', 'append_to_page',
-  'insert_under_heading', 'write_page', 'rename_page', 'move_page',
+  'create_page', 'edit_page', 'multi_edit_page', 'insert_into_page',
+  'write_page', 'rename_page', 'move_page',
   'delete_page', 'create_folder',
 ]);
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
@@ -406,7 +406,7 @@ function DiffView({ diff }) {
 
 const WRITE_VERB = {
   create_page: 'create', edit_page: 'edit', write_page: 'overwrite',
-  multi_edit_page: 'edit', append_to_page: 'append to', insert_under_heading: 'add to',
+  multi_edit_page: 'edit', insert_into_page: 'add to',
 };
 
 function PermissionCard({ ask }) {
@@ -438,8 +438,8 @@ function PermissionCard({ ask }) {
 
 const ROW_VERB = {
   rename_page: 'rename', move_page: 'move', delete_page: 'delete', create_folder: 'folder', run_command: 'shell',
-  vault_diagnostics: 'diagnostics', list_tags: 'tags', find_by_tag: 'tag', page_kinds: 'kinds', read_recap: 'recap',
-  multi_edit_page: 'edit', append_to_page: 'append', insert_under_heading: 'insert', search_summaries: 'summaries',
+  vault_diagnostics: 'diagnostics', tags: 'tags', query_world: 'query', page_kinds: 'kinds', read_recap: 'recap',
+  multi_edit_page: 'edit', insert_into_page: 'insert', search_summaries: 'summaries',
 };
 
 function ToolRow({ name, summary, isError, running, args, diff }) {

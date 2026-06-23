@@ -39,8 +39,7 @@ pub fn tier_of(name: &str) -> Tier {
         "create_page"
         | "edit_page"
         | "multi_edit_page"
-        | "append_to_page"
-        | "insert_under_heading"
+        | "insert_into_page"
         | "write_page" => Tier::Write,
         "rename_page" | "move_page" | "delete_page" | "create_folder" => Tier::Structural,
         "run_command" => Tier::Shell,
@@ -133,14 +132,26 @@ pub fn read_tools() -> Vec<ToolDef> {
             schema: obj(json!({}), &[]),
         },
         ToolDef {
-            name: "list_tags".into(),
-            description: "All tags used across Codex pages with how many pages carry each.".into(),
-            schema: obj(json!({}), &[]),
+            name: "tags".into(),
+            description: "Tags in the Codex. No argument: every tag with how many pages carry it. \
+                          With `tag`: the pages carrying that tag (case-insensitive, leading # optional).".into(),
+            schema: obj(json!({ "tag": { "type": "string", "description": "omit to list all tags; supply to list pages with this tag" } }), &[]),
         },
         ToolDef {
-            name: "find_by_tag".into(),
-            description: "List Codex pages carrying a given tag (case-insensitive, leading # optional).".into(),
-            schema: obj(json!({ "tag": { "type": "string" } }), &["tag"]),
+            name: "query_world".into(),
+            description: "Enumerate pages by structured criteria — frontmatter field values and \
+                          tags — exactly and completely, over the whole world at once. Reach for \
+                          this (not search_pages) for any \"list / count / which pages where …\" \
+                          question, e.g. every dead NPC, all places in a region, factions of a \
+                          type. Full-text search matches words and misses pages that don't say \
+                          them; this matches the parsed structure. Grammar (dataview-lite): \
+                          `LIST FROM #tag kind:npc WHERE field = value`. FROM takes #tags and/or \
+                          kind:<kind> (AND). WHERE takes `field = value`, `field != value`, \
+                          `field contains value` (AND). Either clause optional. Examples: \
+                          `FROM kind:npc WHERE status = dead`; `FROM #faction WHERE region = North`; \
+                          `WHERE part_of = \"[[Thornhold]]\"`. Values match frontmatter; wikilinks \
+                          compare by target.".into(),
+            schema: obj(json!({ "query": { "type": "string" } }), &["query"]),
         },
         ToolDef {
             name: "page_kinds".into(),
@@ -243,26 +254,17 @@ pub fn write_tools() -> Vec<ToolDef> {
             ),
         },
         ToolDef {
-            name: "append_to_page".into(),
-            description: "Append text to the end of a Codex page without rewriting the rest of it.".into(),
+            name: "insert_into_page".into(),
+            description: "Add text to a Codex page without rewriting the rest of it. Omit heading \
+                          to append at the end; supply heading to insert under that markdown \
+                          heading (created at the end if absent).".into(),
             schema: obj(
                 json!({
                     "path": { "type": "string" },
-                    "text": { "type": "string" }
+                    "text": { "type": "string" },
+                    "heading": { "type": "string", "description": "exact heading line, e.g. ## Fantastic Locations; omit to append at end" }
                 }),
                 &["path", "text"],
-            ),
-        },
-        ToolDef {
-            name: "insert_under_heading".into(),
-            description: "Add text under a markdown heading in a Codex page (creates the heading at the end if it is not present). Targets a section without touching the rest.".into(),
-            schema: obj(
-                json!({
-                    "path": { "type": "string" },
-                    "heading": { "type": "string", "description": "exact heading line, e.g. ## Fantastic Locations" },
-                    "text": { "type": "string" }
-                }),
-                &["path", "heading", "text"],
             ),
         },
         ToolDef {
@@ -928,26 +930,20 @@ fn write_preview(ctx: &ToolCtx<'_>, name: &str, args: &Value) -> Result<Value, S
                 json!({ "path": path, "old": cap_preview(&join(|e| &e.old)), "new": cap_preview(&join(|e| &e.new)) }),
             )
         }
-        "append_to_page" => {
-            vault::read_page(&vault_root, &path)
-                .map_err(|_| format!("Page not found: {path} — read or list pages first."))?;
-            let text = str_arg("text");
-            if text.trim().is_empty() {
-                return Err("text is empty".into());
-            }
-            Ok(json!({ "path": path, "old": Value::Null, "new": cap_preview(&text) }))
-        }
-        "insert_under_heading" => {
+        "insert_into_page" => {
             vault::read_page(&vault_root, &path)
                 .map_err(|_| format!("Page not found: {path} — read or list pages first."))?;
             let heading = str_arg("heading");
             let text = str_arg("text");
-            if heading.trim().is_empty() || text.trim().is_empty() {
-                return Err("heading and text are required".into());
+            if text.trim().is_empty() {
+                return Err("text is empty".into());
             }
-            Ok(
-                json!({ "path": path, "old": Value::Null, "new": cap_preview(&format!("{}\n\n{}", heading.trim(), text.trim())) }),
-            )
+            let preview = if heading.trim().is_empty() {
+                cap_preview(&text)
+            } else {
+                cap_preview(&format!("{}\n\n{}", heading.trim(), text.trim()))
+            };
+            Ok(json!({ "path": path, "old": Value::Null, "new": preview }))
         }
         "write_page" => {
             let old = vault::read_page(&vault_root, &path)
@@ -1378,29 +1374,25 @@ pub fn dispatch(ctx: &ToolCtx<'_>, name: &str, args: &Value) -> Result<String, S
             }
             Ok(out.trim_end().to_string())
         }
-        "list_tags" => {
+        "tags" => {
             let vault_root = ctx.cfg.codex_dir(ctx.world_root);
-            let tags = ctx
-                .state
-                .with_index(&vault_root, index::tag_counts)
-                .map_err(app_err)?
-                .map_err(app_err)?;
-            if tags.is_empty() {
-                return Ok("No tags yet.".into());
-            }
-            Ok(tags
-                .iter()
-                .map(|(t, n)| format!("- #{t} ({n})"))
-                .collect::<Vec<_>>()
-                .join("\n"))
-        }
-        "find_by_tag" => {
             let want = str_arg("tag");
             let want = want.trim().trim_start_matches('#').to_lowercase();
             if want.is_empty() {
-                return Err("missing 'tag'".into());
+                let tags = ctx
+                    .state
+                    .with_index(&vault_root, index::tag_counts)
+                    .map_err(app_err)?
+                    .map_err(app_err)?;
+                if tags.is_empty() {
+                    return Ok("No tags yet.".into());
+                }
+                return Ok(tags
+                    .iter()
+                    .map(|(t, n)| format!("- #{t} ({n})"))
+                    .collect::<Vec<_>>()
+                    .join("\n"));
             }
-            let vault_root = ctx.cfg.codex_dir(ctx.world_root);
             let meta = ctx
                 .state
                 .with_index(&vault_root, index::page_meta)
@@ -1418,6 +1410,40 @@ pub fn dispatch(ctx: &ToolCtx<'_>, name: &str, args: &Value) -> Result<String, S
             Ok(hits
                 .iter()
                 .map(|p| format!("- {p}"))
+                .collect::<Vec<_>>()
+                .join("\n"))
+        }
+        "query_world" => {
+            let q = str_arg("query");
+            if q.trim().is_empty() {
+                return Err("missing 'query'".into());
+            }
+            let vault_root = ctx.cfg.codex_dir(ctx.world_root);
+            let result = ctx
+                .state
+                .with_index(&vault_root, |conn| index::run_query(conn, &q))
+                .map_err(app_err)?
+                .map_err(app_err)?;
+            let hits = result?;
+            if hits.is_empty() {
+                return Ok("No pages match.".into());
+            }
+            Ok(hits
+                .iter()
+                .map(|h| {
+                    let kind = h.kind.as_deref().unwrap_or("");
+                    let kind = if kind.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" [{kind}]")
+                    };
+                    let summary = if h.summary.trim().is_empty() {
+                        String::new()
+                    } else {
+                        format!(" — {}", h.summary.trim())
+                    };
+                    format!("- {}{kind}{summary}", h.path)
+                })
                 .collect::<Vec<_>>()
                 .join("\n"))
         }
@@ -1485,22 +1511,17 @@ pub fn dispatch(ctx: &ToolCtx<'_>, name: &str, args: &Value) -> Result<String, S
             reindex(ctx, &vault_root, &path);
             Ok(format!("Applied {} edits to {path}.", edits.len()))
         }
-        "append_to_page" => {
+        "insert_into_page" => {
             let path = norm_md_path(&str_arg("path"));
             let vault_root = ctx.cfg.codex_dir(ctx.world_root);
             let page = vault::read_page(&vault_root, &path).map_err(app_err)?;
+            let heading = str_arg("heading");
             let text = str_arg("text");
-            let content = format!("{}\n\n{}\n", page.content.trim_end(), text.trim_end());
-            vault::write_page(&vault_root, &path, &content).map_err(app_err)?;
-            reindex(ctx, &vault_root, &path);
-            Ok(format!("Appended to {path}."))
-        }
-        "insert_under_heading" => {
-            let path = norm_md_path(&str_arg("path"));
-            let vault_root = ctx.cfg.codex_dir(ctx.world_root);
-            let page = vault::read_page(&vault_root, &path).map_err(app_err)?;
-            let content =
-                vault::append_under_heading(&page.content, &str_arg("heading"), &str_arg("text"));
+            let content = if heading.trim().is_empty() {
+                format!("{}\n\n{}\n", page.content.trim_end(), text.trim_end())
+            } else {
+                vault::append_under_heading(&page.content, &heading, &text)
+            };
             vault::write_page(&vault_root, &path, &content).map_err(app_err)?;
             reindex(ctx, &vault_root, &path);
             Ok(format!("Updated {path}."))
@@ -1908,12 +1929,12 @@ mod tests {
         let diag = call(&ctx, "vault_diagnostics", json!({})).unwrap();
         assert!(diag.contains("[[Nobody Here]]"));
 
-        let tags = call(&ctx, "list_tags", json!({})).unwrap();
+        let tags = call(&ctx, "tags", json!({})).unwrap();
         assert!(tags.contains("#crown"));
 
-        let tagged = call(&ctx, "find_by_tag", json!({ "tag": "#crown" })).unwrap();
+        let tagged = call(&ctx, "tags", json!({ "tag": "#crown" })).unwrap();
         assert!(tagged.contains("NPCs/Reeve.md"));
-        assert!(call(&ctx, "find_by_tag", json!({ "tag": "nope" }))
+        assert!(call(&ctx, "tags", json!({ "tag": "nope" }))
             .unwrap()
             .contains("No pages tagged"));
         std::fs::remove_dir_all(&root).ok();
@@ -1968,16 +1989,16 @@ mod tests {
         let c = std::fs::read_to_string(root.join("Codex/Argent.md")).unwrap();
         assert!(c.contains("A silver city.") && c.contains("Founded long ago."));
 
-        // append + insert under heading.
+        // append (no heading) + insert under heading.
         call(
             &ctx,
-            "append_to_page",
+            "insert_into_page",
             json!({ "path": "Argent.md", "text": "Tail line." }),
         )
         .unwrap();
         call(
             &ctx,
-            "insert_under_heading",
+            "insert_into_page",
             json!({ "path": "Argent.md", "heading": "## Notes", "text": "A fresh note." }),
         )
         .unwrap();
