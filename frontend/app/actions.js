@@ -268,14 +268,7 @@ export async function loadSkills(campaignId) {
   const id = campaignId || store.campaign?.campaign_id;
   if (!id || store.keeperSkills) return;
   const r = await apiFetch(`/campaigns/${id}/agent/skills`).catch(() => null);
-  if (r) setState({ keeperSkills: r.skills || [], skillsPath: r.path || '' });
-}
-
-// The app-global Skills folder path — for the Settings "Open folder" button.
-// Campaign-free route; works even with no world open.
-export async function loadSkillsPath() {
-  const r = await apiFetch('/skills').catch(() => null);
-  if (r) setState({ skillsPath: r.path || '' });
+  if (r) setState({ keeperSkills: r.skills || [] });
 }
 
 // Per-kind infobox field schemas (.ck/config.toml overrides merged with built-ins).
