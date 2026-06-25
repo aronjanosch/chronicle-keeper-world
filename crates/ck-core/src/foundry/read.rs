@@ -50,14 +50,16 @@ pub fn list_actors(world: &Value) -> String {
 
 const MAX_SYSTEM_BLOB: usize = 4000;
 
-/// Core fields for one actor (case-insensitive name match) plus its raw `system`
-/// JSON — the LLM interprets the system-specific stats itself.
+/// Core fields for one actor plus its raw `system` JSON — the LLM interprets the
+/// system-specific stats itself. Matches by exact name, then exact `_id` (so a
+/// token's `actorId` from scene_state resolves directly), then name substring.
 pub fn get_actor(world: &Value, name: &str) -> String {
     let want = name.trim().to_lowercase();
     let actors = collection(world, "actors");
     let found = actors
         .iter()
         .find(|a| str_field(a, "name").to_lowercase() == want)
+        .or_else(|| actors.iter().find(|a| str_field(a, "_id").to_lowercase() == want))
         .or_else(|| {
             actors
                 .iter()

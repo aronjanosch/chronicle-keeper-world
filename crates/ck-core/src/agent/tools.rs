@@ -398,11 +398,12 @@ pub fn foundry_tools() -> Vec<ToolDef> {
         },
         ToolDef {
             name: "foundry_get_actor".into(),
-            description: "Look up one Actor by name in the connected FoundryVTT world: core fields, \
-                          its items, and the raw system stat block (game-system specific — interpret \
-                          it for the user). Read-only, no approval needed."
+            description: "Look up one Actor by name OR by actor id in the connected FoundryVTT world: \
+                          core fields, its items, and the raw system stat block (game-system specific \
+                          — interpret it for the user). Pass the actorId from foundry_scene_state to \
+                          resolve a specific token when names collide. Read-only, no approval needed."
                 .into(),
-            schema: obj(json!({ "name": { "type": "string" } }), &["name"]),
+            schema: obj(json!({ "name": { "type": "string", "description": "Actor name or actor id." } }), &["name"]),
         },
         ToolDef {
             name: "foundry_scene_state".into(),
