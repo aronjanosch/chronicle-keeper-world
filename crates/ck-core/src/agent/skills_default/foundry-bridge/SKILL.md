@@ -80,7 +80,8 @@ never truth" rule is about codex sync, not about asking the table a question). T
 **read-only and need no approval**.
 
 - **`foundry_list_actors`** — every Actor (name + type) in the world. "Who exists at the table?"
-- **`foundry_get_actor`** — `name`. Core fields, the actor's items, and the **raw `system` stat
+- **`foundry_get_actor`** — `name` **or actor id** (pass the `actorId` from `foundry_scene_state`
+  to resolve a specific token when two share a name). Core fields, the actor's items, and the **raw `system` stat
   block**. Foundry stores mechanical stats (HP/AC/skill mods) under `system.*` in a
   **game-system-specific** shape — so the tool hands you that raw JSON and **you interpret it**
   for the user's system (5e `system.attributes.hp.value`, Daggerheart's own shape, etc.). Don't
