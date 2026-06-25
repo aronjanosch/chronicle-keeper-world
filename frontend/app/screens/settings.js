@@ -1,7 +1,7 @@
 // Screen 08 — Settings. Calm single page, grouped into cards. Real config.
 import { html, useState, useEffect } from '../../vendor/htm-preact-standalone.mjs';
 import { store, setOp, openModal } from '../core.js';
-import { loadConfig, saveConfig, loadLlmProviders, loadPromptTemplates, deletePromptTemplate, restorePromptDefaults, pingLlmProvider, loadSkillsPath, revealPath, loadFoundrySettings, saveFoundrySettings, testFoundry, syncFoundry } from '../actions.js';
+import { loadConfig, saveConfig, loadLlmProviders, loadPromptTemplates, deletePromptTemplate, restorePromptDefaults, pingLlmProvider, revealPath, loadFoundrySettings, saveFoundrySettings, testFoundry, syncFoundry } from '../actions.js';
 import { Shell, Sidebar, Topbar } from '../shell.js';
 import { Icon, Btn } from '../ui.js';
 
@@ -167,7 +167,6 @@ export function SettingsScreen({ store }) {
   useEffect(() => {
     (async () => {
       let cfg;
-      loadSkillsPath();
       try { cfg = await loadConfig(); await loadLlmProviders(); await loadPromptTemplates(true); }
       catch (e) { setOp(`Can't load settings: ${e.message}`, 'err'); return; }
       setF({
@@ -248,17 +247,11 @@ export function SettingsScreen({ store }) {
 
         <${FoundryCard} />
 
-        <${SettingsCard} icon="folder" title="Storage" desc="Where Chronicle Keeper keeps its database, audio and model.">
-          <${Row} label="Data folder" hint="Sessions, transcripts and the model live here. Absolute path.">
-            <input value=${f.output_root} onInput=${(e) => set('output_root', e.target.value)} style=${inp({ fontFamily: 'var(--font-mono)' })} />
-          </${Row}>
-        </${SettingsCard}>
-
-        <${SettingsCard} icon="feather" title="Keeper skills" desc="Markdown folders the Keeper pulls on demand. Add a folder to extend it; edit or delete to change the bundled ones.">
-          <${Row} label="Skills folder" hint="One SKILL.md per folder. Shared across every world. Edits and deletes are kept.">
+        <${SettingsCard} icon="folder" title="Storage" desc="Where Chronicle Keeper keeps its database, audio, model and Keeper skills.">
+          <${Row} label="Data folder" hint="Sessions, transcripts, the model and the shared Keeper skills live here. Absolute path.">
             <div style=${{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <input readonly value=${store.skillsPath || '…'} style=${inp({ fontFamily: 'var(--font-mono)', flex: 1 })} />
-              <${Btn} kind="ghost" icon="folder" disabled=${!(window.__TAURI__ && store.skillsPath)} onClick=${() => revealPath(store.skillsPath)}>Open folder</${Btn}>
+              <input value=${f.output_root} onInput=${(e) => set('output_root', e.target.value)} style=${inp({ fontFamily: 'var(--font-mono)', flex: 1 })} />
+              <${Btn} kind="ghost" icon="folder" disabled=${!(window.__TAURI__ && f.output_root)} onClick=${() => revealPath(f.output_root)}>Open folder</${Btn}>
             </div>
           </${Row}>
         </${SettingsCard}>
