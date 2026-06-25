@@ -22,6 +22,9 @@ use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
 
 const IO_TIMEOUT: Duration = Duration::from_secs(20);
+/// Cap each auth HTTP call and the websocket upgrade so an unresponsive Foundry
+/// fails fast with a clear message instead of hanging the tool call.
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(12);
 
 type Ws = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
@@ -54,8 +57,13 @@ impl FoundryClient {
                 .map_err(|e| AppError::Internal(anyhow::anyhow!("cookie header: {e}")))?,
         );
 
-        let (ws, _resp) = connect_async(req)
+        let (ws, _resp) = tokio::time::timeout(CONNECT_TIMEOUT, connect_async(req))
             .await
+            .map_err(|_| {
+                AppError::BadRequest(format!(
+                    "Foundry websocket to {base} timed out — is the server reachable?"
+                ))
+            })?
             .map_err(|e| AppError::Internal(anyhow::anyhow!("foundry websocket: {e}")))?;
 
         let mut client = Self {
@@ -261,6 +269,7 @@ impl FoundryClient {
 async fn authenticate(base: &str, user_id: &str, password: &str) -> AppResult<String> {
     let http = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::none())
+        .timeout(CONNECT_TIMEOUT)
         .build()
         .map_err(|e| AppError::Internal(anyhow::anyhow!("http client: {e}")))?;
 
@@ -268,7 +277,11 @@ async fn authenticate(base: &str, user_id: &str, password: &str) -> AppResult<St
         .get(format!("{base}/join"))
         .send()
         .await
-        .map_err(|e| AppError::BadRequest(format!("foundry GET /join: {e}")))?;
+        .map_err(|_| {
+            AppError::BadRequest(format!(
+                "Couldn't reach Foundry at {base} — check the server is running and the URL is correct."
+            ))
+        })?;
     let session = get
         .headers()
         .get_all("set-cookie")
