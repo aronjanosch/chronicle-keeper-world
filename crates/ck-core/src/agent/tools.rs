@@ -31,6 +31,7 @@ pub enum Tier {
     Structural,
     Shell,
     Foundry,
+    Web,
 }
 
 pub fn tier_of(name: &str) -> Tier {
@@ -43,6 +44,9 @@ pub fn tier_of(name: &str) -> Tier {
         | "write_page" => Tier::Write,
         "rename_page" | "move_page" | "delete_page" | "create_folder" => Tier::Structural,
         "run_command" => Tier::Shell,
+        // Network reads of external content — gated ask-first (a query / page
+        // text leaves the machine), no undo, never remembered.
+        "web_search" | "web_fetch" => Tier::Web,
         // Writes: always-ask, no remote undo. Live-play reads (foundry_get_actor /
         // list_actors / scene_state / lookup) are ungated — they fall through to
         // Tier::Read since they only query the table, never mutate it.
@@ -467,6 +471,39 @@ pub fn shell_tools() -> Vec<ToolDef> {
     }]
 }
 
+pub fn web_tools() -> Vec<ToolDef> {
+    fn obj(props: Value, required: &[&str]) -> Value {
+        json!({ "type": "object", "properties": props, "required": required })
+    }
+    vec![
+        ToolDef {
+            name: "web_search".into(),
+            description: "Search the web (DuckDuckGo) for real-world reference while worldbuilding \
+                          — etymology, mythology, naming conventions, historical detail. Returns \
+                          ranked title / url / snippet hits; follow up with web_fetch to read one. \
+                          Goes out to the internet and always asks the user first; use the Codex \
+                          tools for anything about this world."
+                .into(),
+            schema: obj(
+                json!({
+                    "query": { "type": "string" },
+                    "limit": { "type": "integer", "description": "max results, default 5 (1–10)" }
+                }),
+                &["query"],
+            ),
+        },
+        ToolDef {
+            name: "web_fetch".into(),
+            description: "Fetch one web page (or text/json/xml resource) by URL and return its \
+                          readable text, HTML stripped. Use after web_search, or on a URL the user \
+                          gives you. Goes out to the internet and always asks first; text only — \
+                          binary downloads are refused."
+                .into(),
+            schema: obj(json!({ "url": { "type": "string" } }), &["url"]),
+        },
+    ]
+}
+
 fn norm_md_path(raw: &str) -> String {
     let p = raw.trim().trim_matches('/');
     if p.to_lowercase().ends_with(".md") {
@@ -685,6 +722,7 @@ pub fn gate_preview(ctx: &ToolCtx<'_>, name: &str, args: &Value) -> Result<Value
         Tier::Write => write_preview(ctx, name, args),
         Tier::Structural => structural_preview(ctx, name, args),
         Tier::Foundry => foundry_preview(ctx, name, args),
+        Tier::Web => web_preview(name, args),
         Tier::Shell => {
             let cmd = args
                 .get("command")
@@ -698,6 +736,30 @@ pub fn gate_preview(ctx: &ToolCtx<'_>, name: &str, args: &Value) -> Result<Value
         }
         Tier::Read | Tier::Memory => Err(format!("not a gated tool: {name}")),
     }
+}
+
+/// Approval card for a web tool. `action` carries the tool name so the UI shows
+/// a one-line summary, not a diff — like the Foundry/shell cards.
+fn web_preview(name: &str, args: &Value) -> Result<Value, String> {
+    let str_arg = |k: &str| args.get(k).and_then(Value::as_str).unwrap_or("").trim();
+    let summary = match name {
+        "web_search" => {
+            let q = str_arg("query");
+            if q.is_empty() {
+                return Err("query is empty".into());
+            }
+            format!("search the web for “{q}” (DuckDuckGo)")
+        }
+        "web_fetch" => {
+            let url = str_arg("url");
+            if !(url.starts_with("http://") || url.starts_with("https://")) {
+                return Err("url must start with http:// or https://".into());
+            }
+            format!("fetch the web page {url}")
+        }
+        other => return Err(format!("not a web tool: {other}")),
+    };
+    Ok(json!({ "action": name, "summary": summary }))
 }
 
 /// Approval card for a Foundry tool. `action` carries the tool name (no `new`)
@@ -1047,6 +1109,23 @@ pub async fn run_foundry_tool(
     };
     client.close().await;
     result
+}
+
+/// Web tools touch the network — run async, like the Foundry tools.
+pub fn is_web_async(name: &str) -> bool {
+    matches!(name, "web_search" | "web_fetch")
+}
+
+pub async fn run_web_tool(name: &str, args: &Value) -> Result<String, String> {
+    let str_arg = |k: &str| args.get(k).and_then(Value::as_str).unwrap_or("").trim();
+    match name {
+        "web_search" => {
+            let limit = args.get("limit").and_then(Value::as_u64).unwrap_or(5) as usize;
+            super::web::web_search(str_arg("query"), limit).await
+        }
+        "web_fetch" => super::web::web_fetch(str_arg("url")).await,
+        other => Err(format!("unknown web tool: {other}")),
+    }
 }
 
 fn write_preview(ctx: &ToolCtx<'_>, name: &str, args: &Value) -> Result<Value, String> {

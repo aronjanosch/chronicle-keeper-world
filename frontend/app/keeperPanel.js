@@ -414,6 +414,7 @@ function PermissionCard({ ask }) {
   const isShell = d.command != null;
   const isStructural = !isShell && d.summary != null && d.new == null;
   const isFoundry = d.action === 'sync_foundry' || String(d.action || '').startsWith('foundry_');
+  const isWeb = d.action === 'web_search' || d.action === 'web_fetch';
   const title = isShell
     ? html`The Keeper wants to run a command`
     : isStructural
@@ -430,7 +431,7 @@ function PermissionCard({ ask }) {
     </div>
     <div style=${{ display: 'flex', gap: 8, padding: '0 10px 10px' }}>
       <button class="btn btn-primary" onClick=${() => decide(ask.requestId, 'allow_once')}>Allow once</button>
-      ${!isShell && !isFoundry && html`<button class="btn" onClick=${() => decide(ask.requestId, 'allow_chat')}>Allow for this chat</button>`}
+      ${!isShell && !isFoundry && !isWeb && html`<button class="btn" onClick=${() => decide(ask.requestId, 'allow_chat')}>Allow for this chat</button>`}
       <button class="btn" style=${{ marginLeft: 'auto', color: 'var(--burgundy-700)' }} onClick=${() => decide(ask.requestId, 'deny')}>Deny</button>
     </div>
   </div>`;
@@ -440,6 +441,7 @@ const ROW_VERB = {
   rename_page: 'rename', move_page: 'move', delete_page: 'delete', create_folder: 'folder', run_command: 'shell',
   vault_diagnostics: 'diagnostics', tags: 'tags', query_world: 'query', page_kinds: 'kinds', read_recap: 'recap',
   multi_edit_page: 'edit', insert_into_page: 'insert', search_summaries: 'summaries',
+  web_search: 'web search', web_fetch: 'web fetch',
 };
 
 function ToolRow({ name, summary, isError, running, args, diff }) {

@@ -11,6 +11,7 @@ pub mod context;
 pub mod memory;
 pub mod skills;
 pub mod tools;
+pub mod web;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -282,7 +283,11 @@ fn checkpoint_gated(
         },
         // Shell + Foundry write outside the vault's snapshot model (external
         // edits / a remote world) — no checkpoint, no undo.
-        tools::Tier::Shell | tools::Tier::Foundry | tools::Tier::Read | tools::Tier::Memory => {}
+        tools::Tier::Shell
+        | tools::Tier::Foundry
+        | tools::Tier::Web
+        | tools::Tier::Read
+        | tools::Tier::Memory => {}
     }
     Ok(())
 }
@@ -344,6 +349,7 @@ pub async fn run_turn<L: AgentLlm, G: PermissionGate, F: FnMut(TurnEvent) + Send
         registry.extend(tools::write_tools());
         registry.extend(tools::structural_tools());
         registry.extend(tools::shell_tools());
+        registry.extend(tools::web_tools());
         // Only offered when the bridge is configured — otherwise the tool would
         // just fail on every call.
         if crate::foundry::load_settings(state)
@@ -428,7 +434,9 @@ pub async fn run_turn<L: AgentLlm, G: PermissionGate, F: FnMut(TurnEvent) + Send
                                 tools::Tier::Write => mode == Mode::Ask && !chat_allows_write,
                                 tools::Tier::Structural => !chat_allows_write,
                                 // Always ask; remote, no undo — never remembered.
-                                tools::Tier::Shell | tools::Tier::Foundry => true,
+                                tools::Tier::Shell | tools::Tier::Foundry | tools::Tier::Web => {
+                                    true
+                                }
                                 tools::Tier::Read | tools::Tier::Memory => false,
                             };
                             if should_ask {
@@ -485,6 +493,12 @@ pub async fn run_turn<L: AgentLlm, G: PermissionGate, F: FnMut(TurnEvent) + Send
                 // other tool is synchronous via `dispatch`.
                 None if tools::is_foundry_async(&call.name) => {
                     match tools::run_foundry_tool(&ctx, &call.name, &call.arguments).await {
+                        Ok(raw) => (raw, false),
+                        Err(msg) => (msg, true),
+                    }
+                }
+                None if tools::is_web_async(&call.name) => {
+                    match tools::run_web_tool(&call.name, &call.arguments).await {
                         Ok(raw) => (raw, false),
                         Err(msg) => (msg, true),
                     }
