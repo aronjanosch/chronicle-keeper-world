@@ -56,12 +56,31 @@ function buildTheme(cm) {
       background: 'none', padding: '0', border: 'none', textDecoration: 'none',
     },
 
-    '.cm-tooltip': { background: 'var(--surface-raised)', border: '1px solid var(--rule-strong)', borderRadius: '8px', boxShadow: 'var(--shadow-raised)', overflow: 'hidden' },
-    '.cm-tooltip.cm-tooltip-autocomplete > ul': { fontFamily: 'var(--font-display)', fontSize: '13px', maxHeight: '16em' },
+    '.cm-tooltip': { background: 'var(--surface-raised)', border: '1px solid var(--rule-strong)', borderRadius: '10px', boxShadow: 'var(--shadow-raised)', overflow: 'hidden' },
+    '.cm-tooltip.cm-tooltip-autocomplete > ul': {
+      fontFamily: 'var(--font-display)', fontSize: '13px', maxHeight: '17em', minWidth: '256px',
+      padding: '4px', margin: '0', overflowY: 'auto', overflowX: 'hidden',
+      scrollbarWidth: 'thin', scrollbarColor: 'var(--rule-strong) transparent',
+    },
+    '.cm-tooltip-autocomplete > ul > li[role=option]': {
+      display: 'flex', alignItems: 'baseline', gap: '10px',
+      padding: '5px 9px', borderRadius: '6px', lineHeight: '1.35', cursor: 'pointer', color: 'var(--ink-soft)',
+    },
     '.cm-tooltip-autocomplete ul li[aria-selected]': { background: 'var(--burgundy-50)', color: 'var(--ink)' },
     '.cm-completionIcon': { display: 'none' },
-    '.cm-completionLabel': { color: 'var(--ink)' },
-    '.cm-completionDetail': { color: 'var(--ink-faint)', fontStyle: 'normal', fontFamily: 'var(--font-mono)', fontSize: '10.5px' },
+    '.cm-completionLabel': { color: 'var(--ink)', flex: 'none' },
+    '.cm-completionDetail': { color: 'var(--ink-faint)', fontStyle: 'normal', fontFamily: 'var(--font-mono)', fontSize: '10.5px', marginLeft: 'auto', whiteSpace: 'nowrap' },
+    '.cm-completionSection': {
+      color: 'var(--ink-faint)', fontFamily: 'var(--font-mono)', fontSize: '9px', fontWeight: '600',
+      letterSpacing: '0.11em', textTransform: 'uppercase', padding: '7px 9px 3px',
+    },
+    '.cm-completionSection:not(:first-child)': { borderTop: '1px solid var(--rule-soft)', marginTop: '3px' },
+    // The app's global pill scrollbar leaks into the narrow popover; override it thin.
+    '.cm-tooltip-autocomplete > ul::-webkit-scrollbar': { width: '9px' },
+    '.cm-tooltip-autocomplete > ul::-webkit-scrollbar-track': { background: 'transparent' },
+    '.cm-tooltip-autocomplete > ul::-webkit-scrollbar-thumb': {
+      background: 'var(--rule-strong)', borderRadius: '5px', border: '2px solid var(--surface-raised)', backgroundClip: 'padding-box',
+    },
 
     // Search & replace panel, restyled as an app toolbar.
     '.cm-panels': { background: 'var(--surface-raised)', color: 'var(--ink)' },
@@ -500,14 +519,29 @@ const SLASH_ITEMS = [
   { label: '/divider', detail: 'Horizontal rule', insert: '---\n' },
 ];
 
-function slashSource(cm, getSnippets) {
+// Phase 20A: three visually-separated groups so instant inserts never blur with
+// AI actions. Ranks fix order (GENERATE rank 2 reserved for 20B generators).
+const SEC_INSERT = { name: 'Insert', rank: 1 };
+const SEC_ASK = { name: 'Ask Keeper', rank: 3 };
+
+// Open the Keeper from the cursor with a prefilled composer (pull-not-push:
+// nothing fires until the user sends). `skill` = a kind-matched skill row, or
+// null for an ad-hoc `/keeper <text>` prompt; the current selection is attached.
+function keeperApply(view, f, to, onAskKeeper, arg) {
+  view.dispatch({ changes: { from: f, to, insert: '' } });
+  const { from, to: selTo } = view.state.selection.main;
+  const oa = onAskKeeper && onAskKeeper();
+  if (oa) oa({ ...arg, selection: view.state.sliceDoc(from, selTo) });
+}
+
+function slashSource(cm, getSnippets, getSkills, onAskKeeper) {
   return (ctx) => {
     const line = ctx.state.doc.lineAt(ctx.pos);
     const before = ctx.state.sliceDoc(line.from, ctx.pos);
     const m = /^\s*\/[\w-]*$/.exec(before);
     if (!m) return null;
     const from = line.from + before.indexOf('/');
-    const items = [
+    const inserts = [
       ...SLASH_ITEMS,
       // 11.5H: link-or-create an event page via the [[ completion's
       // "Create event" option.
@@ -517,21 +551,50 @@ function slashSource(cm, getSnippets) {
         detail: 'snippet',
         insert: s.content.replace(/\n+$/, '\n'),
       })),
+    ].map((it) => ({
+      ...it, section: SEC_INSERT, type: 'keyword',
+      apply: (view, _c, f, to) => {
+        view.dispatch({
+          changes: { from: f, to, insert: it.insert },
+          selection: { anchor: f + (it.cursor != null ? it.cursor : it.insert.length) },
+          userEvent: 'input.complete',
+        });
+        if (it.complete) cm.startCompletion(view);
+      },
+    }));
+    const ask = [
+      ...((getSkills && getSkills()) || []).map((s) => ({
+        label: '/' + s.slug, detail: s.description || s.name,
+        section: SEC_ASK, type: 'keyword',
+        apply: (view, _c, f, to) => keeperApply(view, f, to, onAskKeeper, { skill: s }),
+      })),
+      {
+        label: '/keeper', detail: 'Ask the Keeper…',
+        section: SEC_ASK, type: 'keyword',
+        apply: (view, _c, f, to) => keeperApply(view, f, to, onAskKeeper, { skill: null }),
+      },
     ];
+    return { from, options: [...inserts, ...ask], validFor: /^\/[\w-]*$/ };
+  };
+}
+
+// `/keeper <free text>` — an ad-hoc prompt from the cursor. Separate source
+// because the line carries a space (slashSource's token regex has closed).
+function keeperPromptSource(onAskKeeper) {
+  return (ctx) => {
+    const line = ctx.state.doc.lineAt(ctx.pos);
+    const before = ctx.state.sliceDoc(line.from, ctx.pos);
+    const m = /^\s*\/keeper\s+(.+)$/.exec(before);
+    if (!m) return null;
+    const text = m[1];
+    const from = line.from + before.indexOf('/');
     return {
       from,
-      options: items.map((it) => ({
-        label: it.label, detail: it.detail, type: 'keyword',
-        apply: (view, _c, f, to) => {
-          view.dispatch({
-            changes: { from: f, to, insert: it.insert },
-            selection: { anchor: f + (it.cursor != null ? it.cursor : it.insert.length) },
-            userEvent: 'input.complete',
-          });
-          if (it.complete) cm.startCompletion(view);
-        },
-      })),
-      validFor: /^\/[\w-]*$/,
+      options: [{
+        label: `Ask Keeper: ${text}`, type: 'keyword', section: SEC_ASK,
+        apply: (view, _c, f, to) => keeperApply(view, f, to, onAskKeeper, { skill: null, prompt: text }),
+      }],
+      validFor: /^\/keeper\s+.+$/,
     };
   };
 }
@@ -609,7 +672,11 @@ function createSingleton(cm) {
       override: [
         wikilinkSource(cm, () => s.opts.getPages && s.opts.getPages(), (name, kind) => s.opts.onCreatePage && s.opts.onCreatePage(name, kind)),
         tagSource(() => s.opts.getPages && s.opts.getPages()),
-        slashSource(cm, () => s.opts.getSnippets && s.opts.getSnippets()),
+        slashSource(cm,
+          () => s.opts.getSnippets && s.opts.getSnippets(),
+          () => s.opts.getSkills && s.opts.getSkills(),
+          () => s.opts.onAskKeeper),
+        keeperPromptSource(() => s.opts.onAskKeeper),
       ],
       icons: false,
     }),
