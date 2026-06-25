@@ -8,7 +8,7 @@ import { html, useState, useEffect, useRef, useMemo, useCallback } from '../../v
 import { navigate, useStore, openModal, setState } from '../core.js';
 import { Shell, Topbar, useSidebarWidth, ResizeHandle } from '../shell.js';
 import { Empty, Icon, PageBody, WikilinkHoverCard, splitDoc, joinDoc, parseProps, openContextMenu, useAsset, bannerAsset } from '../ui.js';
-import { readVaultPage, saveVaultPage, openCampaign, loadVaultTree, loadKindSchemas, loadAtlasMaps, createVaultPage, watchVault, uploadVaultAsset, loadSnippets, loadRelations, copyText } from '../actions.js';
+import { readVaultPage, saveVaultPage, openCampaign, loadVaultTree, loadKindSchemas, loadAtlasMaps, createVaultPage, watchVault, uploadVaultAsset, loadSnippets, loadRelations, loadSkills, copyText } from '../actions.js';
 import { mountEditor } from '../cm.js';
 import { setEditorActive } from '../commands.js';
 import { TabStrip, openPageEvt } from '../tabs.js';
@@ -406,10 +406,11 @@ function autoGrow(ta) {
 // CodeMirror 6 source editor — edits the whole .md (frontmatter + body) as literal
 // text. The view itself is an app-wide singleton (cm.js); this component just
 // re-parents it and swaps in this tab's cached EditorState (keyed by uiKey).
-function CmEditor({ content, uiKey, pages, snippets, onSave, onCreate, onState, onExtract, onQuote }) {
+function CmEditor({ content, uiKey, pages, snippets, skills, onSave, onCreate, onState, onExtract, onQuote, onAskKeeper }) {
   const hostRef = useRef(null);
   const pagesRef = useRef(pages); pagesRef.current = pages;
   const snippetsRef = useRef(snippets); snippetsRef.current = snippets;
+  const skillsRef = useRef(skills); skillsRef.current = skills;
   useEffect(() => {
     let ctl = null, dead = false;
     mountEditor(hostRef.current, {
@@ -417,12 +418,14 @@ function CmEditor({ content, uiKey, pages, snippets, onSave, onCreate, onState, 
       cacheKey: uiKey,
       getPages: () => pagesRef.current,
       getSnippets: () => snippetsRef.current,
+      getSkills: () => skillsRef.current,
       onCreatePage: (name, kind) => onCreate(name, kind),
       onUploadAsset: uploadVaultAsset,
       onSave,
       onState,
       onExtract,
       onQuote,
+      onAskKeeper,
     }).then((c) => { if (dead) c.destroy(); else ctl = c; });
     setEditorActive(true);
     return () => { dead = true; if (ctl) ctl.destroy(); setEditorActive(false); };
@@ -679,6 +682,7 @@ export function PageScreen() {
   useEffect(() => {
     if (!c) return;
     loadVaultTree(c.campaign_id); loadKindSchemas(c.campaign_id); loadRelations(c.campaign_id);
+    loadSkills(c.campaign_id);
     if (!(store.snippets || []).length) loadSnippets(c.campaign_id);
     if (c.vault_path && !(store.atlasMaps || []).length) loadAtlasMaps(c.campaign_id);
   }, [c?.campaign_id]);
@@ -727,6 +731,11 @@ export function PageScreen() {
   const pages = store.vaultPages || [];
   const folders = store.vaultFolders || [];
   const tree = buildTree(folders, pages);
+  // ASK-KEEPER `/` rows: skills whose kinds: match this page (zero inference).
+  const pageKind = (page?.kind || '').toLowerCase();
+  const editorSkills = pageKind
+    ? (store.keeperSkills || []).filter((s) => (s.kinds || []).some((x) => String(x).toLowerCase() === pageKind))
+    : [];
   const act = makeVaultActions(c, folders, {
     afterDelete: () => navigate('codex', { id: c.campaign_id }),
     afterDeleteFolder: (folderPath) => {
@@ -812,6 +821,26 @@ export function PageScreen() {
     changeMode('read');
   };
 
+  // 20A: editor `/` ASK-KEEPER rows. A skill row pulls that skill; `/keeper …`
+  // is an ad-hoc prompt. The Keeper rail lives in read mode, so surface it and
+  // prefill the composer — pull-not-push, nothing fires until the user sends.
+  const askKeeper = ({ skill, prompt, selection }) => {
+    let draft = skill
+      ? `Use the "${skill.name}" skill to help me develop this page.`
+      : (prompt || '');
+    const sel = (selection || '').trim();
+    if (sel) {
+      const quoted = sel.split('\n').map((l) => `> ${l}`).join('\n');
+      draft = draft ? `${quoted}\n\n${draft}` : `${quoted}\n\n`;
+    }
+    setState({ keeper: {
+      chatId: null, events: [], attachments: [], live: null, error: null,
+      ...(store.keeper || {}), open: true, draft,
+    } });
+    navigate('page', { path, rail: 'chat' });
+    changeMode('read');
+  };
+
   return html`<${Shell}
     sidebar=${mode === 'edit' && zen ? null
       : html`<${FileTree} campaign=${c} tree=${tree} active=${(page && page.title) || null} onOpen=${(p, e) => openPageEvt(p.path, e)} act=${act} />`}
@@ -824,9 +853,9 @@ export function PageScreen() {
           : html`<${EditScroll} uiKey=${uiKey}>
               <div style=${{ maxWidth: 720, margin: '0 auto', padding: '0 52px' }}>
                 <${Provenance} path=${path} />
-                <${CmEditor} key=${'cm:' + rev + ':' + path} content=${page.content} uiKey=${uiKey} pages=${pages} snippets=${store.snippets}
+                <${CmEditor} key=${'cm:' + rev + ':' + path} content=${page.content} uiKey=${uiKey} pages=${pages} snippets=${store.snippets} skills=${editorSkills}
                   onSave=${doSave} onCreate=${(name, kind) => createVaultPage(name, kind || 'lore', '')} onState=${setSaveState}
-                  onExtract=${extractToPage} onQuote=${quoteToKeeper} />
+                  onExtract=${extractToPage} onQuote=${quoteToKeeper} onAskKeeper=${askKeeper} />
               </div>
             </${EditScroll}>`}
     </div>
