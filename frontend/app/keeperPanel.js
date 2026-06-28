@@ -555,6 +555,137 @@ export function PickerControls({ k }) {
     </select>`;
 }
 
+// Float32 PCM chunks → 16-bit mono WAV blob. The mic is captured at the
+// AudioContext's native rate (usually 48k); the backend resamples to 16k, so
+// we ship the native rate untouched in the header.
+function encodeWav(chunks, sampleRate) {
+  let len = 0;
+  for (const c of chunks) len += c.length;
+  const buf = new ArrayBuffer(44 + len * 2);
+  const view = new DataView(buf);
+  const str = (off, s) => { for (let i = 0; i < s.length; i++) view.setUint8(off + i, s.charCodeAt(i)); };
+  str(0, 'RIFF'); view.setUint32(4, 36 + len * 2, true); str(8, 'WAVE');
+  str(12, 'fmt '); view.setUint32(16, 16, true); view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true); view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * 2, true); view.setUint16(32, 2, true); view.setUint16(34, 16, true);
+  str(36, 'data'); view.setUint32(40, len * 2, true);
+  let off = 44;
+  for (const c of chunks) {
+    for (let i = 0; i < c.length; i++, off += 2) {
+      const s = Math.max(-1, Math.min(1, c[i]));
+      view.setInt16(off, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+    }
+  }
+  return new Blob([buf], { type: 'audio/wav' });
+}
+
+// Push-to-talk dictation: record mic → WAV → POST /transcribe-dictation →
+// resolve to text. status is 'idle' | 'recording' | 'transcribing'.
+function useDictation(onText) {
+  const [status, setStatus] = useState('idle');
+  const ref = useRef(null); // { ctx, stream, node, source, chunks }
+
+  async function start() {
+    if (status !== 'idle') return;
+    let stream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch (_) {
+      setOp('Microphone unavailable — check permissions.', 'error');
+      return;
+    }
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const source = ctx.createMediaStreamSource(stream);
+    const node = ctx.createScriptProcessor(4096, 1, 1);
+    const analyser = ctx.createAnalyser();
+    analyser.fftSize = 1024;
+    const chunks = [];
+    node.onaudioprocess = (e) => chunks.push(new Float32Array(e.inputBuffer.getChannelData(0)));
+    source.connect(analyser);
+    source.connect(node);
+    node.connect(ctx.destination);
+    ref.current = { ctx, stream, node, source, analyser, chunks };
+    setStatus('recording');
+  }
+
+  async function stop() {
+    const r = ref.current;
+    ref.current = null;
+    if (!r) { setStatus('idle'); return; }
+    r.node.disconnect(); r.source.disconnect();
+    r.stream.getTracks().forEach((t) => t.stop());
+    const sampleRate = r.ctx.sampleRate;
+    await r.ctx.close();
+    if (!r.chunks.length) { setStatus('idle'); return; }
+    setStatus('transcribing');
+    try {
+      const blob = encodeWav(r.chunks, sampleRate);
+      const { text } = await apiFetch('/transcribe-dictation', {
+        method: 'POST',
+        headers: { 'Content-Type': 'audio/wav' },
+        body: blob,
+      });
+      if (text && text.trim()) onText(text.trim());
+      else setOp('No speech detected.', 'info');
+    } catch (e) {
+      setOp(`Dictation failed: ${e.message}`, 'error');
+    }
+    setStatus('idle');
+  }
+
+  function cancel() {
+    const r = ref.current;
+    ref.current = null;
+    if (r) { r.node.disconnect(); r.source.disconnect(); r.stream.getTracks().forEach((t) => t.stop()); r.ctx.close(); }
+    setStatus('idle');
+  }
+
+  useEffect(() => cancel, []); // tear down on unmount
+  return { status, start, stop, cancel, analyser: ref.current?.analyser || null };
+}
+
+// Live scrolling waveform off the recorder's AnalyserNode. Draws on a canvas
+// (rAF, no Preact re-render) — each frame pushes one RMS bar, oldest scroll off
+// the left. Bar colour follows the canvas's CSS `color`.
+function Waveform({ analyser }) {
+  const cvs = useRef(null);
+  const bars = useRef([]);
+  useEffect(() => {
+    if (!analyser) return undefined;
+    const buf = new Uint8Array(analyser.fftSize);
+    let raf;
+    const tick = () => {
+      analyser.getByteTimeDomainData(buf);
+      let sum = 0;
+      for (let i = 0; i < buf.length; i++) { const v = (buf[i] - 128) / 128; sum += v * v; }
+      const rms = Math.sqrt(sum / buf.length);
+      const c = cvs.current;
+      if (c) {
+        const dpr = window.devicePixelRatio || 1;
+        const w = c.clientWidth, h = c.clientHeight;
+        if (c.width !== Math.round(w * dpr)) { c.width = Math.round(w * dpr); c.height = Math.round(h * dpr); }
+        const ctx = c.getContext('2d');
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        const gap = 3, bw = 2, n = Math.max(1, Math.floor(w / gap));
+        bars.current.push(rms);
+        while (bars.current.length > n) bars.current.shift();
+        ctx.clearRect(0, 0, w, h);
+        ctx.fillStyle = getComputedStyle(c).color || '#888';
+        for (let i = 0; i < bars.current.length; i++) {
+          const lvl = Math.min(1, bars.current[i] * 3.2);
+          const bh = Math.max(2, lvl * h);
+          const x = w - (bars.current.length - i) * gap;
+          ctx.fillRect(x, (h - bh) / 2, bw, bh);
+        }
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [analyser]);
+  return html`<canvas ref=${cvs} style=${{ flex: 1, height: 24, minWidth: 0, color: 'var(--ink-muted)' }} />`;
+}
+
 export function Composer({ busy }) {
   const [text, setText] = useState('');
   const [images, setImages] = useState([]);
@@ -565,6 +696,10 @@ export function Composer({ busy }) {
   const taRef = useRef(null);
   const k = keeperState();
   const onPage = store.route?.name === 'page';
+  const dictation = useDictation((t) => {
+    setText((prev) => (prev ? `${prev} ${t}` : t));
+    requestAnimationFrame(() => { const ta = taRef.current; if (ta) { ta.focus(); autoGrow(ta); } });
+  });
 
   // /command menu: skills filtered by what's typed after the slash.
   const slashItems = slash
@@ -703,15 +838,29 @@ export function Composer({ busy }) {
         onKeyDown=${onKeyDown}
         onPaste=${onPaste}
         style=${{ resize: 'none', fontSize: 13, padding: '9px 10px 4px', border: 'none', outline: 'none', background: 'transparent', color: 'var(--ink)', fontFamily: 'inherit', minHeight: 40, maxHeight: 168, overflowY: 'auto' }} />
-      <div style=${{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 6px 6px' }}>
-        <button class="btn btn-ghost" title="Attach a page, session or file" onClick=${() => setPicker(picker === 'attach' ? null : 'attach')}
-          style=${{ padding: '6px 7px' }}><${Icon} name="plus" size=${14} /></button>
-        <${PickerControls} k=${k} />
-        ${busy
-          ? html`<button class="btn" onClick=${abortRun} title="Stop the Keeper" style=${{ padding: '6px 7px', marginLeft: 'auto' }}><${Icon} name="x" size=${14} /></button>`
-          : html`<button class="btn btn-primary" onClick=${send} title="Send (Enter)" disabled=${!text.trim() && !images.length}
-              style=${{ padding: '6px 8px', marginLeft: 'auto' }}><${Icon} name="arrow-r" size=${14} /></button>`}
-      </div>
+      ${dictation.status === 'recording' || dictation.status === 'transcribing'
+        ? html`<div style=${{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 6px 6px' }}>
+            <button class="btn btn-ghost on" title="Recording" style=${{ padding: '6px 7px', color: 'var(--burgundy)' }}><${Icon} name="mic" size=${14} /></button>
+            ${dictation.status === 'recording'
+              ? html`<${Waveform} analyser=${dictation.analyser} />`
+              : html`<div style=${{ flex: 1, fontSize: 12, color: 'var(--ink-faint)', paddingLeft: 4 }}>Transcribing…</div>`}
+            <button class="btn btn-ghost" title="Discard" onClick=${dictation.cancel} disabled=${dictation.status === 'transcribing'}
+              style=${{ padding: '6px 7px' }}><${Icon} name="x" size=${14} /></button>
+            ${dictation.status === 'recording'
+              ? html`<button class="btn btn-primary" title="Stop & transcribe" onClick=${dictation.stop} style=${{ padding: '6px 8px' }}><${Icon} name="check" size=${14} /></button>`
+              : html`<button class="btn btn-primary" disabled style=${{ padding: '6px 8px' }}><${Spinner} size=${14} /></button>`}
+          </div>`
+        : html`<div style=${{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 6px 6px' }}>
+            <button class="btn btn-ghost" title="Attach a page, session or file" onClick=${() => setPicker(picker === 'attach' ? null : 'attach')}
+              style=${{ padding: '6px 7px' }}><${Icon} name="plus" size=${14} /></button>
+            <${PickerControls} k=${k} />
+            <button class="btn btn-ghost" title="Dictate" disabled=${busy} onClick=${dictation.start}
+              style=${{ padding: '6px 7px' }}><${Icon} name="mic" size=${14} /></button>
+            ${busy
+              ? html`<button class="btn" onClick=${abortRun} title="Stop the Keeper" style=${{ padding: '6px 7px', marginLeft: 'auto' }}><${Icon} name="x" size=${14} /></button>`
+              : html`<button class="btn btn-primary" onClick=${send} title="Send (Enter)" disabled=${!text.trim() && !images.length}
+                  style=${{ padding: '6px 8px', marginLeft: 'auto' }}><${Icon} name="arrow-r" size=${14} /></button>`}
+          </div>`}
     </div>
   </div>`;
 }

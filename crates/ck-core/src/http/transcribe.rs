@@ -233,3 +233,85 @@ pub async fn transcribe(
         "Transcription is not available in this build.".into(),
     ))
 }
+
+/// `/transcribe-dictation` — one-shot speech-to-text for the chatbox mic. The
+/// frontend records mic audio, encodes it as a WAV blob, and POSTs the raw
+/// bytes; we run it through the same engine as session transcription (single
+/// unlabelled track) and return the plain text. No session, no DB, no files.
+#[cfg(feature = "transcription")]
+pub async fn dictate(
+    State(state): State<AppState>,
+    body: axum::body::Bytes,
+) -> AppResult<Json<Value>> {
+    use std::sync::Arc;
+
+    use crate::error::AppError;
+    use crate::transcript_format::segments_to_plain_text;
+    use crate::transcription::{model, transcribe_tracks, Watch};
+
+    if body.is_empty() {
+        return Err(AppError::BadRequest("Empty audio.".into()));
+    }
+
+    // Stage the upload as a temp .wav so symphonia can probe it; cleaned up
+    // regardless of outcome below.
+    let tmp = std::env::temp_dir().join(format!(
+        "ck_dictate_{}_{}.wav",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0)
+    ));
+    std::fs::write(&tmp, &body).map_err(|e| AppError::Internal(e.into()))?;
+
+    let model_dir = match model::ensure(&state.paths, &state.model_progress).await {
+        Ok(dir) => dir,
+        Err(e) => {
+            let _ = std::fs::remove_file(&tmp);
+            crate::state::ModelProgress::set_error(&state.model_progress, e.to_string());
+            return Err(AppError::Internal(e));
+        }
+    };
+    let vad_model = model::ensure_vad(&state.paths).await;
+    let accelerator = state
+        .with_db(crate::config::get_config_map)
+        .ok()
+        .and_then(|cfg| cfg.get("transcription_accelerator").cloned())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "auto".into());
+    let accelerator = crate::config::resolve_accelerator(&accelerator);
+
+    let watch = Arc::new(Watch::default());
+    let progress = state.model_progress.clone();
+    let tracks = vec![("mic".to_string(), tmp.clone(), String::new())];
+    let result = tokio::task::spawn_blocking(move || {
+        transcribe_tracks(
+            &model_dir,
+            accelerator,
+            vad_model.as_deref(),
+            &tracks,
+            &watch,
+            &progress,
+        )
+    })
+    .await;
+    let _ = std::fs::remove_file(&tmp);
+
+    let outcome = result
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("dictation task: {e}")))?
+        .map_err(AppError::Internal)?;
+    Ok(Json(
+        json!({ "text": segments_to_plain_text(&outcome.segments) }),
+    ))
+}
+
+#[cfg(not(feature = "transcription"))]
+pub async fn dictate(
+    State(_state): State<AppState>,
+    _body: axum::body::Bytes,
+) -> AppResult<Json<Value>> {
+    Err(crate::error::AppError::BadRequest(
+        "Transcription is not available in this build.".into(),
+    ))
+}

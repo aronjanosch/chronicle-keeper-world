@@ -206,6 +206,7 @@ pub fn router(state: AppState) -> Router {
         // transcription
         .route("/providers", get(transcribe::providers))
         .route("/transcribe", post(transcribe::transcribe))
+        .route("/transcribe-dictation", post(transcribe::dictate))
         .route("/model-status", get(model_status))
         // summary prompt templates (user-managed library)
         .route(
