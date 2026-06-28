@@ -174,6 +174,8 @@ pub fn router(state: AppState) -> Router {
         // the Keeper's memory + World Brief
         .route("/campaigns/:id/agent/skills", get(agent::list_skills))
         .route("/skills", get(agent::list_skills))
+        .route("/skills/:slug", delete(agent::delete_skill))
+        .route("/skills/:slug/enabled", post(agent::set_skill_enabled))
         .route("/campaigns/:id/agent/memory", get(agent::list_memory))
         .route(
             "/campaigns/:id/agent/memory/:name",

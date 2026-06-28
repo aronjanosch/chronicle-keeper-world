@@ -87,7 +87,7 @@ function currentPageKind() {
 function skillsForKind(kind) {
   if (!kind) return [];
   const k = kind.toLowerCase();
-  return (store.keeperSkills || []).filter((s) => (s.kinds || []).some((x) => String(x).toLowerCase() === k));
+  return (store.keeperSkills || []).filter((s) => s.enabled !== false && (s.kinds || []).some((x) => String(x).toLowerCase() === k));
 }
 
 // The composer text a chip / command seeds: a plain user directive that makes
@@ -701,10 +701,14 @@ export function Composer({ busy }) {
     requestAnimationFrame(() => { const ta = taRef.current; if (ta) { ta.focus(); autoGrow(ta); } });
   });
 
+  // The /command menu lives here, so load skills wherever the composer mounts —
+  // the sidebar panel and the dedicated Keeper screen alike (cached after first).
+  useEffect(() => { loadSkills(store.campaign?.campaign_id); }, [store.campaign?.campaign_id]);
+
   // /command menu: skills filtered by what's typed after the slash.
   const slashItems = slash
     ? (store.keeperSkills || [])
-      .filter((s) => !slash.q || s.slug.includes(slash.q) || (s.name || '').toLowerCase().includes(slash.q))
+      .filter((s) => s.enabled !== false && (!slash.q || s.slug.includes(slash.q) || (s.name || '').toLowerCase().includes(slash.q)))
       .slice(0, 8)
     : [];
 
@@ -820,7 +824,11 @@ export function Composer({ busy }) {
       <div style=${{ padding: '3px 8px 5px', fontSize: 11, color: 'var(--ink-faint)' }}>Skills</div>
       ${slashItems.map((s, i) => html`<div key=${s.slug} onClick=${() => pickSkill(s)} onMouseEnter=${() => setSlash({ ...slash, index: i })}
         class=${`ck-ac-item${i === Math.min(slash.index, slashItems.length - 1) ? ' on' : ''}`} style=${{ ...pickRow, display: 'block' }}>
-        <div style=${{ display: 'flex', alignItems: 'center', gap: 7 }}><${Icon} name="feather" size=${12} /> ${s.name}</div>
+        <div style=${{ display: 'flex', alignItems: 'center', gap: 7 }}>
+          <${Icon} name="feather" size=${12} />
+          <span style=${{ fontFamily: 'var(--font-mono)', fontSize: 12.5, color: 'var(--ink)' }}>/${s.slug}</span>
+          <span style=${{ fontSize: 11.5, color: 'var(--ink-muted)' }}>${s.name}</span>
+        </div>
         ${s.description && html`<div style=${{ fontSize: 11, color: 'var(--ink-faint)', marginLeft: 19, marginTop: 1, whiteSpace: 'normal' }}>${s.description}</div>`}
       </div>`)}
       ${!slashItems.length && html`<div style=${{ padding: 8, fontSize: 12, color: 'var(--ink-faint)' }}>No skill matches.</div>`}

@@ -264,11 +264,25 @@ export async function loadVaultTree(campaignId) {
 
 // Keeper skills (app-global, same list for every world). Cached once — feeds the
 // composer /command menu and the per-kind suggestion chips. Pull, never push.
-export async function loadSkills(campaignId) {
-  const id = campaignId || store.campaign?.campaign_id;
-  if (!id || store.keeperSkills) return;
-  const r = await apiFetch(`/campaigns/${id}/agent/skills`).catch(() => null);
-  if (r) setState({ keeperSkills: r.skills || [] });
+export async function loadSkills(_campaignId, force = false) {
+  if (store.keeperSkills && !force) return;
+  const r = await apiFetch('/skills').catch(() => null);
+  if (r) setState({ keeperSkills: r.skills || [], skillsPath: r.path || '' });
+}
+
+// Skills are app-global (one library for every world) and authored by the Keeper
+// itself via the save_skill tool. Management here is viewing, enabling/disabling,
+// and deleting user skills (deleting an override of a built-in restores it).
+export async function deleteSkill(slug) {
+  const r = await apiFetch(`/skills/${encodeURIComponent(slug)}`, { method: 'DELETE' });
+  await loadSkills(null, true);
+  return r;
+}
+
+export async function setSkillEnabled(slug, enabled) {
+  const r = await apiJson(`/skills/${encodeURIComponent(slug)}/enabled`, 'POST', { enabled });
+  await loadSkills(null, true);
+  return r;
 }
 
 // Per-kind infobox field schemas (.ck/config.toml overrides merged with built-ins).

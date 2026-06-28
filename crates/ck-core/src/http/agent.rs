@@ -217,6 +217,34 @@ pub async fn list_skills(State(state): State<AppState>) -> AppResult<Json<Value>
     })))
 }
 
+/// Delete a user skill (or the override of a bundled one — which restores the
+/// built-in). Authoring/editing happens through the Keeper (`save_skill` tool).
+pub async fn delete_skill(
+    State(state): State<AppState>,
+    Path(slug): Path<String>,
+) -> AppResult<Json<Value>> {
+    let root = agent::skills::skills_root(&state);
+    agent::skills::delete(&root, &slug).map_err(AppError::BadRequest)?;
+    Ok(Json(json!({ "ok": true })))
+}
+
+#[derive(Deserialize)]
+pub struct SkillEnabled {
+    pub enabled: bool,
+}
+
+/// Turn a skill on or off (Settings → Keeper skills). Works for system and user
+/// skills alike — an off skill stays listed but leaves the Keeper's reach.
+pub async fn set_skill_enabled(
+    State(state): State<AppState>,
+    Path(slug): Path<String>,
+    Json(req): Json<SkillEnabled>,
+) -> AppResult<Json<Value>> {
+    let root = agent::skills::skills_root(&state);
+    agent::skills::set_enabled(&root, &slug, req.enabled).map_err(AppError::BadRequest)?;
+    Ok(Json(json!({ "ok": true })))
+}
+
 pub async fn get_brief(
     State(state): State<AppState>,
     Path(campaign_id): Path<String>,

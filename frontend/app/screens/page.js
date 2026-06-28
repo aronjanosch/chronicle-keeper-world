@@ -743,7 +743,7 @@ export function PageScreen() {
   // ASK-KEEPER `/` rows: skills whose kinds: match this page (zero inference).
   const pageKind = (page?.kind || '').toLowerCase();
   const editorSkills = pageKind
-    ? (store.keeperSkills || []).filter((s) => (s.kinds || []).some((x) => String(x).toLowerCase() === pageKind))
+    ? (store.keeperSkills || []).filter((s) => s.enabled !== false && (s.kinds || []).some((x) => String(x).toLowerCase() === pageKind))
     : [];
   const act = makeVaultActions(c, folders, {
     afterDelete: () => navigate('codex', { id: c.campaign_id }),

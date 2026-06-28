@@ -36,7 +36,9 @@ pub enum Tier {
 
 pub fn tier_of(name: &str) -> Tier {
     match name {
-        "read_memory" | "write_memory" | "delete_memory" => Tier::Memory,
+        // Memory + save_skill: app-global Keeper state, not world content.
+        // Ungated like the notebook — the skill-creator flow confirms in chat.
+        "read_memory" | "write_memory" | "delete_memory" | "save_skill" => Tier::Memory,
         "create_page" | "edit_page" | "multi_edit_page" | "insert_into_page" | "write_page" => {
             Tier::Write
         }
@@ -282,6 +284,20 @@ pub fn write_tools() -> Vec<ToolDef> {
                     "content": { "type": "string" }
                 }),
                 &["path", "content"],
+            ),
+        },
+        ToolDef {
+            name: "save_skill".into(),
+            description: "Create or update one of your own skills — an app-global reference you pull on demand later (system rules, house rules, a prep workflow, a style convention). Omit slug to create a new one; pass an existing slug to update or rename it. The description is the ONLY part always in your context, so make it say what the skill does AND when to use it, leaning slightly pushy — you tend to under-reach for skills. Keep the body lean. Show the user the proposed name + description + body and confirm before saving. Load the “Authoring a skill” skill first for how to write a good one.".into(),
+            schema: obj(
+                json!({
+                    "slug": { "type": "string", "description": "existing skill slug to update/rename; omit to create a new skill" },
+                    "name": { "type": "string" },
+                    "description": { "type": "string", "description": "what it does AND when to use it; slightly pushy" },
+                    "kinds": { "type": "array", "items": { "type": "string" }, "description": "page kinds this suits (npc, place…) — adds a one-click chip on those pages; omit for pull-only skills" },
+                    "body": { "type": "string", "description": "the reference text, kept lean (frontmatter is written for you)" }
+                }),
+                &["name", "description", "body"],
             ),
         },
     ]
@@ -1823,6 +1839,35 @@ pub fn dispatch(ctx: &ToolCtx<'_>, name: &str, args: &Value) -> Result<String, S
         }
         "use_skill" => {
             super::skills::read(&super::skills::skills_root(ctx.state), &str_arg("name"))
+        }
+        "save_skill" => {
+            let root = super::skills::skills_root(ctx.state);
+            let (name, description, body, slug) = (
+                str_arg("name"),
+                str_arg("description"),
+                str_arg("body"),
+                str_arg("slug"),
+            );
+            let kinds: Vec<String> = args
+                .get("kinds")
+                .and_then(Value::as_array)
+                .map(|a| {
+                    a.iter()
+                        .filter_map(Value::as_str)
+                        .map(|s| s.trim().to_lowercase())
+                        .filter(|s| !s.is_empty())
+                        .collect()
+                })
+                .unwrap_or_default();
+            if slug.trim().is_empty() {
+                let new = super::skills::create(&root, &name, &description, &kinds, Some(&body))?;
+                Ok(format!(
+                    "Created the skill “{name}” ({new}). It's live now — no restart needed."
+                ))
+            } else {
+                let new = super::skills::update(&root, &slug, &name, &description, &kinds, &body)?;
+                Ok(format!("Updated the skill ({new})."))
+            }
         }
         "read_memory" => super::memory::read_memory(ctx.world_root, &str_arg("name")),
         "write_memory" => super::memory::write_memory(
