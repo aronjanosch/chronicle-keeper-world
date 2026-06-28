@@ -730,7 +730,10 @@ mod live_tests {
 
         println!("--- list_actors ---\n{}", read::list_actors(&world));
         println!("--- scene_state ---\n{}", read::scene_state(&world));
-        println!("--- lookup 'stealth' ---\n{}", read::lookup(&world, "stealth"));
+        println!(
+            "--- lookup 'stealth' ---\n{}",
+            read::lookup(&world, "stealth")
+        );
 
         // get_actor against the first actor present, to prove the raw `system`
         // blob extraction on a real (system-specific) sheet.
@@ -739,7 +742,10 @@ mod live_tests {
             .and_then(|a| a.get("name"))
             .and_then(|n| n.as_str())
         {
-            println!("--- get_actor {first:?} ---\n{}", read::get_actor(&world, first));
+            println!(
+                "--- get_actor {first:?} ---\n{}",
+                read::get_actor(&world, first)
+            );
         }
 
         let id = c

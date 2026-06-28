@@ -388,7 +388,9 @@ pub async fn run_turn<L: AgentLlm, G: PermissionGate, F: FnMut(TurnEvent) + Send
             Err(e) => {
                 let msg = friendly_llm_error(&e.0);
                 let _ = chats::append(world_root, chat_id, &chats::error_event(&msg));
-                return Err(AppError::Internal(anyhow::anyhow!("Keeper turn failed: {msg}")));
+                return Err(AppError::Internal(anyhow::anyhow!(
+                    "Keeper turn failed: {msg}"
+                )));
             }
         };
 
@@ -554,8 +556,7 @@ fn friendly_llm_error(raw: &str) -> String {
          model in Settings, then try again."
             .into()
     } else if m.contains("not found") && m.contains("model") {
-        "That model wasn't found at the provider. Check the model name in Settings."
-            .into()
+        "That model wasn't found at the provider. Check the model name in Settings.".into()
     } else {
         raw.to_string()
     }

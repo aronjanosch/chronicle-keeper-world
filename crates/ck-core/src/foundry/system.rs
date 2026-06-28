@@ -117,7 +117,9 @@ fn default_system(world: &Value, template: Option<&Value>, doc: &str, ty: &str) 
             return Some(m.clone());
         }
     }
-    let flat = template.and_then(|t| t.get(doc)).map(|c| flatten_type(c, ty))?;
+    let flat = template
+        .and_then(|t| t.get(doc))
+        .map(|c| flatten_type(c, ty))?;
     match &flat {
         Value::Object(o) if !o.is_empty() => Some(flat),
         _ => None,

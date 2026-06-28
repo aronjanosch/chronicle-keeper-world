@@ -1,0 +1,14 @@
+#!/bin/sh
+# Auto-format staged Rust before commit so CI's `cargo fmt --all --check` never fails.
+# Enable once per clone:  git config core.hooksPath .githooks
+
+staged=$(git diff --cached --name-only --diff-filter=ACM | grep '\.rs$')
+[ -z "$staged" ] && exit 0
+
+cargo fmt --all || {
+	echo "pre-commit: cargo fmt failed" >&2
+	exit 1
+}
+
+# Re-stage only files that were already staged; leave any unrelated reformats alone.
+echo "$staged" | xargs git add

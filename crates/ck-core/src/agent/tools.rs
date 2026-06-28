@@ -37,11 +37,9 @@ pub enum Tier {
 pub fn tier_of(name: &str) -> Tier {
     match name {
         "read_memory" | "write_memory" | "delete_memory" => Tier::Memory,
-        "create_page"
-        | "edit_page"
-        | "multi_edit_page"
-        | "insert_into_page"
-        | "write_page" => Tier::Write,
+        "create_page" | "edit_page" | "multi_edit_page" | "insert_into_page" | "write_page" => {
+            Tier::Write
+        }
         "rename_page" | "move_page" | "delete_page" | "create_folder" => Tier::Structural,
         "run_command" => Tier::Shell,
         // Network reads of external content — gated ask-first (a query / page
@@ -478,12 +476,13 @@ pub fn web_tools() -> Vec<ToolDef> {
     vec![
         ToolDef {
             name: "web_search".into(),
-            description: "Search the web (DuckDuckGo) for real-world reference while worldbuilding \
+            description:
+                "Search the web (DuckDuckGo) for real-world reference while worldbuilding \
                           — etymology, mythology, naming conventions, historical detail. Returns \
                           ranked title / url / snippet hits; follow up with web_fetch to read one. \
                           Goes out to the internet and always asks the user first; use the Codex \
                           tools for anything about this world."
-                .into(),
+                    .into(),
             schema: obj(
                 json!({
                     "query": { "type": "string" },
@@ -971,7 +970,9 @@ pub async fn run_foundry_tool(
                 client
                     .create_actor(&aname, &atype, system, items)
                     .await
-                    .map(|id| format!("Created {statted} actor “{aname}” ({atype}) in Foundry [id {id}]."))
+                    .map(|id| {
+                        format!("Created {statted} actor “{aname}” ({atype}) in Foundry [id {id}].")
+                    })
                     .map_err(|e| format!("create actor failed: {e}"))
             }
         }
@@ -985,7 +986,9 @@ pub async fn run_foundry_tool(
                 client
                     .create_scene_stub(&sname, w, h)
                     .await
-                    .map(|id| format!("Created blank scene “{sname}” ({w}×{h}) in Foundry [id {id}]."))
+                    .map(|id| {
+                        format!("Created blank scene “{sname}” ({w}×{h}) in Foundry [id {id}].")
+                    })
                     .map_err(|e| format!("create scene failed: {e}"))
             }
         }
@@ -1017,7 +1020,11 @@ pub async fn run_foundry_tool(
                 client
                     .create_rolltable(&tname, &entries)
                     .await
-                    .map(|id| format!("Created roll table “{tname}” with {n} entries in Foundry [id {id}]."))
+                    .map(|id| {
+                        format!(
+                            "Created roll table “{tname}” with {n} entries in Foundry [id {id}]."
+                        )
+                    })
                     .map_err(|e| format!("create roll table failed: {e}"))
             }
         }
@@ -2386,7 +2393,9 @@ mod tests {
             "foundry_lookup",
             "foundry_system_info",
         ] {
-            let err = rt.block_on(run_foundry_tool(&ctx, t, &json!({}))).unwrap_err();
+            let err = rt
+                .block_on(run_foundry_tool(&ctx, t, &json!({})))
+                .unwrap_err();
             assert!(err.contains("not configured"), "{t}: {err}");
         }
         std::fs::remove_dir_all(&root).ok();
@@ -2416,8 +2425,11 @@ mod tests {
         };
         let body = "## Notes\n\nThe   guard    stands\n\tat the gate.\n";
         // Model copied with single spaces / different indentation.
-        let out = apply_edits(body, &[op("The guard stands at the gate.", "The guard left.")])
-            .unwrap();
+        let out = apply_edits(
+            body,
+            &[op("The guard stands at the gate.", "The guard left.")],
+        )
+        .unwrap();
         assert!(out.contains("The guard left."));
         assert!(!out.contains("stands"));
 
@@ -2456,8 +2468,12 @@ mod tests {
             world_root: &root,
             cfg: &cfg,
         };
-        let err = call(&ctx, "read_page", json!({ "path": "People/Baron Aldric.md" }))
-            .unwrap_err();
+        let err = call(
+            &ctx,
+            "read_page",
+            json!({ "path": "People/Baron Aldric.md" }),
+        )
+        .unwrap_err();
         assert!(err.contains("Did you mean"));
         assert!(err.contains("NPCs/Baron Aldric.md"));
         std::fs::remove_dir_all(&root).ok();

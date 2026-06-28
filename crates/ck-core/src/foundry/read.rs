@@ -59,14 +59,20 @@ pub fn get_actor(world: &Value, name: &str) -> String {
     let found = actors
         .iter()
         .find(|a| str_field(a, "name").to_lowercase() == want)
-        .or_else(|| actors.iter().find(|a| str_field(a, "_id").to_lowercase() == want))
+        .or_else(|| {
+            actors
+                .iter()
+                .find(|a| str_field(a, "_id").to_lowercase() == want)
+        })
         .or_else(|| {
             actors
                 .iter()
                 .find(|a| str_field(a, "name").to_lowercase().contains(&want))
         });
     let Some(actor) = found else {
-        return format!("No actor named “{name}” found. Try foundry_list_actors to see what exists.");
+        return format!(
+            "No actor named “{name}” found. Try foundry_list_actors to see what exists."
+        );
     };
 
     let mut out = format!("Actor: {}\n", str_field(actor, "name"));
@@ -96,7 +102,14 @@ pub fn get_actor(world: &Value, name: &str) -> String {
         for it in &items {
             let n = str_field(it, "name");
             let t = str_field(it, "type");
-            out.push_str(&format!("  - {n}{}\n", if t.is_empty() { String::new() } else { format!(" ({t})") }));
+            out.push_str(&format!(
+                "  - {n}{}\n",
+                if t.is_empty() {
+                    String::new()
+                } else {
+                    format!(" ({t})")
+                }
+            ));
         }
     }
 
@@ -201,13 +214,20 @@ pub fn lookup(world: &Value, query: &str) -> String {
         if index.is_some() {
             indexed_packs += 1;
         }
-        for entry in index.map(|a| a.iter().collect::<Vec<_>>()).unwrap_or_default() {
+        for entry in index
+            .map(|a| a.iter().collect::<Vec<_>>())
+            .unwrap_or_default()
+        {
             let name = str_field(entry, "name");
             if name.to_lowercase().contains(&q) {
                 let ty = str_field(entry, "type");
                 hits.push(format!(
                     "  - {name}{} — {label}",
-                    if ty.is_empty() { String::new() } else { format!(" ({ty})") }
+                    if ty.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" ({ty})")
+                    }
                 ));
                 if hits.len() >= MAX_LOOKUP_HITS {
                     break;
