@@ -2,8 +2,8 @@
 
 ![Chronicle Keeper — world overview](docs/screenshots/SCR-20260614-ndhu.png)
 
-> 🚧 **Public beta (1.0.0-beta).** The bigger version of Chronicle Keeper. Unsigned builds —
-> see [install](#download--install). Bugs & feedback → [Issues](https://github.com/aronjanosch/chronicle-keeper-world/issues).
+> 🎉 **v1.0.0 — first full release.** Unsigned builds — see [install](#download--install).
+> Bugs & feedback → [Issues](https://github.com/aronjanosch/chronicle-keeper/issues).
 
 Chronicle Keeper is an AI-powered, local-first **worldbuilding workspace** for tabletop campaigns.
 It turns raw session audio into structured notes — and then turns those notes into a living world
@@ -20,14 +20,17 @@ with an atlas, a timeline, a relationship graph, and an AI Keeper that keeps it 
 - **Files are truth.** Every page is plain Markdown — fully Obsidian-compatible, no lock-in.
 - **Bring your own LLM.** Local [Ollama](https://ollama.com), Anthropic, and OpenAI-compatible providers.
 
-📖 **[Read the docs →](https://aronjanosch.github.io/chronicle-keeper-world/)** — install guides, LLM
+📖 **[Read the docs →](https://aronjanosch.github.io/chronicle-keeper/)** — install guides, LLM
 setup (Ollama + getting API keys), the full workflow, and FAQ.
 
 ## Features
 
 **Worldbuilding**
 - **Editable wiki pages.** Every NPC, place, faction, item, PC and lore entry is a Markdown page you read and write — files are truth, fully Obsidian-compatible.
-- **The Keeper.** An AI assistant that reads your world and edits pages for you, with permissions, grounding, and undo.
+- **The Keeper.** An AI assistant that reads your world and edits pages for you, with permissions, grounding, and undo. Talk to it by **voice** (push-to-talk dictation, transcribed on-device).
+- **Keeper skills.** Reusable references the Keeper pulls on demand — system rules, house rules, prep workflows — and can **write itself** ("save that as a skill"); manage them in Settings.
+- **Foundry VTT bridge.** Read live actors and scenes, look up compendiums, post to chat, and stat an NPC from a page straight into your running [Foundry](https://foundryvtt.com) game.
+- **Web reference.** Ask-first web search & fetch for real-world naming, mythology and history — kept separate from your canon.
 - **Atlas.** Maps with pins for your places.
 - **Timeline.** Dated pages laid out on your world's own in-world calendar (custom months/eras).
 - **Graph.** A force-directed view of how characters, factions and places link together.
@@ -67,7 +70,7 @@ setup (Ollama + getting API keys), the full workflow, and FAQ.
 ## Download & install
 
 Grab the installer for your OS
-[**Releases**](https://github.com/aronjanosch/chronicle-keeper-world/releases) page.
+[**Releases**](https://github.com/aronjanosch/chronicle-keeper/releases) page.
 
 > **Heads up:** the app isn't code-signed yet (signing is planned), so your OS will show a
 > one-time "unknown developer" warning on first launch.
@@ -97,7 +100,7 @@ Open **Settings** and pick one:
   context to your full session, so local summaries are complete but take a few minutes.
 - **Cloud:** paste an Anthropic or any OpenAI-compatible API key. Keys stay on your machine. Faster, pay per use.
 
-See the [LLM setup guide](https://aronjanosch.github.io/chronicle-keeper-world/docs/llm-setup.html) for model recommendations and tuning.
+See the [LLM setup guide](https://aronjanosch.github.io/chronicle-keeper/docs/llm-setup.html) for model recommendations and tuning.
 
 ## How it works
 
