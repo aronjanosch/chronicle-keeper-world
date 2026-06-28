@@ -16,6 +16,25 @@ pub struct PageInfo {
     pub kind: Option<String>,
     pub summary: String,
     pub modified: Option<u64>,
+    /// Open-thread markers (`[?]`) in the body — a page existing says nothing
+    /// about whether it's complete; this surfaces incompleteness in the digest.
+    pub open_questions: usize,
+    /// Body shorter than a real page (`STUB_WORD_THRESHOLD` words).
+    pub is_stub: bool,
+}
+
+/// A body under this many words reads as a stub (headings only, no prose).
+pub(crate) const STUB_WORD_THRESHOLD: usize = 25;
+
+/// Cheap completeness signals from raw file content: open-thread (`[?]`) count
+/// and stub flag. Frontmatter is excluded — only the body counts.
+pub(crate) fn gap_signals(content: &str) -> (usize, bool) {
+    let (_, body) = split_frontmatter(content);
+    let open_questions = body.matches("[?]").count();
+    (
+        open_questions,
+        body.split_whitespace().count() < STUB_WORD_THRESHOLD,
+    )
 }
 
 #[derive(Debug, Serialize)]
@@ -346,6 +365,7 @@ pub fn list_pages(vault: &Path) -> AppResult<Vec<PageInfo>> {
         .iter()
         .filter_map(|abs| {
             let content = std::fs::read_to_string(abs).ok()?;
+            let (open_questions, is_stub) = gap_signals(&content);
             let p = page_from(vault, abs, content);
             Some(PageInfo {
                 path: p.path,
@@ -353,6 +373,8 @@ pub fn list_pages(vault: &Path) -> AppResult<Vec<PageInfo>> {
                 kind: p.kind,
                 summary: p.summary,
                 modified: mtime_secs(abs),
+                open_questions,
+                is_stub,
             })
         })
         .collect();

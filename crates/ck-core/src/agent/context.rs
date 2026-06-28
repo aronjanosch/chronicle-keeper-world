@@ -149,7 +149,7 @@ pub fn digest(world_root: &Path, cfg: &WorldConfig) -> String {
             } else {
                 format!(" — {}", p.summary.trim())
             };
-            format!("- {}{}{summary}\n", p.path, kind_of(p))
+            format!("- {}{}{}{summary}\n", p.path, kind_of(p), gap_marker(p))
         })
         .collect();
 
@@ -160,7 +160,7 @@ pub fn digest(world_root: &Path, cfg: &WorldConfig) -> String {
     } else {
         let paths_only: String = pages
             .iter()
-            .map(|p| format!("- {}{}\n", p.path, kind_of(p)))
+            .map(|p| format!("- {}{}{}\n", p.path, kind_of(p), gap_marker(p)))
             .collect();
         if paths_only.len() <= PAGE_LIST_CAP {
             out.push_str("(summaries omitted to fit — read_page or search_pages for detail)\n");
@@ -217,9 +217,23 @@ fn recent_pages(pages: &[vault::PageInfo], n: usize) -> Vec<String> {
             } else {
                 format!(" — {}", p.summary.trim())
             };
-            format!("- {}{kind}{summary}", p.path)
+            format!("- {}{kind}{}{summary}", p.path, gap_marker(p))
         })
         .collect()
+}
+
+/// Completeness annotation for a digest line: `⚠stub` when the body is too thin
+/// to be a real page, ` · N?` when it carries N open-thread (`[?]`) markers. A
+/// signal, never a nag — the model still decides what to do with it.
+fn gap_marker(p: &vault::PageInfo) -> String {
+    let mut m = String::new();
+    if p.is_stub {
+        m.push_str(" ⚠stub");
+    }
+    if p.open_questions > 0 {
+        m.push_str(&format!(" · {}?", p.open_questions));
+    }
+    m
 }
 
 /// Newest-first `#NNN — title (date)` lines for the digest.
@@ -378,7 +392,7 @@ mod tests {
         .unwrap();
         let d = digest(&root, &cfg("W"));
         assert!(d.contains("1 pages."));
-        assert!(d.contains("Thornhold.md [place] — A fortified town."));
+        assert!(d.contains("Thornhold.md [place] ⚠stub — A fortified town."));
         std::fs::remove_dir_all(&root).ok();
     }
 
@@ -446,7 +460,7 @@ mod tests {
         let b_mid = block.find("Mid.md").unwrap();
         let b_old = block.find("Old.md").unwrap();
         assert!(b_new < b_mid && b_mid < b_old);
-        assert!(d.contains("New.md — New page.")); // summaries carried
+        assert!(d.contains("New.md ⚠stub — New page.")); // summaries carried
         std::fs::remove_dir_all(&root).ok();
     }
 
@@ -468,7 +482,29 @@ mod tests {
         let d = digest(&root, &cfg("W"));
         assert!(d.contains("Folders:")); // main list degraded
         assert!(d.contains("## Recently edited pages"));
-        assert!(d.contains("FreshModule.md — Just built.")); // still salient
+        assert!(d.contains("FreshModule.md ⚠stub — Just built.")); // still salient
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn digest_flags_stubs_and_open_questions() {
+        let root = tmp_world("gaps");
+        // Thin body → stub; no markers.
+        std::fs::write(
+            root.join("Codex/Stub.md"),
+            "---\nkind: place\nsummary: Thin.\n---\n\nTBD.\n",
+        )
+        .unwrap();
+        // Fleshed-out body with two open threads → not a stub, 2 questions.
+        let prose = "word ".repeat(40);
+        std::fs::write(
+            root.join("Codex/Deep.md"),
+            format!("---\nkind: npc\nsummary: Done.\n---\n\n{prose} [?] more [?]\n"),
+        )
+        .unwrap();
+        let d = digest(&root, &cfg("W"));
+        assert!(d.contains("Stub.md [place] ⚠stub — Thin."));
+        assert!(d.contains("Deep.md [npc] · 2? — Done."));
         std::fs::remove_dir_all(&root).ok();
     }
 

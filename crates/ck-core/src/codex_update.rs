@@ -883,6 +883,8 @@ mod tests {
             kind: Some("npc".into()),
             summary: "Old one-liner.".into(),
             modified: None,
+            open_questions: 0,
+            is_stub: false,
         }];
         let raw = r#"{"proposals":[
             {"title":"Ulric","kind":"npc","is_new":false,"summary_new":"New liner.","body_append":"S14 — thing happened.","rationale":"r","entities":["Ulric"]},
